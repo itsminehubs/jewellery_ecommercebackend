@@ -1,0 +1,53 @@
+{
+  "name": "jewellery_ecommercebackend",
+  "version": "1.0.0",
+  "description": "jewellery_ecommercebackend all the jewellery CRUD operation of mobile application and website of backend",
+  "homepage": "https://github.com/itsminehubs/jewellery_ecommercebackend#readme",
+  "bugs": {
+    "url": "https://github.com/itsminehubs/jewellery_ecommercebackend/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/itsminehubs/jewellery_ecommercebackend.git"
+  },
+  "license": "ISC",
+  "keywords": [
+    "ecommerce",
+    "jewelry",
+    "express",
+    "mongodb"
+  ],
+  "author": "shubhamkumargarg",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "bull": "^4.16.5",
+    "cloudinary": "^2.8.0",
+    "compression": "^1.8.1",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "express-mongo-sanitize": "^2.2.0",
+    "express-rate-limit": "^8.2.1",
+    "helmet": "^8.1.0",
+    "joi": "^18.0.2",
+    "jsonwebtoken": "^9.0.3",
+    "mongo-sanitize": "^1.1.0",
+    "mongoose": "^9.0.2",
+    "morgan": "^1.10.1",
+    "multer": "^2.0.2",
+    "nodemailer": "^7.0.12",
+    "nodemon": "^3.1.11",
+    "razorpay": "^2.9.6",
+    "redis": "^5.10.0",
+    "twilio": "^5.11.1",
+    "uuid": "^13.0.0",
+    "winston": "^3.19.0",
+    "winston-daily-rotate-file": "^5.0.0"
+  }
+}
