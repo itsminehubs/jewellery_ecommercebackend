@@ -8,9 +8,17 @@ const getDashboard = asyncHandler(async (req, res) => {
 });
 
 const getAllOrders = asyncHandler(async (req, res) => {
-  const result = await adminService.getAllOrders(req.query, req.query);
+  // Extract pagination from query
+  const { page = 1, limit = 20, ...filters } = req.query;
+
+  const result = await adminService.getAllOrders(filters, { 
+    page: parseInt(page), 
+    limit: parseInt(limit) 
+  });
+
   ApiResponse.paginated(result.orders, result.page, result.limit, result.total).send(res);
 });
+
 
 const updateOrderStatus = asyncHandler(async (req, res) => {
   const { status, note } = req.body;

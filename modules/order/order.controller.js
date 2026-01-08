@@ -22,10 +22,15 @@ const cancelOrder = asyncHandler(async (req, res) => {
   const order = await orderService.cancelOrder(req.params.id, req.user._id, reason);
   ApiResponse.success(order, 'Order cancelled successfully').send(res);
 });
+const deleteOrder = asyncHandler(async (req, res) => {
+  await orderService.deleteOrder(req.params.id, req.user._id);
+  ApiResponse.success(null, 'Order deleted successfully').send(res);
+});
 
 module.exports = {
   createOrder,
   getUserOrders,
   getOrder,
-  cancelOrder
+  cancelOrder,
+  deleteOrder
 };

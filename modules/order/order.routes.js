@@ -8,5 +8,6 @@ router.post('/', authenticate, orderLimiter, orderController.createOrder);
 router.get('/', authenticate, orderController.getUserOrders);
 router.get('/:id', authenticate, orderController.getOrder);
 router.patch('/:id/cancel', authenticate, orderController.cancelOrder);
+router.delete('/:id/fail', authenticate, orderController.deleteOrder);
 
 module.exports = router;

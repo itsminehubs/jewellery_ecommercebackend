@@ -73,9 +73,22 @@ const handleRefund = async (orderId) => {
 
   return { order, refund };
 };
+const markPaymentFailed = async (orderId) => {
+  const order = await Order.findById(orderId);
+  if (!order) throw ApiError.notFound('Order not found');
 
+  order.paymentStatus = 'failed';
+  order.status = 'cancelled';
+  order.statusHistory.push({ status: 'cancelled', timestamp: new Date() });
+  
+  await order.save();
+  logger.info(`Payment failed for order: ${orderId}`);
+
+  return order;
+};
 module.exports = {
   createPaymentOrder,
   verifyPayment,
-  handleRefund
+  handleRefund,
+  markPaymentFailed,
 };

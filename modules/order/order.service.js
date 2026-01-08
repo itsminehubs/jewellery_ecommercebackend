@@ -5,35 +5,65 @@ const ApiError = require('../../utils/ApiError');
 const logger = require('../../utils/logger');
 
 const createOrder = async (userId, orderData) => {
-  const user = await User.findById(userId).populate('cart.product');
-  if (!user || user.cart.length === 0) throw ApiError.badRequest('Cart is empty');
+  if (!orderData.items || orderData.items.length === 0) {
+    throw ApiError.badRequest('Order items are required');
+  }
 
-  const items = user.cart.map(item => ({
-    product: item.product._id,
-    quantity: item.quantity,
-    price: item.product.finalPrice,
-    name: item.product.name,
-    image: item.product.images[0]?.url
-  }));
+  const items = [];
+  let subtotal = 0;
 
-  const subtotal = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  for (const cartItem of orderData.items) {
+    const product = await Product.findById(cartItem.product);
+
+    if (!product) {
+      throw ApiError.badRequest('Product not found');
+    }
+
+    if (product.stock < cartItem.quantity) {
+      throw ApiError.badRequest(`${product.name} is out of stock`);
+    }
+
+    const price = product.finalPrice || product.price;
+    const itemTotal = price * cartItem.quantity;
+
+    subtotal += itemTotal;
+
+    items.push({
+      product: product._id,
+      name: product.name,
+      image: product.images?.[0]?.url,
+      quantity: cartItem.quantity,
+      price
+    });
+
+    // Reduce stock (optional but recommended)
+    product.stock -= cartItem.quantity;
+    await product.save();
+  }
+
   const tax = subtotal * 0.18;
-  const total = subtotal + tax + (orderData.shippingCost || 0);
+  const shippingCost = orderData.shippingCost || 0;
+  const total = subtotal + tax + shippingCost;
 
   const order = new Order({
     user: userId,
     items,
     shippingAddress: orderData.shippingAddress,
+    paymentMethod: orderData.paymentMethod,
     subtotal,
     tax,
+    shippingCost,
     total,
     statusHistory: [{ status: 'pending', timestamp: new Date() }]
   });
 
   await order.save();
-  await user.clearCart();
-  
+
+  // Optional: clear cart
+  await User.findByIdAndUpdate(userId, { cart: [] });
+
   logger.info(`Order created: ${order._id}`);
+
   return order;
 };
 
@@ -85,11 +115,35 @@ const cancelOrder = async (orderId, userId, reason) => {
   
   return order;
 };
+// order.service.js
+const deleteOrder = async (orderId, userId) => {
+  const order = await Order.findOne({ _id: orderId, user: userId });
+
+  if (!order) {
+    throw ApiError.notFound('Order not found');
+  }
+
+  // Do NOT allow delete if payment succeeded
+  if (order.paymentStatus === 'paid') {
+    throw ApiError.badRequest('Paid order cannot be deleted');
+  }
+
+  // Restore product stock
+  for (const item of order.items) {
+    await Product.findByIdAndUpdate(item.product, {
+      $inc: { stock: item.quantity }
+    });
+  }
+
+  await order.deleteOne();
+  logger.info(`Order deleted due to payment failure: ${orderId}`);
+};
 
 module.exports = {
   createOrder,
   getUserOrders,
   getOrderById,
   updateOrderStatus,
-  cancelOrder
+  cancelOrder,
+  deleteOrder,
 };
