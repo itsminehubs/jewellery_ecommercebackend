@@ -248,8 +248,19 @@ const HTTP_STATUS = {
   INTERNAL_SERVER_ERROR: 500,
   SERVICE_UNAVAILABLE: 503
 };
-
+// Invoice Status
+const INVOICE_STATUS = {
+  GENERATED: 'generated',
+  SENT: 'sent',
+  VIEWED: 'viewed',
+  PAID: 'paid',
+  OVERDUE: 'overdue',
+  CANCELLED: 'cancelled',
+  VOID: 'void',
+  DRAFT: 'draft'
+};
 module.exports = {
+  INVOICE_STATUS,
   USER_ROLES,
   ORDER_STATUS,
   PAYMENT_STATUS,

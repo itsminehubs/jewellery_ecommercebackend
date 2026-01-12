@@ -271,6 +271,14 @@ userSchema.methods.removeFromWishlist = async function(productId) {
   
   return await this.save();
 };
+/**
+ * Clear wishlist
+ * @returns {Promise<User>}
+ */
+userSchema.methods.clearWishlist = async function () {
+  this.wishlist = [];
+  return await this.save();
+};
 
 /**
  * Increment login attempts

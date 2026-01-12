@@ -26,5 +26,6 @@ router.delete('/cart', authenticate, userController.clearCart);
 router.get('/wishlist', authenticate, userController.getWishlist);
 router.post('/wishlist', authenticate, userController.addToWishlist);
 router.delete('/wishlist/:productId', authenticate, userController.removeFromWishlist);
+router.delete('/wishlist', authenticate, userController.clearWishlist);
 
 module.exports = router;

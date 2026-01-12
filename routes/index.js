@@ -8,6 +8,7 @@ const orderRoutes = require('../modules/order/order.routes');
 const paymentRoutes = require('../modules/payment/payment.routes');
 const bannerRoutes = require('../modules/banner/banner.routes');
 const adminRoutes = require('../modules/admin/admin.routes');
+const invoiceRoutes= require("../modules/Invoice/invoiceroutes")
 const { handleWebhook } = require('../modules/payment/razorpay.webhook');
 
 // Webhook endpoint (before JSON parsing middleware)
@@ -19,6 +20,7 @@ router.use('/users', userRoutes);
 router.use('/products', productRoutes);
 router.use('/orders', orderRoutes);
 router.use('/payments', paymentRoutes);
+router.use('/invoice', invoiceRoutes);
 router.use('/banners', bannerRoutes);
 router.use('/admin', adminRoutes);
 

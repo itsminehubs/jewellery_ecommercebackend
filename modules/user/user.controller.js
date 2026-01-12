@@ -90,6 +90,10 @@ const removeFromWishlist = asyncHandler(async (req, res) => {
   const wishlist = await userService.removeFromWishlist(req.user._id, productId);
   ApiResponse.success(wishlist, 'Removed from wishlist').send(res);
 });
+const clearWishlist = asyncHandler(async (req, res) => {
+  const wishlist = await userService.clearWishlist(req.user._id);
+  ApiResponse.success(wishlist, 'Wishlist cleared successfully').send(res);
+});
 
 module.exports = {
   getProfile,
@@ -106,5 +110,6 @@ module.exports = {
   clearCart,
   getWishlist,
   addToWishlist,
-  removeFromWishlist
+  removeFromWishlist,
+  clearWishlist
 };

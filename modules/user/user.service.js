@@ -207,6 +207,17 @@ const removeFromWishlist = async (userId, productId) => {
   
   return user.wishlist;
 };
+const clearWishlist = async (userId) => {
+  const user = await User.findById(userId);
+  if (!user) {
+    throw ApiError.notFound('User not found');
+  }
+
+  await user.clearWishlist();
+  await cacheHelper.del(`${CACHE_KEYS.WISHLIST}${userId}`);
+
+  return user.wishlist;
+};
 
 module.exports = {
   getUser,
@@ -223,5 +234,6 @@ module.exports = {
   clearCart,
   getWishlist,
   addToWishlist,
-  removeFromWishlist
+  removeFromWishlist,
+  clearWishlist
 };
