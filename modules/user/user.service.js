@@ -111,12 +111,21 @@ const deleteAddress = async (userId, addressId) => {
     throw ApiError.notFound('User not found');
   }
 
-  user.addresses.id(addressId).remove();
+  const address = user.addresses.id(addressId);
+  if (!address) {
+    throw ApiError.notFound('Address not found');
+  }
+
+  // Preferred way (Mongoose v6+)
+  address.deleteOne();
+
   await user.save();
+
   await cacheHelper.del(`${CACHE_KEYS.USER}${userId}`);
-  
+
   return user;
 };
+
 
 const getCart = async (userId) => {
   const user = await User.findById(userId).populate('cart.product');

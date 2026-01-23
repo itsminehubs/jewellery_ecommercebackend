@@ -83,7 +83,7 @@ const PRODUCT_STATUS = {
 // Banner Types
 const BANNER_TYPES = {
   HOMEPAGE: 'homepage',
-  CATEGORY: 'category',
+  OFFER: 'offer',
   PROMOTIONAL: 'promotional',
   FESTIVAL: 'festival'
 };

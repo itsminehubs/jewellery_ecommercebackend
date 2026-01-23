@@ -63,7 +63,7 @@ const deleteBanner = async (bannerId) => {
 
   if (banner.image.public_id) await deleteImage(banner.image.public_id);
   
-  await banner.remove();
+  await banner.deleteOne();
   await cacheHelper.delPattern(`${CACHE_KEYS.BANNERS}*`);
   logger.info(`Banner deleted: ${bannerId}`);
 };
