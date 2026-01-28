@@ -89,19 +89,19 @@ const updateOrderStatus = async (orderId, status, note = '') => {
 
   order.status = status;
   order.statusHistory.push({ status, timestamp: new Date(), note });
-  
+
   if (status === 'delivered') order.deliveredAt = new Date();
-  
+
   await order.save();
   logger.info(`Order ${orderId} status updated to ${status}`);
-  
+
   return order;
 };
 
 const cancelOrder = async (orderId, userId, reason) => {
   const order = await Order.findOne({ _id: orderId, user: userId });
   if (!order) throw ApiError.notFound('Order not found');
-  
+
   if (['shipped', 'delivered'].includes(order.status)) {
     throw ApiError.badRequest('Cannot cancel shipped or delivered orders');
   }
@@ -109,10 +109,17 @@ const cancelOrder = async (orderId, userId, reason) => {
   order.status = 'cancelled';
   order.cancelReason = reason;
   order.statusHistory.push({ status: 'cancelled', timestamp: new Date(), note: reason });
-  
+
+  // Restore stock on cancellation
+  for (const item of order.items) {
+    await Product.findByIdAndUpdate(item.product, {
+      $inc: { stock: item.quantity }
+    });
+  }
+
   await order.save();
-  logger.info(`Order cancelled: ${orderId}`);
-  
+  logger.info(`Order cancelled and stock restored: ${orderId}`);
+
   return order;
 };
 // order.service.js

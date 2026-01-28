@@ -14,5 +14,8 @@ router.get('/orders', adminController.getAllOrders);
 router.patch('/orders/:id/status', adminController.updateOrderStatus);
 router.get('/users', adminController.getAllUsers);
 router.patch('/users/:id/toggle-status', adminController.toggleUserStatus);
+router.get('/stock-analytics', adminController.getStockAnalytics);
+router.get('/sales-reports', adminController.getSalesReports);
+router.get('/stock-list', adminController.getStockList);
 
 module.exports = router;

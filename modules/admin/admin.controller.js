@@ -11,9 +11,9 @@ const getAllOrders = asyncHandler(async (req, res) => {
   // Extract pagination from query
   const { page = 1, limit = 20, ...filters } = req.query;
 
-  const result = await adminService.getAllOrders(filters, { 
-    page: parseInt(page), 
-    limit: parseInt(limit) 
+  const result = await adminService.getAllOrders(filters, {
+    page: parseInt(page),
+    limit: parseInt(limit)
   });
 
   ApiResponse.paginated(result.orders, result.page, result.limit, result.total).send(res);
@@ -51,10 +51,32 @@ const toggleUserStatus = asyncHandler(async (req, res) => {
   ApiResponse.success(user, 'User status updated').send(res);
 });
 
+const getStockAnalytics = asyncHandler(async (req, res) => {
+  const stats = await adminService.getStockAnalytics();
+  ApiResponse.success(stats, 'Stock analytics fetched').send(res);
+});
+
+const getSalesReports = asyncHandler(async (req, res) => {
+  const { period } = req.query; // daily, weekly, monthly, yearly
+  const reports = await adminService.getSalesReports(period || 'monthly');
+  ApiResponse.success(reports, 'Sales reports fetched').send(res);
+});
+
+const getStockList = asyncHandler(async (req, res) => {
+  const { page = 1, limit = 20, search, category, status } = req.query;
+  const result = await adminService.getStockList({
+    page, limit, search, category, status
+  });
+  ApiResponse.paginated(result.products, result.page, result.limit, result.total).send(res);
+});
+
 module.exports = {
   getDashboard,
   getAllOrders,
   updateOrderStatus,
   getAllUsers,
-  toggleUserStatus
+  toggleUserStatus,
+  getStockAnalytics,
+  getSalesReports,
+  getStockList
 };
