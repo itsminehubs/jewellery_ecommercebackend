@@ -8,7 +8,7 @@ const logger = require('../utils/logger');
 const connectDB = async () => {
   try {
     const options = {
-      maxPoolSize: 10,
+      maxPoolSize: 50,
       minPoolSize: 5,
       serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 45000,

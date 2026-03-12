@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tax Invoice - <%= order.orderNumber %>
+    </title>
+    <style>
+        :root {
+            --primary-color: #7A1F2B;
+            --secondary-color: #D4AF37;
+            --text-color: #1A1A1A;
+            --light-text: #666666;
+            --border-color: #EEEEEE;
+            --bg-color: #F9F9F9;
+        }
+
+        @page {
+            size: A4;
+            margin: 0;
+        }
+
+        body {
+            font-family: 'Helvetica', 'Arial', sans-serif;
+            margin: 0;
+            padding: 40px;
+            color: var(--text-color);
+            line-height: 1.4;
+            font-size: 10px;
+        }
+
+        .invoice-container {
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: 20px;
+            margin-bottom: 20px;
+        }
+
+        .logo-section h1 {
+            color: var(--primary-color);
+            font-size: 28px;
+            margin: 0;
+            font-weight: bold;
+            letter-spacing: 1px;
+        }
+
+        .logo-section p {
+            color: var(--secondary-color);
+            font-size: 10px;
+            margin: 5px 0 0 0;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .company-details {
+            text-align: right;
+            color: var(--light-text);
+            font-size: 9px;
+        }
+
+        .company-details strong {
+            color: var(--text-color);
+            display: block;
+            margin-bottom: 3px;
+            font-size: 11px;
+        }
+
+        /* Meta Info Bar */
+        .meta-info {
+            background-color: var(--bg-color);
+            padding: 10px 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+            border-radius: 4px;
+        }
+
+        .meta-info h2 {
+            margin: 0;
+            font-size: 14px;
+            color: var(--text-color);
+        }
+
+        .meta-details {
+            display: flex;
+            gap: 40px;
+            color: var(--light-text);
+        }
+
+        .meta-details span strong {
+            color: var(--text-color);
+            margin-left: 5px;
+        }
+
+        /* Addresses */
+        .address-section {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 30px;
+        }
+
+        .address-box {
+            width: 48%;
+        }
+
+        .address-box h3 {
+            color: var(--primary-color);
+            font-size: 11px;
+            text-transform: uppercase;
+            margin: 0 0 10px 0;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 5px;
+        }
+
+        .address-content {
+            font-size: 10px;
+        }
+
+        .address-content strong {
+            display: block;
+            margin-bottom: 3px;
+            font-size: 11px;
+        }
+
+        /* Product Table */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+
+        th {
+            background-color: var(--primary-color);
+            color: white;
+            text-align: left;
+            padding: 10px;
+            font-size: 10px;
+            text-transform: uppercase;
+        }
+
+        td {
+            padding: 12px 10px;
+            border-bottom: 1px solid var(--border-color);
+            vertical-align: top;
+        }
+
+        .row-even {
+            background-color: #FCFCFC;
+        }
+
+        .col-sl {
+            width: 30px;
+        }
+
+        .col-desc {
+            width: 40%;
+        }
+
+        .col-hsn {
+            width: 60px;
+        }
+
+        .col-qty {
+            width: 40px;
+            text-align: center;
+        }
+
+        .col-price {
+            width: 80px;
+            text-align: right;
+        }
+
+        .col-total {
+            width: 100px;
+            text-align: right;
+            font-weight: bold;
+        }
+
+        .product-name {
+            font-weight: bold;
+            font-size: 11px;
+            display: block;
+            margin-bottom: 2px;
+        }
+
+        .product-meta {
+            color: var(--light-text);
+            font-size: 9px;
+        }
+
+        /* Totals Area */
+        .footer-area {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .left-footer {
+            width: 55%;
+        }
+
+        .right-footer {
+            width: 40%;
+        }
+
+        .amount-words {
+            margin-bottom: 20px;
+        }
+
+        .amount-words p {
+            margin: 0;
+            color: var(--light-text);
+            font-size: 9px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .amount-words .words {
+            font-size: 11px;
+            color: var(--text-color);
+            margin-top: 3px;
+        }
+
+        .terms-conditions {
+            margin-top: 40px;
+        }
+
+        .terms-conditions h4 {
+            font-size: 10px;
+            color: var(--primary-color);
+            margin: 0 0 5px 0;
+        }
+
+        .terms-conditions ul {
+            padding: 0;
+            margin: 0;
+            list-style: none;
+            color: var(--light-text);
+            font-size: 8px;
+        }
+
+        .terms-conditions li {
+            margin-bottom: 3px;
+        }
+
+        .total-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+            font-size: 11px;
+        }
+
+        .total-row.grand-total {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 2px solid var(--border-color);
+            font-size: 14px;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        .total-label {
+            color: var(--light-text);
+        }
+
+        .total-value {
+            text-align: right;
+            min-width: 100px;
+        }
+
+        /* Signature */
+        .signature-area {
+            text-align: center;
+            margin-top: 30px;
+        }
+
+        .signature-box {
+            border: 1px dashed var(--border-color);
+            height: 60px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: var(--light-text);
+            font-size: 8px;
+            margin: 10px 0;
+        }
+
+        /* Branding Footer */
+        .branding-footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background-color: var(--primary-color);
+            color: white;
+            text-align: center;
+            padding: 10px 0;
+            font-size: 9px;
+        }
+
+        .branding-footer .doc-info {
+            font-size: 7px;
+            opacity: 0.8;
+            margin-top: 3px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="invoice-container">
+        <!-- Header -->
+        <div class="header">
+            <div class="logo-section">
+                <h1>JEWELSCRAFT</h1>
+                <p>Luxury Jewellery & Craftsmanship</p>
+            </div>
+            <div class="company-details">
+                <strong>Golden Jewels Pvt. Ltd.</strong>
+                123, Luxury Avenue, Diamond District<br>
+                Mumbai, Maharashtra 400001, India<br>
+                GSTIN: 27AABCU9603R1ZX | CIN: U74140MH1995PTC091234
+            </div>
+        </div>
+
+        <!-- Meta Info -->
+        <div class="meta-info">
+            <h2>TAX INVOICE</h2>
+            <div class="meta-details">
+                <span>Invoice No: <strong>
+                        <%= invoice.invoiceNumber %>
+                    </strong></span>
+                <span>Date: <strong>
+                        <%= new Date(invoice.issueDate).toLocaleDateString('en-IN') %>
+                    </strong></span>
+            </div>
+        </div>
+
+        <!-- Addresses -->
+        <div class="address-section">
+            <div class="address-box">
+                <h3>Sold By:</h3>
+                <div class="address-content">
+                    <strong>JewelsCraft Luxury Warehouse</strong>
+                    Sector 5, Gems Park<br>
+                    Mumbai 400072, India
+                </div>
+            </div>
+            <div class="address-box">
+                <h3>Ship To / Bill To:</h3>
+                <div class="address-content">
+                    <strong>
+                        <%= order.user.name %>
+                    </strong>
+                    <%= shippingAddress.addressLine1 || '' %><br>
+                        <% if (shippingAddress.addressLine2) { %>
+                            <%= shippingAddress.addressLine2 %><br>
+                                <% } %>
+                                    <%= shippingAddress.city %>, <%= shippingAddress.state %>
+                                            <%= shippingAddress.pincode %><br>
+                                                Phone: <%= shippingAddress.phone || order.user.phone || 'N/A' %>
+                </div>
+            </div>
+        </div>
+
+        <!-- Items Table -->
+        <table>
+            <thead>
+                <tr>
+                    <th class="col-sl">Sl.</th>
+                    <th class="col-desc">Product Description</th>
+                    <th class="col-hsn">HSN</th>
+                    <th class="col-qty">Qty</th>
+                    <th class="col-price">Unit Price</th>
+                    <th class="col-total">Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% order.items.forEach((item, index)=> { %>
+                    <tr class="<%= index % 2 === 1 ? 'row-even' : '' %>">
+                        <td class="col-sl">
+                            <%= index + 1 %>
+                        </td>
+                        <td class="col-desc">
+                            <span class="product-name">
+                                <%= item.name || (item.product && item.product.name) || 'Jewellery Item' %>
+                            </span>
+                            <span class="product-meta">
+                                <% if (item.product && item.product.weight) { %>
+                                    Weight: <%= item.product.weight %>g |
+                                        <% } %>
+                                            <% if (item.product && item.product.purity) { %>
+                                                Purity: <%= item.product.purity %>
+                                                    <% } %>
+                            </span>
+                        </td>
+                        <td class="col-hsn">
+                            <%= (item.product && item.product.hsnCode) || '7113' %>
+                        </td>
+                        <td class="col-qty">
+                            <%= item.quantity %>
+                        </td>
+                        <td class="col-price">₹<%= item.price.toLocaleString('en-IN', { minimumFractionDigits: 2 }) %>
+                        </td>
+                        <td class="col-total">₹<%= (item.price * item.quantity).toLocaleString('en-IN', {
+                                minimumFractionDigits: 2 }) %>
+                        </td>
+                    </tr>
+                    <% }); %>
+            </tbody>
+        </table>
+
+        <!-- Footer Area -->
+        <div class="footer-area">
+            <div class="left-footer">
+                <div class="amount-words">
+                    <p>Amount in Words:</p>
+                    <div class="words">
+                        <%= amountInWords %>
+                    </div>
+                </div>
+
+                <div class="terms-conditions">
+                    <h4>TERMS & CONDITIONS:</h4>
+                    <ul>
+                        <li>1. All jewellery items are BIS Hallmarked where applicable.</li>
+                        <li>2. Please keep this invoice for warranty and returns.</li>
+                        <li>3. Gold rates fluctuate; returns are based on market value deduction.</li>
+                        <li>4. This is a computer-generated document and requires no physical signature.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="right-footer">
+                <div class="total-row">
+                    <span class="total-label">Subtotal</span>
+                    <span class="total-value">₹<%= order.subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })
+                            %></span>
+                </div>
+                <% if (order.discount> 0) { %>
+                    <div class="total-row">
+                        <span class="total-label">Discount</span>
+                        <span class="total-value">-₹<%= order.discount.toLocaleString('en-IN', { minimumFractionDigits:
+                                2 }) %></span>
+                    </div>
+                    <% } %>
+                        <div class="total-row">
+                            <span class="total-label">GST (3%)</span>
+                            <span class="total-value">₹<%= (order.tax || (order.subtotal *
+                                    0.03)).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></span>
+                        </div>
+                        <div class="total-row">
+                            <span class="total-label">Shipping Charges</span>
+                            <span class="total-value">₹<%= (order.shippingCost || 0).toLocaleString('en-IN', {
+                                    minimumFractionDigits: 2 }) %></span>
+                        </div>
+                        <div class="total-row grand-total">
+                            <span class="total-label">Grand Total</span>
+                            <span class="total-value">₹<%= order.total.toLocaleString('en-IN', { minimumFractionDigits:
+                                    2 }) %></span>
+                        </div>
+
+                        <div class="signature-area">
+                            <p style="margin: 0; font-weight: bold; font-size: 9px;">For GOLDEN JEWELS PVT LTD</p>
+                            <div class="signature-box">
+                                Digitally Signed
+                            </div>
+                            <p style="margin: 0; font-size: 9px;">Authorised Signatory</p>
+                        </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Branding Footer Bar -->
+    <div class="branding-footer">
+        Thank you for shopping with JewelsCraft Luxury. Your trust is our greatest jewel.
+        <div class="doc-info">
+            Doc ID: <%= order._id %> | Generated By: <%= adminName || 'System' %> | Time: <%= new
+                        Date().toLocaleString('en-IN') %>
+        </div>
+    </div>
+</body>
+
+</html>

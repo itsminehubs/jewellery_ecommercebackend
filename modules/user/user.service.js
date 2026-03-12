@@ -35,7 +35,7 @@ const updateProfile = async (userId, updateData) => {
 
   await user.save();
   await cacheHelper.del(`${CACHE_KEYS.USER}${userId}`);
-  
+
   logger.info(`Profile updated for user: ${userId}`);
   return user;
 };
@@ -52,10 +52,10 @@ const uploadProfileImage = async (userId, filePath) => {
 
   const result = await uploadImage(filePath, 'profile-images');
   user.profileImage = { url: result.url, public_id: result.public_id };
-  
+
   await user.save();
   await cacheHelper.del(`${CACHE_KEYS.USER}${userId}`);
-  
+
   return user;
 };
 
@@ -72,7 +72,7 @@ const addAddress = async (userId, addressData) => {
   user.addresses.push(addressData);
   await user.save();
   await cacheHelper.del(`${CACHE_KEYS.USER}${userId}`);
-  
+
   return user;
 };
 const getAddresses = async (userId) => {
@@ -101,7 +101,7 @@ const updateAddress = async (userId, addressId, addressData) => {
   Object.assign(address, addressData);
   await user.save();
   await cacheHelper.del(`${CACHE_KEYS.USER}${userId}`);
-  
+
   return user;
 };
 
@@ -137,50 +137,80 @@ const getCart = async (userId) => {
 };
 
 const addToCart = async (userId, productId, quantity) => {
-  const user = await User.findById(userId);
+  // Try to increment quantity if product exists
+  let user = await User.findOneAndUpdate(
+    { _id: userId, 'cart.product': productId },
+    { $inc: { 'cart.$.quantity': quantity || 1 } },
+    { new: true, populate: 'cart.product' }
+  );
+
+  // If product doesn't exist in cart, push new item
+  if (!user) {
+    user = await User.findByIdAndUpdate(
+      userId,
+      {
+        $push: {
+          cart: { product: productId, quantity: quantity || 1, addedAt: new Date() }
+        }
+      },
+      { new: true, populate: 'cart.product' }
+    );
+  }
+
   if (!user) {
     throw ApiError.notFound('User not found');
   }
 
-  await user.addToCart(productId, quantity);
   await cacheHelper.del(`${CACHE_KEYS.CART}${userId}`);
-  
   return user.cart;
 };
 
 const updateCartItem = async (userId, productId, quantity) => {
-  const user = await User.findById(userId);
-  if (!user) {
-    throw ApiError.notFound('User not found');
+  if (quantity <= 0) {
+    return removeFromCart(userId, productId);
   }
 
-  await user.updateCartQuantity(productId, quantity);
+  const user = await User.findOneAndUpdate(
+    { _id: userId, 'cart.product': productId },
+    { $set: { 'cart.$.quantity': quantity } },
+    { new: true, populate: 'cart.product' }
+  );
+
+  if (!user) {
+    throw ApiError.notFound('User or product in cart not found');
+  }
+
   await cacheHelper.del(`${CACHE_KEYS.CART}${userId}`);
-  
   return user.cart;
 };
 
 const removeFromCart = async (userId, productId) => {
-  const user = await User.findById(userId);
+  const user = await User.findByIdAndUpdate(
+    userId,
+    { $pull: { cart: { product: productId } } },
+    { new: true, populate: 'cart.product' }
+  );
+
   if (!user) {
     throw ApiError.notFound('User not found');
   }
 
-  await user.removeFromCart(productId);
   await cacheHelper.del(`${CACHE_KEYS.CART}${userId}`);
-  
   return user.cart;
 };
 
 const clearCart = async (userId) => {
-  const user = await User.findById(userId);
+  const user = await User.findByIdAndUpdate(
+    userId,
+    { $set: { cart: [] } },
+    { new: true }
+  );
+
   if (!user) {
     throw ApiError.notFound('User not found');
   }
 
-  await user.clearCart();
   await cacheHelper.del(`${CACHE_KEYS.CART}${userId}`);
-  
   return user.cart;
 };
 
@@ -201,7 +231,7 @@ const addToWishlist = async (userId, productId) => {
 
   await user.addToWishlist(productId);
   await cacheHelper.del(`${CACHE_KEYS.WISHLIST}${userId}`);
-  
+
   return user.wishlist;
 };
 
@@ -213,7 +243,7 @@ const removeFromWishlist = async (userId, productId) => {
 
   await user.removeFromWishlist(productId);
   await cacheHelper.del(`${CACHE_KEYS.WISHLIST}${userId}`);
-  
+
   return user.wishlist;
 };
 const clearWishlist = async (userId) => {
@@ -226,6 +256,38 @@ const clearWishlist = async (userId) => {
   await cacheHelper.del(`${CACHE_KEYS.WISHLIST}${userId}`);
 
   return user.wishlist;
+};
+
+const deleteAccount = async (userId) => {
+  const user = await User.findById(userId);
+  if (!user) {
+    throw ApiError.notFound('User not found');
+  }
+
+  if (user.profileImage && user.profileImage.public_id) {
+    await deleteImage(user.profileImage.public_id);
+  }
+
+  await User.findByIdAndDelete(userId);
+  await cacheHelper.del(`${CACHE_KEYS.USER}${userId}`);
+
+  logger.info(`Account deleted for user: ${userId}`);
+  return { success: true };
+};
+
+const getLoyaltyInfo = async (userId) => {
+  const user = await User.findById(userId).select('loyaltyPoints loyaltyTier');
+  if (!user) throw ApiError.notFound('User not found');
+  return user;
+};
+
+const updateFcmToken = async (userId, fcmToken) => {
+  const user = await User.findById(userId);
+  if (!user) throw ApiError.notFound('User not found');
+  user.fcmToken = fcmToken;
+  await user.save();
+  await cacheHelper.del(`${CACHE_KEYS.USER}${userId}`);
+  return user;
 };
 
 module.exports = {
@@ -244,5 +306,8 @@ module.exports = {
   getWishlist,
   addToWishlist,
   removeFromWishlist,
-  clearWishlist
+  clearWishlist,
+  deleteAccount,
+  getLoyaltyInfo,
+  updateFcmToken
 };

@@ -5,7 +5,9 @@
 // User Roles
 const USER_ROLES = {
   USER: 'user',
-  ADMIN: 'admin'
+  ADMIN: 'admin',
+  STAFF: 'staff',
+  MODERATOR: 'moderator'
 };
 
 // Order Status
@@ -161,7 +163,8 @@ const CACHE_KEYS = {
   CART: 'cart:',
   WISHLIST: 'wishlist:',
   OTP: 'otp:',
-  REFRESH_TOKEN: 'refresh_token:'
+  REFRESH_TOKEN: 'refresh_token:',
+  PRODUCT_VIEWS: 'product_views:'
 };
 
 // Cache TTL (in seconds)

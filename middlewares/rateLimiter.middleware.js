@@ -14,7 +14,7 @@ const createRateLimiter = (options = {}) => {
     standardHeaders: true,
     legacyHeaders: false,
     message: 'Too many requests, please try again later',
-    handler: (req, res,next) => {
+    handler: (req, res, next) => {
       logger.warn('Rate limit exceeded', {
         ip: req.ip,
         url: req.originalUrl,
@@ -22,14 +22,14 @@ const createRateLimiter = (options = {}) => {
       });
 
       return res.status(429).json({
-    success: false,
-    message: 'Too many requests, please try again later'
-  });
+        success: false,
+        message: 'Too many requests, please try again later'
+      });
 
     },
     skip: (req) => {
       // Skip rate limiting for admin users in production
-     
+
       return false;
     },
     ...options
@@ -43,8 +43,8 @@ const createRateLimiter = (options = {}) => {
  * 100 requests per 15 minutes
  */
 const apiLimiter = createRateLimiter({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
+  max: process.env.NODE_ENV === 'development' ? 2000 : (parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 500),
   message: 'Too many requests from this IP, please try again later'
 });
 
@@ -54,7 +54,7 @@ const apiLimiter = createRateLimiter({
  */
 const authLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: process.env.NODE_ENV === 'development' ? 50 : 10,
   message: 'Too many authentication attempts, please try again later',
   skipSuccessfulRequests: true
 });

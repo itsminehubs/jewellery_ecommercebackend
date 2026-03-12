@@ -1,6 +1,13 @@
 const adminService = require('./admin.service');
 const ApiResponse = require('../../utils/ApiResponse');
 const { asyncHandler } = require('../../middlewares/error.middleware');
+const ApiError = require('../../utils/ApiError');
+
+const adjustLoyaltyPoints = asyncHandler(async (req, res) => {
+  const { points, reason } = req.body;
+  const user = await adminService.adjustLoyaltyPoints(req.params.id, points, reason);
+  ApiResponse.success(user, 'Loyalty points adjusted successfully').send(res);
+});
 
 const getDashboard = asyncHandler(async (req, res) => {
   const stats = await adminService.getDashboardStats();
@@ -70,6 +77,21 @@ const getStockList = asyncHandler(async (req, res) => {
   ApiResponse.paginated(result.products, result.page, result.limit, result.total).send(res);
 });
 
+const exportProducts = asyncHandler(async (req, res) => {
+  const csvContent = await adminService.exportProductsToCSV();
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename=products_export_${Date.now()}.csv`);
+  res.status(200).send(csvContent);
+});
+
+const importProducts = asyncHandler(async (req, res) => {
+  if (!req.file) {
+    throw ApiError.badRequest('Please upload a CSV file');
+  }
+  const result = await adminService.importProductsFromCSV(req.file.path);
+  ApiResponse.success(result, 'Bulk import completed').send(res);
+});
+
 module.exports = {
   getDashboard,
   getAllOrders,
@@ -78,5 +100,8 @@ module.exports = {
   toggleUserStatus,
   getStockAnalytics,
   getSalesReports,
-  getStockList
+  getStockList,
+  exportProducts,
+  importProducts,
+  adjustLoyaltyPoints
 };

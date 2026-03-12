@@ -82,5 +82,11 @@ module.exports = {
   sendOTP,
   verifyOTP,
   refreshToken,
-  logout
+  logout,
+  deleteAccount: {
+    body: Joi.object().keys({
+      phone: Joi.string().required().pattern(REGEX_PATTERNS.PHONE),
+      otp: Joi.string().required().length(6)
+    })
+  }
 };

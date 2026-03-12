@@ -1,70 +1,100 @@
 const Order = require('./order.model');
 const Product = require('../product/product.model');
 const User = require('../user/user.model');
+const loyaltyService = require('../user/loyalty.service');
+const couponService = require('../coupon/coupon.service');
+const Coupon = require('../coupon/coupon.model');
 const ApiError = require('../../utils/ApiError');
 const logger = require('../../utils/logger');
 
 const createOrder = async (userId, orderData) => {
-  if (!orderData.items || orderData.items.length === 0) {
-    throw ApiError.badRequest('Order items are required');
-  }
+  const session = await Order.startSession();
+  session.startTransaction();
 
-  const items = [];
-  let subtotal = 0;
-
-  for (const cartItem of orderData.items) {
-    const product = await Product.findById(cartItem.product);
-
-    if (!product) {
-      throw ApiError.badRequest('Product not found');
+  try {
+    if (!orderData.items || orderData.items.length === 0) {
+      throw ApiError.badRequest('Order items are required');
     }
 
-    if (product.stock < cartItem.quantity) {
-      throw ApiError.badRequest(`${product.name} is out of stock`);
+    const items = [];
+    let subtotal = 0;
+    let totalTax = 0;
+
+    for (const cartItem of orderData.items) {
+      const product = await Product.findById(cartItem.product).session(session);
+
+      if (!product) {
+        throw ApiError.badRequest('Product not found');
+      }
+
+      if (product.stock < cartItem.quantity) {
+        throw ApiError.badRequest(`${product.name} is out of stock`);
+      }
+
+      const price = product.finalPrice || product.price;
+      const itemTotal = price * cartItem.quantity;
+
+      const itemGstRate = product.gstRate || 3;
+      const itemTax = itemTotal * (itemGstRate / 100);
+
+      subtotal += itemTotal;
+      totalTax += itemTax;
+
+      items.push({
+        product: product._id,
+        name: product.name,
+        image: product.images?.[0]?.url,
+        quantity: cartItem.quantity,
+        price,
+        gstRate: itemGstRate,
+        taxAmount: itemTax
+      });
+
+      product.stock -= cartItem.quantity;
+      await product.save({ session });
     }
 
-    const price = product.finalPrice || product.price;
-    const itemTotal = price * cartItem.quantity;
+    let discount = 0;
+    if (orderData.couponCode) {
+      const coupon = await couponService.validateCoupon(orderData.couponCode, userId, subtotal);
+      discount = couponService.calculateDiscount(coupon, subtotal);
+      coupon.usedCount += 1;
+      await coupon.save({ session });
+    }
 
-    subtotal += itemTotal;
+    const shippingCost = orderData.shippingCost || 0;
+    const total = subtotal + totalTax + shippingCost - discount;
 
-    items.push({
-      product: product._id,
-      name: product.name,
-      image: product.images?.[0]?.url,
-      quantity: cartItem.quantity,
-      price
+    const order = new Order({
+      user: userId,
+      items,
+      shippingAddress: orderData.shippingAddress,
+      paymentMethod: orderData.paymentMethod,
+      subtotal,
+      tax: totalTax, // Fixed variable name from 'tax' to 'totalTax'
+      shippingCost,
+      discount,
+      total,
+      statusHistory: [{ status: 'pending', timestamp: new Date() }]
     });
 
-    // Reduce stock (optional but recommended)
-    product.stock -= cartItem.quantity;
-    await product.save();
+    await order.save({ session });
+
+    await User.findByIdAndUpdate(userId, { cart: [] }, { session });
+
+    await loyaltyService.awardPoints(userId, order.total, session);
+
+    await session.commitTransaction();
+    logger.info(`Order created: ${order._id}`);
+
+    return order;
+  } catch (error) {
+    await session.abortTransaction();
+    logger.error(`Order creation failed: ${error.message}`);
+    throw error;
+  } finally {
+    session.endSession();
   }
-
-  const tax = subtotal * 0.18;
-  const shippingCost = orderData.shippingCost || 0;
-  const total = subtotal + tax + shippingCost;
-
-  const order = new Order({
-    user: userId,
-    items,
-    shippingAddress: orderData.shippingAddress,
-    paymentMethod: orderData.paymentMethod,
-    subtotal,
-    tax,
-    shippingCost,
-    total,
-    statusHistory: [{ status: 'pending', timestamp: new Date() }]
-  });
-
-  await order.save();
-
-  // Optional: clear cart
-  await User.findByIdAndUpdate(userId, { cart: [] });
-
-  logger.info(`Order created: ${order._id}`);
-
-  return order;
 };
 
 const getUserOrders = async (userId, options = {}) => {
@@ -120,6 +150,9 @@ const cancelOrder = async (orderId, userId, reason) => {
   await order.save();
   logger.info(`Order cancelled and stock restored: ${orderId}`);
 
+  // Deduct loyalty points on cancellation
+  await loyaltyService.deductPoints(userId, order.total);
+
   return order;
 };
 // order.service.js
@@ -146,8 +179,37 @@ const deleteOrder = async (orderId, userId) => {
   logger.info(`Order deleted due to payment failure: ${orderId}`);
 };
 
+/**
+ * Verify order total based on latest prices
+ * @param {Array} items - List of items with product ID and quantity
+ * @returns {Promise<Object>}
+ */
+const verifyPrice = async (items) => {
+  let subtotal = 0;
+  let totalTax = 0;
+
+  for (const item of items) {
+    const product = await Product.findById(item.product);
+    if (!product) throw ApiError.notFound('Product not found');
+
+    const price = product.finalPrice || product.price;
+    const itemTotal = price * item.quantity;
+    const itemTax = itemTotal * ((product.gstRate || 3) / 100);
+
+    subtotal += itemTotal;
+    totalTax += itemTax;
+  }
+
+  // Simplified shipping logic for verification (should match createOrder)
+  const shippingCost = subtotal > 2999 ? 0 : 99;
+  const total = subtotal + totalTax + shippingCost;
+
+  return { subtotal, tax: totalTax, shippingCost, total };
+};
+
 module.exports = {
   createOrder,
+  verifyPrice,
   getUserOrders,
   getOrderById,
   updateOrderStatus,

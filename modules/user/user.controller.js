@@ -1,5 +1,7 @@
 const userService = require('./user.service');
+const loyaltyService = require('./loyalty.service');
 const ApiResponse = require('../../utils/ApiResponse');
+const ApiError = require('../../utils/ApiError');
 const { asyncHandler } = require('../../middlewares/error.middleware');
 const { deleteFile } = require('../../middlewares/upload.middleware');
 
@@ -20,7 +22,7 @@ const uploadProfileImage = asyncHandler(async (req, res) => {
 
   const user = await userService.uploadProfileImage(req.user._id, req.file.path);
   await deleteFile(req.file.path);
-  
+
   ApiResponse.success(user, 'Profile image uploaded successfully').send(res);
 });
 
@@ -95,6 +97,52 @@ const clearWishlist = asyncHandler(async (req, res) => {
   ApiResponse.success(wishlist, 'Wishlist cleared successfully').send(res);
 });
 
+const deleteAccount = asyncHandler(async (req, res) => {
+  const { phone, otp } = req.body;
+  if (!phone || !otp) {
+    throw ApiError.badRequest('Phone number and OTP are required for account deletion');
+  }
+
+  // Verify OTP
+  const otpKey = `${CACHE_KEYS.OTP}${phone}`;
+  const storedOTP = await cacheHelper.get(otpKey);
+
+  if (!storedOTP || String(storedOTP) !== String(otp)) {
+    throw ApiError.badRequest('Invalid or expired OTP');
+  }
+
+  // Delete OTP after verification
+  await cacheHelper.del(otpKey);
+
+  // Perform deletion
+  await userService.deleteAccount(req.user._id);
+
+  ApiResponse.success(null, 'Account deleted successfully').send(res);
+});
+
+const getLoyaltyInfo = async (req, res) => {
+  const user = await userService.getLoyaltyInfo(req.user._id); // Changed from User.findById to userService.getLoyaltyInfo
+  res.status(200).json({ success: true, data: user });
+};
+
+const redeemLoyaltyPoints = async (req, res) => {
+  const { points } = req.body;
+  if (!points || points <= 0) {
+    throw ApiError.badRequest('Points to redeem are required');
+  }
+  const discountAmount = await loyaltyService.redeemPoints(req.user._id, points);
+  res.status(200).json({
+    success: true,
+    message: `Redeemed ${points} points for ₹${discountAmount} discount`,
+    data: { discountAmount }
+  });
+};
+
+const updateFcmToken = asyncHandler(async (req, res) => {
+  await userService.updateFcmToken(req.user._id, req.body.fcmToken);
+  ApiResponse.success(null, 'FCM token updated successfully').send(res);
+});
+
 module.exports = {
   getProfile,
   updateProfile,
@@ -111,5 +159,9 @@ module.exports = {
   getWishlist,
   addToWishlist,
   removeFromWishlist,
-  clearWishlist
+  clearWishlist,
+  deleteAccount,
+  getLoyaltyInfo,
+  redeemLoyaltyPoints,
+  updateFcmToken,
 };

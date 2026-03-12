@@ -93,9 +93,9 @@ const cacheHelper = {
   get: async (key) => {
     const client = getRedisClient();
     const value = await client.get(key);
-    
+
     if (!value) return null;
-    
+
     try {
       return JSON.parse(value);
     } catch {
@@ -121,7 +121,7 @@ const cacheHelper = {
   delPattern: async (pattern) => {
     const client = getRedisClient();
     const keys = await client.keys(pattern);
-    
+
     if (keys.length > 0) {
       await client.del(...keys);
     }
@@ -146,6 +146,17 @@ const cacheHelper = {
   expire: async (key, seconds) => {
     const client = getRedisClient();
     return await client.expire(key, seconds);
+  },
+
+  /**
+   * Increment value of key
+   * @param {string} key - Cache key
+   * @param {number} amount - Amount to increment
+   * @returns {Promise<number>}
+   */
+  increment: async (key, amount = 1) => {
+    const client = getRedisClient();
+    return await client.incrby(key, amount);
   }
 };
 

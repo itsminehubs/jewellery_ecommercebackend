@@ -1,5 +1,8 @@
 const User = require('../user/user.model');
 const Product = require('../product/product.model');
+const fs = require('fs');
+const csv = require('csv-parser');
+const { Parser } = require('json2csv');
 const Order = require('../order/order.model');
 const ApiError = require('../../utils/ApiError');
 const logger = require('../../utils/logger');
@@ -15,16 +18,47 @@ const getDashboardStats = async () => {
     { $group: { _id: null, total: { $sum: '$total' } } }
   ]);
 
+  const totalRevenue = revenue[0]?.total || 0;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayRevenueData = await Order.aggregate([
+    { $match: { paymentStatus: 'completed', createdAt: { $gte: today } } },
+    { $group: { _id: null, total: { $sum: '$total' } } }
+  ]);
+
   const topProducts = await Product.find().sort('-sales').limit(5);
+
+  // POS vs Online Split
+  const channelSplit = await Order.aggregate([
+    { $match: { paymentStatus: 'completed' } },
+    { $group: { _id: '$source', total: { $sum: '$total' }, count: { $sum: 1 } } }
+  ]);
 
   return {
     totalUsers,
     totalProducts,
     totalOrders,
     pendingOrders,
-    totalRevenue: revenue[0]?.total || 0,
-    topProducts
+    totalRevenue,
+    todayRevenue: todayRevenueData[0]?.total || 0,
+    averageOrderValue: totalOrders > 0 ? (totalRevenue / totalOrders) : 0,
+    topProducts,
+    channelSplit
   };
+};
+
+const adjustLoyaltyPoints = async (userId, points, reason = 'Admin Adjustment') => {
+  const user = await User.findById(userId);
+  if (!user) throw ApiError.notFound('User not found');
+
+  user.loyaltyPoints = (user.loyaltyPoints || 0) + Number(points);
+  
+  // LOG THE ADJUSTMENT (In a real system, we'd have a LoyaltyHistory model)
+  logger.info(`Admin adjusted points for ${userId}: ${points} points. Reason: ${reason}`);
+
+  await user.save();
+  return user;
 };
 
 const getAllOrders = async (filters = {}, options = {}) => {
@@ -221,6 +255,100 @@ const getStockList = async (options = {}) => {
   return { products: stockList, total, page: Number(page), limit: Number(limit) };
 };
 
+const exportProductsToCSV = async () => {
+  const products = await Product.find().lean();
+
+  if (!products.length) return '';
+
+  const fields = [
+    'sku', 'name', 'category', 'metalType', 'purity',
+    'grossWeight', 'stoneWeight', 'netWeight',
+    'makingCharges', 'makingChargeType', 'stoneCharges', 'wastage',
+    'price', 'discount', 'stock', 'status', 'featured', 'trending',
+    'hsnCode', 'gstRate'
+  ];
+
+  const json2csvParser = new Parser({ fields });
+  const csv = json2csvParser.parse(products);
+
+  return csv;
+};
+
+const importProductsFromCSV = async (filePath) => {
+  const results = [];
+  const summary = {
+    total: 0,
+    created: 0,
+    updated: 0,
+    errors: []
+  };
+
+  return new Promise((resolve, reject) => {
+    fs.createReadStream(filePath)
+      .pipe(csv())
+      .on('data', (data) => results.push(data))
+      .on('end', async () => {
+        summary.total = results.length;
+
+        for (const row of results) {
+          try {
+            const { sku, name, category, metalType, price, stock } = row;
+
+            if (!name || !category || !metalType || !price) {
+              summary.errors.push({ row, error: 'Missing required fields' });
+              continue;
+            }
+
+            const productData = {
+              name,
+              category,
+              metalType,
+              price: Number(price),
+              stock: Number(stock || 0),
+              discount: Number(row.discount || 0),
+              purity: row.purity,
+              weight: Number(row.weight || 0),
+              grossWeight: Number(row.grossWeight || row.weight || 0),
+              stoneWeight: Number(row.stoneWeight || 0),
+              netWeight: Number(row.netWeight || row.weight || 0),
+              makingCharges: Number(row.makingCharges || 0),
+              makingChargeType: row.makingChargeType || 'per_gram',
+              stoneCharges: Number(row.stoneCharges || 0),
+              wastage: Number(row.wastage || 0),
+              hsnCode: row.hsnCode || '7113',
+              gstRate: Number(row.gstRate || 3),
+              status: row.status || 'active',
+              featured: row.featured === 'true',
+              trending: row.trending === 'true'
+            };
+
+            if (sku) {
+              const updated = await Product.findOneAndUpdate(
+                { sku: sku.trim() },
+                productData,
+                { new: true, runValidators: true }
+              );
+
+              if (updated) {
+                summary.updated++;
+                continue;
+              }
+            }
+
+            // Create new if no SKU or SKU not found
+            await Product.create(productData);
+            summary.created++;
+
+          } catch (error) {
+            summary.errors.push({ row, error: error.message });
+          }
+        }
+        resolve(summary);
+      })
+      .on('error', (error) => reject(error));
+  });
+};
+
 module.exports = {
   getDashboardStats,
   getAllOrders,
@@ -229,5 +357,8 @@ module.exports = {
   toggleUserStatus,
   getStockAnalytics,
   getSalesReports,
-  getStockList
+  getStockList,
+  exportProductsToCSV,
+  importProductsFromCSV,
+  adjustLoyaltyPoints
 };

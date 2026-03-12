@@ -123,12 +123,34 @@ const userSchema = new mongoose.Schema({
   },
   lockUntil: {
     type: Date
+  },
+  loyaltyPoints: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+  loyaltyTier: {
+    type: String,
+    enum: ['Silver', 'Gold', 'Platinum'],
+    default: 'Silver'
+  },
+  fcmToken: {
+    type: String,
+    trim: true
+  },
+  dailyPointsEarned: {
+    type: Number,
+    default: 0
+  },
+  lastPointsUpdateDate: {
+    type: Date,
+    default: Date.now
   }
 }, {
   timestamps: true,
   toJSON: {
     virtuals: true,
-    transform: function(doc, ret) {
+    transform: function (doc, ret) {
       delete ret.__v;
       delete ret.refreshToken;
       delete ret.loginAttempts;
@@ -145,22 +167,22 @@ userSchema.index({ role: 1 });
 userSchema.index({ createdAt: -1 });
 
 // Virtual for cart total
-userSchema.virtual('cartItemsCount').get(function() {
+userSchema.virtual('cartItemsCount').get(function () {
   return this.cart ? this.cart.length : 0;
 });
 
 // Virtual for wishlist count
-userSchema.virtual('wishlistCount').get(function() {
+userSchema.virtual('wishlistCount').get(function () {
   return this.wishlist ? this.wishlist.length : 0;
 });
 
 // Check if account is locked
-userSchema.virtual('isLocked').get(function() {
+userSchema.virtual('isLocked').get(function () {
   return !!(this.lockUntil && this.lockUntil > Date.now());
 });
 
 // Pre-save middleware
-userSchema.pre('save', async function() {
+userSchema.pre('save', async function () {
   try {
     // Ensure only one default address
     if (this.isModified('addresses') && this.addresses.length > 0) {
@@ -189,7 +211,7 @@ userSchema.pre('save', async function() {
  * @param {number} quantity - Quantity
  * @returns {Promise<User>}
  */
-userSchema.methods.addToCart = async function(productId, quantity = 1) {
+userSchema.methods.addToCart = async function (productId, quantity = 1) {
   const existingItem = this.cart.find(
     item => item.product.toString() === productId.toString()
   );
@@ -208,11 +230,11 @@ userSchema.methods.addToCart = async function(productId, quantity = 1) {
  * @param {string} productId - Product ID
  * @returns {Promise<User>}
  */
-userSchema.methods.removeFromCart = async function(productId) {
+userSchema.methods.removeFromCart = async function (productId) {
   this.cart = this.cart.filter(
     item => item.product.toString() !== productId.toString()
   );
-  
+
   return await this.save();
 };
 
@@ -222,7 +244,7 @@ userSchema.methods.removeFromCart = async function(productId) {
  * @param {number} quantity - New quantity
  * @returns {Promise<User>}
  */
-userSchema.methods.updateCartQuantity = async function(productId, quantity) {
+userSchema.methods.updateCartQuantity = async function (productId, quantity) {
   const item = this.cart.find(
     item => item.product.toString() === productId.toString()
   );
@@ -241,7 +263,7 @@ userSchema.methods.updateCartQuantity = async function(productId, quantity) {
  * Clear cart
  * @returns {Promise<User>}
  */
-userSchema.methods.clearCart = async function() {
+userSchema.methods.clearCart = async function () {
   this.cart = [];
   return await this.save();
 };
@@ -251,11 +273,11 @@ userSchema.methods.clearCart = async function() {
  * @param {string} productId - Product ID
  * @returns {Promise<User>}
  */
-userSchema.methods.addToWishlist = async function(productId) {
+userSchema.methods.addToWishlist = async function (productId) {
   if (!this.wishlist.includes(productId)) {
     this.wishlist.push(productId);
   }
-  
+
   return await this.save();
 };
 
@@ -264,11 +286,11 @@ userSchema.methods.addToWishlist = async function(productId) {
  * @param {string} productId - Product ID
  * @returns {Promise<User>}
  */
-userSchema.methods.removeFromWishlist = async function(productId) {
+userSchema.methods.removeFromWishlist = async function (productId) {
   this.wishlist = this.wishlist.filter(
     id => id.toString() !== productId.toString()
   );
-  
+
   return await this.save();
 };
 /**
@@ -284,7 +306,7 @@ userSchema.methods.clearWishlist = async function () {
  * Increment login attempts
  * @returns {Promise<User>}
  */
-userSchema.methods.incLoginAttempts = async function() {
+userSchema.methods.incLoginAttempts = async function () {
   // Reset attempts if lock has expired
   if (this.lockUntil && this.lockUntil < Date.now()) {
     return await this.updateOne({
@@ -294,7 +316,7 @@ userSchema.methods.incLoginAttempts = async function() {
   }
 
   const updates = { $inc: { loginAttempts: 1 } };
-  
+
   // Lock account after 5 failed attempts
   const maxAttempts = 5;
   const lockTime = 2 * 60 * 60 * 1000; // 2 hours
@@ -310,7 +332,7 @@ userSchema.methods.incLoginAttempts = async function() {
  * Reset login attempts
  * @returns {Promise<User>}
  */
-userSchema.methods.resetLoginAttempts = async function() {
+userSchema.methods.resetLoginAttempts = async function () {
   return await this.updateOne({
     $set: { loginAttempts: 0 },
     $unset: { lockUntil: 1 }
@@ -324,7 +346,7 @@ userSchema.methods.resetLoginAttempts = async function() {
  * @param {string} phone - Phone number
  * @returns {Promise<User>}
  */
-userSchema.statics.findByPhone = function(phone) {
+userSchema.statics.findByPhone = function (phone) {
   return this.findOne({ phone });
 };
 
@@ -333,7 +355,7 @@ userSchema.statics.findByPhone = function(phone) {
  * @param {string} email - Email address
  * @returns {Promise<User>}
  */
-userSchema.statics.findByEmail = function(email) {
+userSchema.statics.findByEmail = function (email) {
   return this.findOne({ email: email.toLowerCase() });
 };
 

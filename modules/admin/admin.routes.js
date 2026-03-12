@@ -14,8 +14,11 @@ router.get('/orders', adminController.getAllOrders);
 router.patch('/orders/:id/status', adminController.updateOrderStatus);
 router.get('/users', adminController.getAllUsers);
 router.patch('/users/:id/toggle-status', adminController.toggleUserStatus);
+router.patch('/users/:id/adjust-loyalty', adminController.adjustLoyaltyPoints);
 router.get('/stock-analytics', adminController.getStockAnalytics);
 router.get('/sales-reports', adminController.getSalesReports);
 router.get('/stock-list', adminController.getStockList);
+router.get('/bulk-export', adminController.exportProducts);
+router.post('/bulk-import', require('../../middlewares/upload.middleware').upload.single('file'), adminController.importProducts);
 
 module.exports = router;

@@ -5,6 +5,7 @@ const { authenticate } = require('../../middlewares/auth.middleware');
 const { orderLimiter } = require('../../middlewares/rateLimiter.middleware');
 
 router.post('/', authenticate, orderLimiter, orderController.createOrder);
+router.post('/verify-price', authenticate, orderController.verifyPrice);
 router.get('/', authenticate, orderController.getUserOrders);
 router.get('/:id', authenticate, orderController.getOrder);
 router.patch('/:id/cancel', authenticate, orderController.cancelOrder);

@@ -22,18 +22,18 @@ const sendOTP = async (phone) => {
   try {
     // Generate 6-digit OTP
     const otp = generateOTP(6);
-    
+
     // Store OTP in Redis with 5-minute expiration
     const otpKey = `${CACHE_KEYS.OTP}${phone}`;
     await cacheHelper.set(otpKey, otp, CACHE_TTL.OTP);
 
-      // In development, log OTP
-      logger.info(`Development OTP for ${phone}: ${otp}`);
-      console.log(`\n🔐 OTP for ${phone}: ${otp}\n`);
-   return {
+    // In development, log OTP
+    logger.info(`Development OTP for ${phone}: ${otp}`);
+    console.log(`\n🔐 OTP for ${phone}: ${otp}\n`);
+    return {
       message: SUCCESS_MESSAGES.OTP_SENT,
       phone,
-    
+      otp: process.env.NODE_ENV === 'development' ? otp : undefined
     };
   } catch (error) {
     logger.error(`Error sending OTP: ${error.message}`);
@@ -187,7 +187,7 @@ const refreshAccessToken = async (refreshToken) => {
     if (error instanceof ApiError) {
       throw error;
     }
-    
+
     logger.error(`Error refreshing token: ${error.message}`);
     throw ApiError.unauthorized('Invalid refresh token');
   }
@@ -229,7 +229,7 @@ const logout = async (userId, refreshToken = null) => {
  */
 const checkPhoneExists = async (phone) => {
   const user = await User.findByPhone(phone);
-  
+
   return {
     exists: !!user,
     isRegistered: !!user

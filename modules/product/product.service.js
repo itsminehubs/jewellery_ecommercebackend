@@ -7,8 +7,12 @@ const logger = require('../../utils/logger');
 const { PRODUCT_CATEGORIES } = require('../../utils/constants');
 
 const getAllProducts = async (filters = {}, options = {}) => {
-  const { page = 1, limit = 20, sort = '-createdAt', search } = options;
+  const { page = 1, limit = 20, sort = '-createdAt', search, sku } = options;
   const query = { status: 'active', ...filters };
+
+  if (sku) {
+    query.sku = sku;
+  }
 
   if (search) {
     query.$text = { $search: search };
@@ -22,20 +26,36 @@ const getAllProducts = async (filters = {}, options = {}) => {
 };
 
 const getProductById = async (productId) => {
-  const product = await Product.findById(productId);
-  if (!product) throw ApiError.notFound('Product not found');
-  
-  product.views += 1;
-  await product.save();
-  
-  return product;
+  const cacheKey = `${CACHE_KEYS.PRODUCT_DETAIL}:${productId}`;
+  const viewKey = `${CACHE_KEYS.PRODUCT_VIEWS}:${productId}`;
+
+  // 1. Try Cache
+  let productData = await cacheHelper.get(cacheKey);
+
+  if (!productData) {
+    // 2. Fetch from DB
+    const product = await Product.findById(productId);
+    if (!product) throw ApiError.notFound('Product not found');
+
+    productData = product.toObject();
+    // Cache for 10 minutes
+    await cacheHelper.set(cacheKey, productData, 600);
+  }
+
+  // 3. Increment views in Redis (Buffered - flush to DB later)
+  await cacheHelper.increment(viewKey);
+
+  return productData;
 };
 
 const createProduct = async (productData, imagePaths = []) => {
   const images = imagePaths.length > 0 ? await uploadMultipleImages(imagePaths, 'products') : [];
   const product = new Product({ ...productData, images });
   await product.save();
-  
+
+  // Clear listing caches if exists
+  await cacheHelper.delPattern(`${CACHE_KEYS.PRODUCT_DETAIL}:*`);
+
   logger.info(`Product created: ${product._id}`);
   return product;
 };
@@ -51,7 +71,10 @@ const updateProduct = async (productId, updateData, imagePaths = []) => {
 
   Object.assign(product, updateData);
   await product.save();
-  
+
+  // Clear specific product cache
+  await cacheHelper.del(`${CACHE_KEYS.PRODUCT_DETAIL}:${productId}`);
+
   return product;
 };
 
@@ -69,15 +92,21 @@ const deleteProduct = async (productId) => {
   // Delete product document
   await product.deleteOne();
 
+  // Clear cache
+  await cacheHelper.del(`${CACHE_KEYS.PRODUCT_DETAIL}:${productId}`);
+
   logger.info(`Product deleted: ${productId}`);
+};
+
+const getProductBySku = async (sku) => {
+  const product = await Product.findOne({ sku });
+  if (!product) throw ApiError.notFound('Product not found with this SKU');
+  return product;
 };
 const getProductsByCategory = async (category, options = {}) => {
   const { page = 1, limit = 20, sort = '-createdAt', search, minPrice, maxPrice, metalType } = options;
 
-  // ✅ Validate category
-  if (!Object.values(PRODUCT_CATEGORIES).includes(category)) {
-    throw ApiError.badRequest('Invalid product category');
-  }
+  // ✅ Validation removed for dynamic categories
 
   const query = {
     category,
@@ -165,4 +194,5 @@ module.exports = {
   getProductsByCategory,
   getFeaturedProducts,
   getTrendingProducts,
+  getProductBySku
 };
