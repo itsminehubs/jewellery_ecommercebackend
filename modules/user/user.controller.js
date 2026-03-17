@@ -120,23 +120,19 @@ const deleteAccount = asyncHandler(async (req, res) => {
   ApiResponse.success(null, 'Account deleted successfully').send(res);
 });
 
-const getLoyaltyInfo = async (req, res) => {
-  const user = await userService.getLoyaltyInfo(req.user._id); // Changed from User.findById to userService.getLoyaltyInfo
-  res.status(200).json({ success: true, data: user });
-};
+const getLoyaltyInfo = asyncHandler(async (req, res) => {
+  const user = await userService.getLoyaltyInfo(req.user._id);
+  ApiResponse.success(user, 'Loyalty info fetched successfully').send(res);
+});
 
-const redeemLoyaltyPoints = async (req, res) => {
+const redeemLoyaltyPoints = asyncHandler(async (req, res) => {
   const { points } = req.body;
   if (!points || points <= 0) {
     throw ApiError.badRequest('Points to redeem are required');
   }
   const discountAmount = await loyaltyService.redeemPoints(req.user._id, points);
-  res.status(200).json({
-    success: true,
-    message: `Redeemed ${points} points for ₹${discountAmount} discount`,
-    data: { discountAmount }
-  });
-};
+  ApiResponse.success({ discountAmount }, `Redeemed ${points} points for ₹${discountAmount} discount`).send(res);
+});
 
 const updateFcmToken = asyncHandler(async (req, res) => {
   await userService.updateFcmToken(req.user._id, req.body.fcmToken);

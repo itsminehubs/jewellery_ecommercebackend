@@ -225,6 +225,12 @@ const profileImageUpload = uploadSingle('profileImage', {
   maxFileSize: 2 * 1024 * 1024 // 2MB
 });
 
+/**
+ * Review images upload
+ * Accepts up to 5 images
+ */
+const reviewImageUpload = uploadMultiple('images', 5);
+
 module.exports = {
   createUpload,
   uploadSingle,
@@ -237,5 +243,6 @@ module.exports = {
   cleanupOnError,
   productImageUpload,
   singleImageUpload,
-  profileImageUpload
+  profileImageUpload,
+  reviewImageUpload
 };

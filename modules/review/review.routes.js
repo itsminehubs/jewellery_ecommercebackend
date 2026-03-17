@@ -1,18 +1,19 @@
 const express = require('express');
 const router = express.Router();
 const reviewController = require('./review.controller');
-const { protect, restrictTo } = require('../../middleware/auth');
-const { upload } = require('../../utils/cloudinary');
+const { authenticate } = require('../../middlewares/auth.middleware');
+const { isAdmin } = require('../../middlewares/admin.middleware');
+const { reviewImageUpload } = require('../../middlewares/upload.middleware');
 
 // Public routes
 router.get('/product/:productId', reviewController.getProductReviews);
 
 // Protected routes
-router.use(protect);
-router.post('/', upload.array('images', 5), reviewController.createReview);
+router.use(authenticate);
+router.post('/', reviewImageUpload, reviewController.createReview);
 
 // Admin routes
-router.use(restrictTo('admin'));
+router.use(isAdmin);
 router.get('/', reviewController.getAllReviews);
 router.patch('/:reviewId/approve', reviewController.approveReview);
 

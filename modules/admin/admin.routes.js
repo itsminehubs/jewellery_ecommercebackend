@@ -5,6 +5,8 @@ const { authenticate } = require('../../middlewares/auth.middleware');
 const { isAdmin } = require('../../middlewares/admin.middleware');
 const { adminLimiter } = require('../../middlewares/rateLimiter.middleware');
 
+const { uploadSingle } = require('../../middlewares/upload.middleware');
+
 router.use(authenticate);
 router.use(isAdmin);
 router.use(adminLimiter);
@@ -19,6 +21,6 @@ router.get('/stock-analytics', adminController.getStockAnalytics);
 router.get('/sales-reports', adminController.getSalesReports);
 router.get('/stock-list', adminController.getStockList);
 router.get('/bulk-export', adminController.exportProducts);
-router.post('/bulk-import', require('../../middlewares/upload.middleware').upload.single('file'), adminController.importProducts);
+router.post('/bulk-import', uploadSingle('file'), adminController.importProducts);
 
 module.exports = router;

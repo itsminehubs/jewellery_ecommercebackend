@@ -1,47 +1,29 @@
 const reviewService = require('./review.service');
-const catchAsync = require('../../utils/catchAsync');
-const sendResponse = require('../../utils/sendResponse');
+const { asyncHandler } = require('../../middlewares/error.middleware');
+const ApiResponse = require('../../utils/ApiResponse');
 
-const createReview = catchAsync(async (req, res) => {
+const createReview = asyncHandler(async (req, res) => {
     const review = await reviewService.createReview({
         ...req.body,
         user: req.user._id,
         images: req.files ? req.files.map(file => ({ url: file.path, public_id: file.filename })) : []
     });
-    sendResponse(res, {
-        statusCode: 201,
-        success: true,
-        message: 'Review submitted successfully. It will be visible after approval.',
-        data: review
-    });
+    ApiResponse.created(review, 'Review submitted successfully. It will be visible after approval.').send(res);
 });
 
-const getProductReviews = catchAsync(async (req, res) => {
+const getProductReviews = asyncHandler(async (req, res) => {
     const result = await reviewService.getProductReviews(req.params.productId, req.query);
-    sendResponse(res, {
-        statusCode: 200,
-        success: true,
-        data: result
-    });
+    ApiResponse.success(result, 'Product reviews fetched').send(res);
 });
 
-const approveReview = catchAsync(async (req, res) => {
+const approveReview = asyncHandler(async (req, res) => {
     const review = await reviewService.approveReview(req.params.reviewId);
-    sendResponse(res, {
-        statusCode: 200,
-        success: true,
-        message: 'Review approved successfully',
-        data: review
-    });
+    ApiResponse.success(review, 'Review approved successfully').send(res);
 });
 
-const getAllReviews = catchAsync(async (req, res) => {
+const getAllReviews = asyncHandler(async (req, res) => {
     const result = await reviewService.getAllReviews(req.query, req.query);
-    sendResponse(res, {
-        statusCode: 200,
-        success: true,
-        data: result
-    });
+    ApiResponse.paginated(result.reviews, result.page, result.limit, result.total).send(res);
 });
 
 module.exports = {

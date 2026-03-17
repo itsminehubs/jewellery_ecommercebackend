@@ -1,6 +1,6 @@
 const Category = require('./category.model');
 const slugify = require('slugify');
-const { uploadImage, deleteImage } = require('../../utils/cloudinary');
+const { uploadImage, deleteImage } = require('../../config/cloudinary');
 const ApiError = require('../../utils/ApiError');
 const logger = require('../../utils/logger');
 
