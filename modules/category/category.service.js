@@ -26,7 +26,7 @@ const createCategory = async (categoryData, file) => {
     if (file) {
         const uploadResult = await uploadImage(file.path, 'categories');
         image = {
-            url: uploadResult.secure_url,
+            url: uploadResult.url,
             public_id: uploadResult.public_id
         };
     }
@@ -67,7 +67,7 @@ const updateCategory = async (id, categoryData, file) => {
 
         const uploadResult = await uploadImage(file.path, 'categories');
         category.image = {
-            url: uploadResult.secure_url,
+            url: uploadResult.url,
             public_id: uploadResult.public_id
         };
     } else if (categoryData.removeImage === 'true' && category.image && category.image.public_id) {
