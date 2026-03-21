@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { USER_ROLES } = require('../../utils/constants');
+const { hashPassword, comparePassword } = require('../../utils/hash');
 
 const addressSchema = new mongoose.Schema({
   type: {
@@ -72,6 +73,10 @@ const userSchema = new mongoose.Schema({
     type: String,
     enum: Object.values(USER_ROLES),
     default: USER_ROLES.USER
+  },
+  password: {
+    type: String,
+    select: false
   },
   profileImage: {
     url: String,
@@ -182,8 +187,13 @@ userSchema.virtual('isLocked').get(function () {
 });
 
 // Pre-save middleware
-userSchema.pre('save', async function () {
+userSchema.pre('save', async function (next) {
   try {
+    // Hash password if modified
+    if (this.isModified('password') && this.password) {
+      this.password = await hashPassword(this.password);
+    }
+
     // Ensure only one default address
     if (this.isModified('addresses') && this.addresses.length > 0) {
       const defaultAddresses = this.addresses.filter(addr => addr.isDefault);
@@ -293,6 +303,15 @@ userSchema.methods.removeFromWishlist = async function (productId) {
 
   return await this.save();
 };
+/**
+ * Check if password matches
+ * @param {string} password - Password to check
+ * @returns {Promise<boolean>}
+ */
+userSchema.methods.isPasswordMatch = async function (password) {
+  return await comparePassword(password, this.password);
+};
+
 /**
  * Clear wishlist
  * @returns {Promise<User>}

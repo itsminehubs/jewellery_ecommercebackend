@@ -7,6 +7,17 @@ const { otpLimiter, authLimiter } = require('../../middlewares/rateLimiter.middl
 const validate = require('../../middlewares/validate.middleware');
 
 /**
+ * @route   POST /api/v1/auth/login
+ * @desc    Login with email/phone and password
+ * @access  Public
+ */
+router.post(
+  '/login',
+  authLimiter,
+  authController.login
+);
+
+/**
  * @route   POST /api/v1/auth/send-otp
  * @desc    Send OTP to phone number
  * @access  Public
@@ -73,6 +84,39 @@ router.get(
   '/me',
   authenticate,
   authController.getCurrentUser
+);
+
+/**
+ * @route   POST /api/v1/auth/verify-pos-override
+ * @desc    Verify credentials for POS billing override
+ * @access  Public (Check inside controller)
+ */
+router.post(
+  '/verify-pos-override',
+  authLimiter,
+  authController.verifyPOSOverride
+);
+
+/**
+ * @route   POST /api/v1/auth/forgot-password
+ * @desc    Forgot password (send OTP)
+ * @access  Public
+ */
+router.post(
+  '/forgot-password',
+  authLimiter,
+  authController.forgotPassword
+);
+
+/**
+ * @route   POST /api/v1/auth/reset-password
+ * @desc    Reset password
+ * @access  Public
+ */
+router.post(
+  '/reset-password',
+  authLimiter,
+  authController.resetPassword
 );
 
 module.exports = router;

@@ -4,10 +4,121 @@
 
 // User Roles
 const USER_ROLES = {
-  USER: 'user',
+  SUPER_ADMIN: 'super_admin',
   ADMIN: 'admin',
-  STAFF: 'staff',
-  MODERATOR: 'moderator'
+  STORE_MANAGER: 'store_manager',
+  SALES_STAFF: 'sales_staff',
+  INVENTORY_STAFF: 'inventory_staff',
+  CUSTOMER_SUPPORT: 'customer_support',
+  MARKETING_EXECUTIVE: 'marketing_executive',
+  ACCOUNTS_FINANCE: 'accounts_finance',
+  USER: 'user'
+};
+
+// Permission Constants
+const PERMISSIONS = {
+  // System Level
+  MANAGE_ADMINS: 'manage_admins',
+  MANAGE_STORES: 'manage_stores',
+  CONFIGURE_GLOBAL_SETTINGS: 'configure_global_settings',
+  SET_GOLD_RATES: 'set_gold_rates',
+  MANAGE_FEATURES: 'manage_features',
+  VIEW_AUDIT_LOGS: 'view_audit_logs',
+
+  // Product & Inventory
+  PRODUCT_CREATE: 'product_create',
+  PRODUCT_EDIT: 'product_edit',
+  PRODUCT_DELETE: 'product_delete',
+  PRODUCT_BULK_MANAGE: 'product_bulk_manage',
+  STOCK_TRANSFER: 'stock_transfer',
+  STOCK_OVERRIDE: 'stock_override',
+  STOCK_MANAGE: 'stock_manage',
+
+  // Analytics & Reports
+  VIEW_GLOBAL_REPORTS: 'view_global_reports',
+  VIEW_STORE_REPORTS: 'view_store_reports',
+  VIEW_FINANCIAL_REPORTS: 'view_financial_reports',
+
+  // Users & Customers
+  CUSTOMER_VIEW: 'customer_view',
+  CUSTOMER_DELETE: 'customer_delete',
+  CUSTOMER_BLOCK: 'customer_block',
+  MANAGE_EMPLOYEES: 'manage_employees',
+
+  // Orders
+  ORDER_VIEW_ALL: 'order_view_all',
+  ORDER_VIEW_STORE: 'order_view_store',
+  ORDER_STATUS_UPDATE: 'order_status_update',
+  ORDER_CANCEL: 'order_cancel',
+  ORDER_REFUND: 'order_refund',
+  ORDER_MODIFY: 'order_modify',
+
+  // POS
+  POS_ACCESS_ALL: 'pos_access_all',
+  POS_ACCESS_ASSIGNED: 'pos_access_assigned',
+  POS_BILLING: 'pos_billing',
+  POS_OVERRIDE_BILL: 'pos_override_bill',
+  POS_VIEW_CASH_REPORTS: 'pos_view_cash_reports',
+
+  // Marketing
+  MANAGE_COUPONS: 'manage_coupons',
+  MANAGE_BANNERS: 'manage_banners',
+  SEND_NOTIFICATIONS: 'send_notifications',
+
+  // Community & Reviews
+  MANAGE_REVIEWS: 'manage_reviews',
+  MANAGE_CATEGORIES: 'manage_categories',
+  MANAGE_CONTACTS: 'manage_contacts'
+};
+
+// Role-Permission Mapping
+const ROLE_PERMISSIONS = {
+  [USER_ROLES.SUPER_ADMIN]: Object.values(PERMISSIONS),
+  
+  [USER_ROLES.ADMIN]: [
+    PERMISSIONS.PRODUCT_CREATE, PERMISSIONS.PRODUCT_EDIT, PERMISSIONS.PRODUCT_DELETE,
+    PERMISSIONS.CONFIGURE_GLOBAL_SETTINGS, // To manage pricing formulas
+    PERMISSIONS.ORDER_VIEW_ALL, PERMISSIONS.ORDER_STATUS_UPDATE, PERMISSIONS.ORDER_CANCEL,
+    PERMISSIONS.STOCK_MANAGE, PERMISSIONS.VIEW_STORE_REPORTS,
+    PERMISSIONS.CUSTOMER_VIEW, PERMISSIONS.MANAGE_COUPONS,
+    PERMISSIONS.MANAGE_BANNERS, PERMISSIONS.SEND_NOTIFICATIONS, 
+    PERMISSIONS.POS_VIEW_CASH_REPORTS, PERMISSIONS.VIEW_GLOBAL_REPORTS,
+    PERMISSIONS.MANAGE_EMPLOYEES, PERMISSIONS.MANAGE_REVIEWS,
+    PERMISSIONS.MANAGE_CATEGORIES, PERMISSIONS.MANAGE_CONTACTS
+  ],
+
+  [USER_ROLES.STORE_MANAGER]: [
+    PERMISSIONS.POS_ACCESS_ASSIGNED, PERMISSIONS.POS_BILLING, PERMISSIONS.POS_VIEW_CASH_REPORTS,
+    PERMISSIONS.ORDER_VIEW_STORE, PERMISSIONS.ORDER_REFUND, // Approve returns/exchanges
+    PERMISSIONS.STOCK_MANAGE, PERMISSIONS.STOCK_TRANSFER,
+    PERMISSIONS.CUSTOMER_VIEW, PERMISSIONS.VIEW_STORE_REPORTS
+  ],
+
+  [USER_ROLES.SALES_STAFF]: [
+    PERMISSIONS.POS_BILLING, PERMISSIONS.CUSTOMER_VIEW
+  ],
+
+  [USER_ROLES.INVENTORY_STAFF]: [
+    PERMISSIONS.STOCK_MANAGE, PERMISSIONS.STOCK_TRANSFER, PERMISSIONS.VIEW_STORE_REPORTS
+  ],
+
+  [USER_ROLES.CUSTOMER_SUPPORT]: [
+    PERMISSIONS.CUSTOMER_VIEW, PERMISSIONS.ORDER_VIEW_ALL, PERMISSIONS.ORDER_STATUS_UPDATE,
+    PERMISSIONS.ORDER_REFUND, // Raise return requests
+    PERMISSIONS.MANAGE_REVIEWS, PERMISSIONS.MANAGE_CONTACTS
+  ],
+
+  [USER_ROLES.MARKETING_EXECUTIVE]: [
+    PERMISSIONS.MANAGE_COUPONS, PERMISSIONS.MANAGE_BANNERS, PERMISSIONS.SEND_NOTIFICATIONS,
+    PERMISSIONS.VIEW_GLOBAL_REPORTS
+  ],
+
+  [USER_ROLES.ACCOUNTS_FINANCE]: [
+    PERMISSIONS.VIEW_FINANCIAL_REPORTS, PERMISSIONS.ORDER_VIEW_ALL, 
+    PERMISSIONS.VIEW_GLOBAL_REPORTS, PERMISSIONS.PRODUCT_BULK_MANAGE // Export invoices
+  ],
+
+  [USER_ROLES.USER]: []
 };
 
 // Order Status
@@ -265,6 +376,8 @@ const INVOICE_STATUS = {
 module.exports = {
   INVOICE_STATUS,
   USER_ROLES,
+  PERMISSIONS,
+  ROLE_PERMISSIONS,
   ORDER_STATUS,
   PAYMENT_STATUS,
   PAYMENT_METHODS,
@@ -291,3 +404,4 @@ module.exports = {
   EMAIL_TEMPLATES,
   HTTP_STATUS
 };
+

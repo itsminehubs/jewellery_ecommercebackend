@@ -16,6 +16,20 @@ const sendOTP = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Login with email/phone and password
+ * @route POST /api/v1/auth/login
+ * @access Public
+ */
+const login = asyncHandler(async (req, res) => {
+  const { phone, email, password } = req.body;
+  const identifier = phone || email;
+
+  const result = await authService.login(identifier, password);
+
+  ApiResponse.success(result, result.message).send(res);
+});
+
+/**
  * Verify OTP and login/register
  * @route POST /api/v1/auth/verify-otp
  * @access Public
@@ -77,11 +91,48 @@ const getCurrentUser = asyncHandler(async (req, res) => {
   ApiResponse.success(req.user, 'User fetched successfully').send(res);
 });
 
+/**
+ * Verify credentials for POS Override
+ * @route POST /api/v1/auth/verify-pos-override
+ * @access Private/Public (Staff only)
+ */
+const verifyPOSOverride = asyncHandler(async (req, res) => {
+  const { phone, email, password } = req.body;
+  const result = await authService.verifyPOSOverride(phone || email, password);
+  ApiResponse.success(result, result.message).send(res);
+});
+
+/**
+ * Forgot password (send OTP)
+ * @route POST /api/v1/auth/forgot-password
+ * @access Public
+ */
+const forgotPassword = asyncHandler(async (req, res) => {
+  const { phone, email } = req.body;
+  const result = await authService.forgotPassword(phone || email);
+  ApiResponse.success(result, 'OTP sent to your registered phone number').send(res);
+});
+
+/**
+ * Reset password
+ * @route POST /api/v1/auth/reset-password
+ * @access Public
+ */
+const resetPassword = asyncHandler(async (req, res) => {
+  const { phone, otp, newPassword } = req.body;
+  const result = await authService.resetPassword(phone, otp, newPassword);
+  ApiResponse.success(result, result.message).send(res);
+});
+
 module.exports = {
   sendOTP,
   verifyOTP,
+  login,
   refreshToken,
   logout,
   checkPhone,
-  getCurrentUser
+  getCurrentUser,
+  verifyPOSOverride,
+  forgotPassword,
+  resetPassword
 };

@@ -124,6 +124,85 @@ const verifyOTP = async (phone, otp, name = null, email = null) => {
   }
 };
 
+/**
+ * Login user with phone/email and password
+ * @param {string} phoneOrEmail - Phone or Email
+ * @param {string} password - Password
+ * @returns {Promise<Object>}
+ */
+const login = async (phoneOrEmail, password) => {
+  try {
+    // Find user by phone or email
+    let user = await User.findOne({
+      $or: [
+        { phone: phoneOrEmail },
+        { email: phoneOrEmail.toLowerCase() }
+      ]
+    }).select('+password');
+
+    if (!user) {
+      throw ApiError.unauthorized('Invalid credentials');
+    }
+
+    if (!user.isActive) {
+      throw ApiError.forbidden('Account is deactivated');
+    }
+
+    if (user.isLocked) {
+      throw ApiError.forbidden('Account is temporarily locked');
+    }
+
+    // Check password
+    if (!user.password) {
+      // If user exists but has no password (e.g. OTP only), they must set one or use OTP
+      throw ApiError.badRequest('Please use OTP login or set a password first');
+    }
+
+    const isMatch = await user.isPasswordMatch(password);
+    if (!isMatch) {
+      await user.incLoginAttempts();
+      throw ApiError.unauthorized('Invalid credentials');
+    }
+
+    // Reset attempts on success
+    await user.resetLoginAttempts();
+
+    // Update last login
+    user.lastLogin = new Date();
+    
+    // Generate tokens
+    const tokens = generateTokens(user._id.toString(), user.role);
+    user.refreshToken = tokens.refreshToken;
+    await user.save();
+
+    // Cache user data
+    await cacheHelper.set(
+      `${CACHE_KEYS.USER}${user._id}`,
+      JSON.stringify(user.toJSON()),
+      CACHE_TTL.MEDIUM
+    );
+
+    await cacheHelper.set(
+      `${CACHE_KEYS.REFRESH_TOKEN}${user._id}`,
+      tokens.refreshToken,
+      7 * 24 * 60 * 60
+    );
+
+    const userResponse = user.toJSON();
+    delete userResponse.refreshToken;
+
+    return {
+      message: SUCCESS_MESSAGES.LOGIN_SUCCESS,
+      user: userResponse,
+      tokens
+    };
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    logger.error(`Error during login: ${error.message}`);
+    throw ApiError.internal('Login failed');
+  }
+};
+
 
 /**
  * Refresh access token
@@ -236,10 +315,97 @@ const checkPhoneExists = async (phone) => {
   };
 };
 
+/**
+ * Verify credentials for POS Override (Managers/Admins)
+ * @param {string} phoneOrEmail - Phone or Email
+ * @param {string} password - Password
+ * @returns {Promise<Object>}
+ */
+const verifyPOSOverride = async (phoneOrEmail, password) => {
+  // Reuse existing login logic for credential & status checks
+  const result = await login(phoneOrEmail, password);
+  const user = result.user;
+  
+  const { ROLE_PERMISSIONS, PERMISSIONS } = require('../../utils/constants');
+  
+  const allowedPermissions = ROLE_PERMISSIONS[user.role] || [];
+  if (!allowedPermissions.includes(PERMISSIONS.POS_OVERRIDE_BILL)) {
+    throw ApiError.forbidden('You do not have permission to override POS bills');
+  }
+
+  return {
+    success: true,
+    message: 'Override authorized',
+    manager: {
+      id: user._id,
+      name: user.name,
+      role: user.role
+    }
+  };
+};
+
+/**
+ * Initiate forgot password (send OTP)
+ * @param {string} phoneOrEmail - Phone or Email
+ * @returns {Promise<Object>}
+ */
+const forgotPassword = async (phoneOrEmail) => {
+  const user = await User.findOne({
+    $or: [
+      { phone: phoneOrEmail },
+      { email: phoneOrEmail.toLowerCase() }
+    ]
+  });
+
+  if (!user) {
+    throw ApiError.notFound('No account found with this phone/email');
+  }
+
+  if (!user.phone) {
+    throw ApiError.badRequest('Phone number not associated with this account. Please contact admin.');
+  }
+
+  return await sendOTP(user.phone);
+};
+
+/**
+ * Reset password using OTP
+ * @param {string} phone - Phone number
+ * @param {string} otp - OTP code
+ * @param {string} newPassword - New password
+ * @returns {Promise<Object>}
+ */
+const resetPassword = async (phone, otp, newPassword) => {
+  const otpKey = `${CACHE_KEYS.OTP}${phone}`;
+  const storedOTP = await cacheHelper.get(otpKey);
+
+  if (!storedOTP || String(storedOTP) !== String(otp)) {
+    throw ApiError.badRequest(ERROR_MESSAGES.INVALID_OTP);
+  }
+
+  const user = await User.findByPhone(phone);
+  if (!user) {
+    throw ApiError.notFound('User not found');
+  }
+
+  user.password = newPassword;
+  await user.save();
+  await cacheHelper.del(otpKey);
+
+  return {
+    message: 'Password reset successfully'
+  };
+};
+
 module.exports = {
   sendOTP,
   verifyOTP,
+  login,
   refreshAccessToken,
   logout,
-  checkPhoneExists
+  checkPhoneExists,
+  verifyPOSOverride,
+  forgotPassword,
+  resetPassword
 };
+

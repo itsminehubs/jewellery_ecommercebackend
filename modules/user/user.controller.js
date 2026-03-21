@@ -4,6 +4,8 @@ const ApiResponse = require('../../utils/ApiResponse');
 const ApiError = require('../../utils/ApiError');
 const { asyncHandler } = require('../../middlewares/error.middleware');
 const { deleteFile } = require('../../middlewares/upload.middleware');
+const { cacheHelper } = require('../../config');
+const { CACHE_KEYS } = require('../../utils/constants');
 
 const getProfile = asyncHandler(async (req, res) => {
   const user = await userService.getUser(req.user._id);

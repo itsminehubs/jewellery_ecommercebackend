@@ -22,8 +22,15 @@ const getLatestRate = asyncHandler(async (req, res) => {
     ApiResponse.success(rate, 'Latest gold rate fetched').send(res);
 });
 
+const deleteRate = asyncHandler(async (req, res) => {
+    const { metal, purity } = req.params;
+    await goldRateService.deleteRate(metal, purity);
+    ApiResponse.success(null, 'Gold rate deleted successfully').send(res);
+});
+
 module.exports = {
     updateRate,
     getCurrentRates,
     getLatestRate,
+    deleteRate,
 };

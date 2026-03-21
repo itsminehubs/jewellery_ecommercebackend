@@ -24,11 +24,14 @@ const validate = (schema) => {
       const errorMessage = error.details
         .map((details) => details.message)
         .join(', ');
-      
+
       return next(ApiError.badRequest(errorMessage));
     }
 
-    Object.assign(req, value);
+    if (value.body) req.body = value.body;
+    if (value.query) req.query = value.query;
+    if (value.params) req.params = value.params;
+
     return next();
   };
 };

@@ -36,6 +36,7 @@ router.use('/stores', storeRoutes);
 router.use('/gold-rates', goldRateRoutes);
 router.use('/pos-orders', posOrderRoutes);
 router.use('/coupons', couponRoutes);
+router.use('/reviews', reviewRoutes);
 
 // API info
 router.get('/', (req, res) => {

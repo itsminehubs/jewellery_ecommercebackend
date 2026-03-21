@@ -6,7 +6,8 @@ const { getAllCategories,
     updateCategory,
     deleteCategory } = require('./category.controller');
 const { authenticate } = require('../../middlewares/auth.middleware');
-const { isAdmin } = require('../../middlewares/admin.middleware');
+const { checkPermission } = require('../../middlewares/rbac.middleware');
+const { PERMISSIONS } = require('../../utils/constants');
 const { singleImageUpload } = require('../../middlewares/upload.middleware');
 
 router.get('/', getAllCategories);
@@ -14,7 +15,7 @@ router.get('/:id', getCategory);
 
 // Protected routes (Admin only)
 router.use(authenticate);
-router.use(isAdmin);
+router.use(checkPermission(PERMISSIONS.MANAGE_CATEGORIES));
 
 router.post('/', singleImageUpload, createCategory);
 router.put('/:id', singleImageUpload, updateCategory);

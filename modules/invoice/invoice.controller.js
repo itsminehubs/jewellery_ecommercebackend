@@ -31,7 +31,9 @@ const getInvoice = asyncHandler(async (req, res) => {
   const { invoiceId } = req.params;
   const invoice = await Invoice.findById(invoiceId).populate('order').populate('user', 'name email');
   if (!invoice) throw ApiError.notFound('Invoice not found');
-  if (req.user.role !== 'admin' && invoice.user.toString() !== req.user._id.toString()) {
+  
+  const isStaff = req.user.role !== 'user';
+  if (!isStaff && invoice.user.toString() !== req.user._id.toString()) {
     throw ApiError.forbidden('You are not authorized to view this invoice');
   }
   ApiResponse.success(invoice, 'Invoice fetched successfully').send(res);
@@ -43,9 +45,24 @@ const getAllInvoices = asyncHandler(async (req, res) => {
     page: req.query.page || 1,
     limit: req.query.limit || 10
   };
-  if (req.user.role !== 'admin') filters.user = req.user._id;
+  
+  const isStaff = req.user.role !== 'user';
+  if (!isStaff) filters.user = req.user._id;
+  
   const result = await invoiceService.getAllInvoices(filters, options);
   ApiResponse.paginated(result.invoices, result.page, result.limit, result.total).send(res);
+});
+
+const getInvoiceByOrder = asyncHandler(async (req, res) => {
+  const { orderId } = req.params;
+  const invoice = await Invoice.findOne({ order: orderId }).populate('order').populate('user', 'name email');
+  if (!invoice) throw ApiError.notFound('Invoice not found');
+  
+  const isStaff = req.user.role !== 'user';
+  if (!isStaff && invoice.user.toString() !== req.user._id.toString()) {
+    throw ApiError.forbidden('You are not authorized to view this invoice');
+  }
+  ApiResponse.success(invoice, 'Invoice fetched successfully').send(res);
 });
 
 const deleteInvoice = asyncHandler(async (req, res) => {
@@ -58,6 +75,7 @@ module.exports = {
   generateInvoice,
   downloadInvoice,
   getInvoice,
+  getInvoiceByOrder,
   getAllInvoices,
   deleteInvoice
 };

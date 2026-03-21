@@ -68,7 +68,9 @@ const getProducts = {
         search: Joi.string(),
         sku: Joi.string(),
         minPrice: Joi.number().min(0),
-        maxPrice: Joi.number().min(0)
+        maxPrice: Joi.number().min(0),
+        featured: Joi.boolean(),
+        trending: Joi.boolean()
     })
 };
 

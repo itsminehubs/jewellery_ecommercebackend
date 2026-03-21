@@ -7,14 +7,15 @@ const Order = require('../order/order.model');
 const ApiError = require('../../utils/ApiError');
 const logger = require('../../utils/logger');
 
-const getDashboardStats = async () => {
+const getDashboardStats = async (shopId = null) => {
+  const filter = shopId ? { shop_id: shopId } : {};
   const totalUsers = await User.countDocuments({ role: 'user' });
   const totalProducts = await Product.countDocuments();
-  const totalOrders = await Order.countDocuments();
-  const pendingOrders = await Order.countDocuments({ status: 'pending' });
+  const totalOrders = await Order.countDocuments(filter);
+  const pendingOrders = await Order.countDocuments({ ...filter, status: 'pending' });
 
   const revenue = await Order.aggregate([
-    { $match: { paymentStatus: 'completed' } },
+    { $match: { ...filter, paymentStatus: 'completed' } },
     { $group: { _id: null, total: { $sum: '$total' } } }
   ]);
 
@@ -23,7 +24,7 @@ const getDashboardStats = async () => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const todayRevenueData = await Order.aggregate([
-    { $match: { paymentStatus: 'completed', createdAt: { $gte: today } } },
+    { $match: { ...filter, paymentStatus: 'completed', createdAt: { $gte: today } } },
     { $group: { _id: null, total: { $sum: '$total' } } }
   ]);
 
@@ -31,7 +32,7 @@ const getDashboardStats = async () => {
 
   // POS vs Online Split
   const channelSplit = await Order.aggregate([
-    { $match: { paymentStatus: 'completed' } },
+    { $match: { ...filter, paymentStatus: 'completed' } },
     { $group: { _id: '$source', total: { $sum: '$total' }, count: { $sum: 1 } } }
   ]);
 
@@ -53,7 +54,7 @@ const adjustLoyaltyPoints = async (userId, points, reason = 'Admin Adjustment') 
   if (!user) throw ApiError.notFound('User not found');
 
   user.loyaltyPoints = (user.loyaltyPoints || 0) + Number(points);
-  
+
   // LOG THE ADJUSTMENT (In a real system, we'd have a LoyaltyHistory model)
   logger.info(`Admin adjusted points for ${userId}: ${points} points. Reason: ${reason}`);
 
@@ -97,7 +98,6 @@ const getAllUsers = async (filters = {}, options = {}) => {
 
   const finalFilters = {
     ...filters,
-    role: 'user' // 🔐 force only normal users
   };
 
   const users = await User.find(finalFilters)
@@ -111,9 +111,95 @@ const getAllUsers = async (filters = {}, options = {}) => {
 
   const total = await User.countDocuments(finalFilters);
 
-  return { users, total, page, limit };
+  return { users: users || [], total, page, limit };
 };
 
+const createEmployee = async (employeeData, requesterRole) => {
+  const { phone, email, name, role, password } = employeeData;
+  const { USER_ROLES } = require('../../utils/constants');
+
+  // Restriction: ADMIN can only create operational staff
+  if (requesterRole === USER_ROLES.ADMIN) {
+    const allowedRolesForAdmin = [
+      USER_ROLES.STORE_MANAGER,
+      USER_ROLES.SALES_STAFF,
+      USER_ROLES.INVENTORY_STAFF,
+      USER_ROLES.CUSTOMER_SUPPORT,
+      USER_ROLES.MARKETING_EXECUTIVE,
+      USER_ROLES.ACCOUNTS_FINANCE
+    ];
+    if (!allowedRolesForAdmin.includes(role)) {
+      throw ApiError.forbidden('Admins can only create operational staff, not other administrators.');
+    }
+  }
+
+  // Check if user already exists
+  const existingUser = await User.findOne({ 
+    $or: [{ phone }, { email: email?.toLowerCase() }] 
+  });
+  
+  if (existingUser) {
+    throw ApiError.badRequest('User with this phone or email already exists');
+  }
+
+  const employee = new User({
+    phone,
+    email: email || null,
+    name,
+    password, // This will be hashed by the User model's pre-save hook
+    role: role || USER_ROLES.SALES_STAFF,
+    isPhoneVerified: true,
+    isEmailVerified: !!email,
+    isActive: true
+  });
+
+  await employee.save();
+  logger.info(`Admin (${requesterRole}) created new employee: ${employee._id} with role ${employee.role}`);
+  
+  return employee;
+};
+
+const updateEmployee = async (userId, updateData, requesterRole) => {
+  const { phone, email, name, role, password } = updateData;
+  const { USER_ROLES } = require('../../utils/constants');
+
+  const targetUser = await User.findById(userId);
+  if (!targetUser) throw ApiError.notFound('Employee not found');
+
+  // Restriction: ADMIN cannot modify another ADMIN or SUPER_ADMIN
+  if (requesterRole === USER_ROLES.ADMIN) {
+    if (targetUser.role === USER_ROLES.ADMIN || targetUser.role === USER_ROLES.SUPER_ADMIN) {
+      throw ApiError.forbidden('Admins cannot modify other administrators.');
+    }
+    
+    // Restriction: If role is being changed, ADMIN cannot promote to administrative roles
+    if (role && (role === USER_ROLES.ADMIN || role === USER_ROLES.SUPER_ADMIN)) {
+      throw ApiError.forbidden('Admins cannot promote users to administrative roles.');
+    }
+  }
+
+  // Check unique constraints if phone or email is changing
+  if (phone && phone !== targetUser.phone) {
+    const phoneExists = await User.findOne({ phone, _id: { $ne: userId } });
+    if (phoneExists) throw ApiError.badRequest('Phone number already in use');
+    targetUser.phone = phone;
+  }
+
+  if (email && email !== targetUser.email) {
+    const emailExists = await User.findOne({ email: email.toLowerCase(), _id: { $ne: userId } });
+    if (emailExists) throw ApiError.badRequest('Email already in use');
+    targetUser.email = email.toLowerCase();
+  }
+
+  if (name) targetUser.name = name;
+  if (role) targetUser.role = role;
+  if (password) targetUser.password = password; // Hashed by pre-save hook
+
+  await targetUser.save();
+  logger.info(`Admin (${requesterRole}) updated employee: ${userId}`);
+  
+  return targetUser;
+};
 
 const toggleUserStatus = async (userId) => {
   const user = await User.findById(userId);
@@ -123,9 +209,53 @@ const toggleUserStatus = async (userId) => {
   await user.save();
 
   logger.info(`User ${userId} status toggled to ${user.isActive}`);
-
   return user;
 };
+
+const updateUserRole = async (userId, role, requesterRole) => {
+  const { USER_ROLES } = require('../../utils/constants');
+  
+  const targetUser = await User.findById(userId);
+  if (!targetUser) throw ApiError.notFound('User not found');
+
+  // Restriction: ADMIN cannot modify another ADMIN or SUPER_ADMIN
+  if (requesterRole === USER_ROLES.ADMIN) {
+    if (targetUser.role === USER_ROLES.ADMIN || targetUser.role === USER_ROLES.SUPER_ADMIN) {
+      throw ApiError.forbidden('Admins cannot modify roles of other administrators.');
+    }
+    
+    // Restriction: ADMIN cannot promote someone to ADMIN or SUPER_ADMIN
+    if (role === USER_ROLES.ADMIN || role === USER_ROLES.SUPER_ADMIN) {
+      throw ApiError.forbidden('Admins cannot promote users to administrative roles.');
+    }
+  }
+
+  targetUser.role = role;
+  await targetUser.save();
+
+  logger.info(`Admin (${requesterRole}) updated user ${userId} role to ${role}`);
+  return targetUser;
+};
+
+const deleteUser = async (userId, requesterRole) => {
+  const { USER_ROLES } = require('../../utils/constants');
+  
+  const user = await User.findById(userId);
+  if (!user) throw ApiError.notFound('User not found');
+
+  // Restriction: ADMIN cannot delete another ADMIN or SUPER_ADMIN
+  if (requesterRole === USER_ROLES.ADMIN) {
+    if (user.role === USER_ROLES.ADMIN || user.role === USER_ROLES.SUPER_ADMIN) {
+      throw ApiError.forbidden('Admins cannot delete other administrators.');
+    }
+  }
+
+  await User.findByIdAndDelete(userId);
+  
+  logger.info(`Admin (${requesterRole}) deleted user: ${userId}`);
+  return { message: 'User deleted successfully' };
+};
+
 
 const getStockAnalytics = async () => {
   // 1. Total Stock & Value
@@ -167,10 +297,10 @@ const getStockAnalytics = async () => {
   };
 };
 
-const getSalesReports = async (period) => {
+const getSalesReports = async (period, shopId = null) => {
   let groupBy = {};
   const now = new Date();
-  let matchStage = {};
+  let matchStage = shopId ? { shop_id: shopId } : {};
 
   if (period === 'daily') {
     matchStage = {
@@ -355,6 +485,10 @@ module.exports = {
   updateOrderStatus,
   getAllUsers,
   toggleUserStatus,
+  updateUserRole,
+  updateEmployee,
+  createEmployee,
+  deleteUser,
   getStockAnalytics,
   getSalesReports,
   getStockList,

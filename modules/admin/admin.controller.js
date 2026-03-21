@@ -10,7 +10,8 @@ const adjustLoyaltyPoints = asyncHandler(async (req, res) => {
 });
 
 const getDashboard = asyncHandler(async (req, res) => {
-  const stats = await adminService.getDashboardStats();
+  const { shopId } = req.query;
+  const stats = await adminService.getDashboardStats(shopId);
   ApiResponse.success(stats, 'Dashboard stats fetched').send(res);
 });
 
@@ -53,9 +54,25 @@ const getAllUsers = asyncHandler(async (req, res) => {
 });
 
 
+const updateEmployee = asyncHandler(async (req, res) => {
+  const user = await adminService.updateEmployee(req.params.id, req.body, req.user.role);
+  ApiResponse.success(user, 'Employee updated successfully').send(res);
+});
+
 const toggleUserStatus = asyncHandler(async (req, res) => {
   const user = await adminService.toggleUserStatus(req.params.id);
   ApiResponse.success(user, 'User status updated').send(res);
+});
+
+const updateUserRole = asyncHandler(async (req, res) => {
+  const { role } = req.body;
+  const user = await adminService.updateUserRole(req.params.id, role, req.user.role);
+  ApiResponse.success(user, 'User role updated').send(res);
+});
+
+const deleteUser = asyncHandler(async (req, res) => {
+  await adminService.deleteUser(req.params.id);
+  ApiResponse.success(null, 'User deleted successfully').send(res);
 });
 
 const getStockAnalytics = asyncHandler(async (req, res) => {
@@ -64,8 +81,8 @@ const getStockAnalytics = asyncHandler(async (req, res) => {
 });
 
 const getSalesReports = asyncHandler(async (req, res) => {
-  const { period } = req.query; // daily, weekly, monthly, yearly
-  const reports = await adminService.getSalesReports(period || 'monthly');
+  const { period, shopId } = req.query; // daily, weekly, monthly, yearly
+  const reports = await adminService.getSalesReports(period || 'monthly', shopId);
   ApiResponse.success(reports, 'Sales reports fetched').send(res);
 });
 
@@ -92,16 +109,25 @@ const importProducts = asyncHandler(async (req, res) => {
   ApiResponse.success(result, 'Bulk import completed').send(res);
 });
 
+const createEmployee = asyncHandler(async (req, res) => {
+  const employee = await adminService.createEmployee(req.body, req.user.role);
+  ApiResponse.success(employee, 'Employee created successfully').send(res);
+});
+
 module.exports = {
   getDashboard,
   getAllOrders,
   updateOrderStatus,
   getAllUsers,
   toggleUserStatus,
+  updateUserRole,
   getStockAnalytics,
   getSalesReports,
   getStockList,
   exportProducts,
   importProducts,
-  adjustLoyaltyPoints
+  updateEmployee,
+  adjustLoyaltyPoints,
+  createEmployee,
+  deleteUser
 };

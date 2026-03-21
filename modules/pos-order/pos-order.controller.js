@@ -1,60 +1,48 @@
 const posOrderService = require('./pos-order.service');
+const ApiResponse = require('../../utils/ApiResponse');
+const { asyncHandler } = require('../../middlewares/error.middleware');
 
-const createOrder = async (req, res) => {
-    try {
-        const orderData = {
-            ...req.body,
-            billedBy: req.user._id,
-            shop_id: req.headers['x-shop-id'] || req.body.shop_id // Get shop_id from header or body
-        };
+const createOrder = asyncHandler(async (req, res) => {
+    const orderData = {
+        ...req.body,
+        billedBy: req.user._id,
+        shop_id: req.headers['x-shop-id'] || req.body.shop_id
+    };
 
-        if (!orderData.shop_id) {
-            return res.status(400).json({ success: false, message: 'Shop ID is required' });
-        }
-
-        const order = await posOrderService.createOrder(orderData);
-        res.status(201).json({ success: true, data: order });
-    } catch (error) {
-        res.status(400).json({ success: false, message: error.message });
+    if (!orderData.shop_id) {
+        return ApiResponse.error('Shop ID is required', 400).send(res);
     }
-};
 
-const getStoreOrders = async (req, res) => {
-    try {
-        const shop_id = req.headers['x-shop-id'] || req.query.shop_id;
-        if (!shop_id) {
-            return res.status(400).json({ success: false, message: 'Shop ID is required' });
-        }
-        const orders = await posOrderService.getStoreOrders(shop_id, req.query);
-        res.status(200).json({ success: true, data: orders });
-    } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-    }
-};
+    const order = await posOrderService.createOrder(orderData);
+    ApiResponse.created(order, 'Order created successfully').send(res);
+});
 
-const getOrderById = async (req, res) => {
-    try {
-        const order = await posOrderService.getOrderById(req.params.id);
-        if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
-        res.status(200).json({ success: true, data: order });
-    } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+const getStoreOrders = asyncHandler(async (req, res) => {
+    const shop_id = req.headers['x-shop-id'] || req.query.shop_id;
+    if (!shop_id) {
+        return ApiResponse.error('Shop ID is required', 400).send(res);
     }
-};
+    const orders = await posOrderService.getStoreOrders(shop_id, req.query);
+    ApiResponse.success(orders, 'Orders fetched successfully').send(res);
+});
 
-const getStoreAnalytics = async (req, res) => {
-    try {
-        const shop_id = req.headers['x-shop-id'] || req.query.shop_id;
-        const { startDate, endDate } = req.query;
-        if (!shop_id || !startDate || !endDate) {
-            return res.status(400).json({ success: false, message: 'Shop ID, startDate, and endDate are required' });
-        }
-        const analytics = await posOrderService.getStoreAnalytics(shop_id, startDate, endDate);
-        res.status(200).json({ success: true, data: analytics });
-    } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+const getOrderById = asyncHandler(async (req, res) => {
+    const order = await posOrderService.getOrderById(req.params.id);
+    if (!order) {
+        return ApiResponse.error('Order not found', 404).send(res);
     }
-};
+    ApiResponse.success(order, 'Order fetched successfully').send(res);
+});
+
+const getStoreAnalytics = asyncHandler(async (req, res) => {
+    const shop_id = req.headers['x-shop-id'] || req.query.shop_id;
+    const { startDate, endDate } = req.query;
+    if (!shop_id || !startDate || !endDate) {
+        return ApiResponse.error('Shop ID, startDate, and endDate are required', 400).send(res);
+    }
+    const analytics = await posOrderService.getStoreAnalytics(shop_id, startDate, endDate);
+    ApiResponse.success(analytics, 'Analytics fetched successfully').send(res);
+});
 
 module.exports = {
     createOrder,

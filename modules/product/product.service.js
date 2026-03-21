@@ -7,22 +7,45 @@ const logger = require('../../utils/logger');
 const { PRODUCT_CATEGORIES } = require('../../utils/constants');
 
 const getAllProducts = async (filters = {}, options = {}) => {
-  const { page = 1, limit = 20, sort = '-createdAt', search, sku } = options;
+  const { 
+    page = 1, 
+    limit = 20, 
+    sort = '-createdAt', 
+    search, 
+    sku,
+    category,
+    minPrice,
+    maxPrice,
+    metalType,
+    purity,
+    gemstones,
+    style,
+    minDiscount
+  } = options;
+  
   const query = { status: 'active', ...filters };
 
-  if (sku) {
-    query.sku = sku;
+  if (sku) query.sku = sku;
+  if (search) query.$text = { $search: search };
+  if (category) query.category = category;
+  
+  if (minPrice || maxPrice) {
+    query.finalPrice = {};
+    if (minPrice) query.finalPrice.$gte = Number(minPrice);
+    if (maxPrice) query.finalPrice.$lte = Number(maxPrice);
   }
 
-  if (search) {
-    query.$text = { $search: search };
-  }
+  if (metalType) query.metalType = metalType;
+  if (purity) query.purity = purity;
+  if (gemstones) query.gemstones = gemstones;
+  if (style) query.style = style;
+  if (minDiscount) query.discount = { $gte: Number(minDiscount) };
 
   const skip = (page - 1) * limit;
-  const products = await Product.find(query).sort(sort).skip(skip).limit(limit);
+  const products = await Product.find(query).sort(sort).skip(skip).limit(Number(limit));
   const total = await Product.countDocuments(query);
 
-  return { products, total, page, limit };
+  return { products, total, page: Number(page), limit: Number(limit) };
 };
 
 const getProductById = async (productId) => {

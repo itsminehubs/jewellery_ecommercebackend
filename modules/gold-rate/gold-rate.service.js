@@ -42,8 +42,16 @@ const getCurrentRates = async () => {
     ]);
 };
 
+/**
+ * Delete all rates for a specific metal and purity
+ */
+const deleteRate = async (metal, purity) => {
+    return await GoldRate.deleteMany({ metal, purity });
+};
+
 module.exports = {
     updateRate,
     getLatestRate,
     getCurrentRates,
+    deleteRate,
 };
