@@ -2,6 +2,8 @@ const { createRazorpayOrder, verifyWebhookSignature, fetchPayment, refundPayment
 const Order = require('../order/order.model');
 const ApiError = require('../../utils/ApiError');
 const crypto = require('crypto');
+const Product = require('../product/product.model');
+const loyaltyService = require('../user/loyalty.service');
 const logger = require('../../utils/logger');
 
 const createPaymentOrder = async (orderId) => {
@@ -51,6 +53,9 @@ const verifyPayment = async (paymentData) => {
   await order.save();
   logger.info(`Payment verified for order: ${order._id}`);
 
+  // AWARD POINTS ONLY AFTER SUCCESSFUL PAYMENT
+  await loyaltyService.awardPoints(order.user, order.total);
+
   return order;
 };
 
@@ -83,6 +88,13 @@ const markPaymentFailed = async (orderId) => {
   
   await order.save();
   logger.info(`Payment failed for order: ${orderId}`);
+
+  // RESTORE STOCK ON PAYMENT FAILURE
+  for (const item of order.items) {
+    await Product.findByIdAndUpdate(item.product, {
+      $inc: { stock: item.quantity }
+    });
+  }
 
   return order;
 };

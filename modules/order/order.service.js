@@ -82,8 +82,6 @@ const createOrder = async (userId, orderData) => {
 
     await User.findByIdAndUpdate(userId, { cart: [] }, { session });
 
-    await loyaltyService.awardPoints(userId, order.total, session);
-
     await session.commitTransaction();
     logger.info(`Order created: ${order._id}`);
 
