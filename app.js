@@ -24,12 +24,10 @@ const app = express();
 app.set('trust proxy', 1);
 
 // Security
-const allowedOrigins = [
-  process.env.FRONTEND_URL,
-  process.env.ADMIN_URL,
-  'http://localhost:3000',
-  'http://localhost:5173'
-].filter(Boolean);
+const allowedOrigins = (process.env.CORS_ORIGINS || "")
+  .split(",")
+  .map(origin => origin.trim())
+  .filter(Boolean);
 
 app.use(helmet());
 app.use(cors({
