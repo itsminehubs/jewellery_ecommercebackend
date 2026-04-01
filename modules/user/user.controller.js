@@ -4,6 +4,7 @@ const ApiResponse = require('../../utils/ApiResponse');
 const ApiError = require('../../utils/ApiError');
 const { asyncHandler } = require('../../middlewares/error.middleware');
 const { deleteFile } = require('../../middlewares/upload.middleware');
+const otpService = require('../../utils/otpService');
 const { cacheHelper } = require('../../config');
 const { CACHE_KEYS } = require('../../utils/constants');
 
@@ -99,24 +100,21 @@ const clearWishlist = asyncHandler(async (req, res) => {
   ApiResponse.success(wishlist, 'Wishlist cleared successfully').send(res);
 });
 
+const requestAccountDeletion = asyncHandler(async (req, res) => {
+  const user = req.user;
+  const otp = await otpService.generateAndStoreOTP(user.phone);
+
+  ApiResponse.success({
+    message: 'OTP sent to your registered phone number',
+    otp: process.env.NODE_ENV === 'development' ? otp : undefined
+  }, 'OTP Sent').send(res);
+});
+
 const deleteAccount = asyncHandler(async (req, res) => {
   const { phone, otp } = req.body;
-  if (!phone || !otp) {
-    throw ApiError.badRequest('Phone number and OTP are required for account deletion');
-  }
+  
+  await otpService.verifyOTP(phone, otp);
 
-  // Verify OTP
-  const otpKey = `${CACHE_KEYS.OTP}${phone}`;
-  const storedOTP = await cacheHelper.get(otpKey);
-
-  if (!storedOTP || String(storedOTP) !== String(otp)) {
-    throw ApiError.badRequest('Invalid or expired OTP');
-  }
-
-  // Delete OTP after verification
-  await cacheHelper.del(otpKey);
-
-  // Perform deletion
   await userService.deleteAccount(req.user._id);
 
   ApiResponse.success(null, 'Account deleted successfully').send(res);
@@ -158,6 +156,7 @@ module.exports = {
   addToWishlist,
   removeFromWishlist,
   clearWishlist,
+  requestAccountDeletion,
   deleteAccount,
   getLoyaltyInfo,
   redeemLoyaltyPoints,

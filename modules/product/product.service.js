@@ -95,8 +95,9 @@ const updateProduct = async (productId, updateData, imagePaths = []) => {
   Object.assign(product, updateData);
   await product.save();
 
-  // Clear specific product cache
+  // Clear caches: detail and listings
   await cacheHelper.del(`${CACHE_KEYS.PRODUCT_DETAIL}:${productId}`);
+  await cacheHelper.delPattern(`${CACHE_KEYS.PRODUCT_DETAIL}:*`); // Clear listings/results
 
   return product;
 };
@@ -115,8 +116,9 @@ const deleteProduct = async (productId) => {
   // Delete product document
   await product.deleteOne();
 
-  // Clear cache
+  // Clear caches: detail and listings
   await cacheHelper.del(`${CACHE_KEYS.PRODUCT_DETAIL}:${productId}`);
+  await cacheHelper.delPattern(`${CACHE_KEYS.PRODUCT_DETAIL}:*`);
 
   logger.info(`Product deleted: ${productId}`);
 };

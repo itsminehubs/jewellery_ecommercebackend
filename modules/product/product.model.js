@@ -46,7 +46,7 @@ productSchema.index({ trending: 1, status: 1 });
 productSchema.index({ featured: 1, status: 1 });
 productSchema.index({ shop_id: 1, createdAt: -1 });
 
-productSchema.pre('save', async function (next) {
+productSchema.pre('save', async function () {
   // Update final price
   if (this.isModified('price') || this.isModified('discount')) {
     this.finalPrice = this.price - (this.price * this.discount / 100);
@@ -64,10 +64,9 @@ productSchema.pre('save', async function (next) {
 
       this.sku = `${categoryCode}-${metalCode}-${datePart}-${randomPart}`;
     } catch (error) {
-      return next(error);
+      throw error;
     }
   }
-  next();
 });
 
 

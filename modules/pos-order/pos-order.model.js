@@ -82,7 +82,7 @@ const posOrderSchema = new mongoose.Schema({
 });
 
 // Auto-generate a professional Order ID (e.g., POS-SHOP01-20240307-001)
-posOrderSchema.pre('save', async function (next) {
+posOrderSchema.pre('save', async function () {
     if (!this.orderId) {
         const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
         const count = await mongoose.model('POSOrder').countDocuments({
@@ -91,7 +91,6 @@ posOrderSchema.pre('save', async function (next) {
         }) + 1;
         this.orderId = `POS-${this.shop_id}-${dateStr}-${count.toString().padStart(4, '0')}`;
     }
-    next();
 });
 
 const POSOrder = mongoose.model('POSOrder', posOrderSchema);

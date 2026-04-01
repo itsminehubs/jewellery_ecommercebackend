@@ -187,7 +187,7 @@ userSchema.virtual('isLocked').get(function () {
 });
 
 // Pre-save middleware
-userSchema.pre('save', async function (next) {
+userSchema.pre('save', async function () {
   try {
     // Hash password if modified
     if (this.isModified('password') && this.password) {

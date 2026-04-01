@@ -1,11 +1,11 @@
 const twilio = require('twilio');
 const User = require('../user/user.model');
 const ApiError = require('../../utils/ApiError');
-const { generateOTP } = require('../../utils/hash');
 const { generateTokens, verifyRefreshToken } = require('../../utils/jwt');
 const { cacheHelper } = require('../../config');
 const { CACHE_KEYS, CACHE_TTL, SUCCESS_MESSAGES, ERROR_MESSAGES } = require('../../utils/constants');
 const logger = require('../../utils/logger');
+const otpService = require('../../utils/otpService');
 
 // Initialize Twilio client
 // const twilioClient = twilio(
@@ -20,22 +20,15 @@ const logger = require('../../utils/logger');
  */
 const sendOTP = async (phone) => {
   try {
-    // Generate 6-digit OTP
-    const otp = generateOTP(6);
+    const otp = await otpService.generateAndStoreOTP(phone);
 
-    // Store OTP in Redis with 5-minute expiration
-    const otpKey = `${CACHE_KEYS.OTP}${phone}`;
-    await cacheHelper.set(otpKey, otp, CACHE_TTL.OTP);
-
-    // In development, log OTP
-    logger.info(`Development OTP for ${phone}: ${otp}`);
-    console.log(`\n🔐 OTP for ${phone}: ${otp}\n`);
     return {
       message: SUCCESS_MESSAGES.OTP_SENT,
       phone,
       otp: process.env.NODE_ENV === 'development' ? otp : undefined
     };
   } catch (error) {
+    if (error instanceof ApiError) throw error;
     logger.error(`Error sending OTP: ${error.message}`);
     throw ApiError.internal('Failed to send OTP');
   }
@@ -51,18 +44,7 @@ const sendOTP = async (phone) => {
  */
 const verifyOTP = async (phone, otp, name = null, email = null) => {
   try {
-    const otpKey = `${CACHE_KEYS.OTP}${phone}`;
-    const storedOTP = await cacheHelper.get(otpKey);
-
-    if (!storedOTP) {
-      throw ApiError.badRequest('OTP expired or invalid');
-    }
-
-    if (String(storedOTP) !== String(otp)) {
-      throw ApiError.badRequest(ERROR_MESSAGES.INVALID_OTP);
-    }
-
-    await cacheHelper.del(otpKey);
+    await otpService.verifyOTP(phone, otp);
 
     let user = await User.findByPhone(phone);
     let isNewUser = false;
@@ -376,12 +358,7 @@ const forgotPassword = async (phoneOrEmail) => {
  * @returns {Promise<Object>}
  */
 const resetPassword = async (phone, otp, newPassword) => {
-  const otpKey = `${CACHE_KEYS.OTP}${phone}`;
-  const storedOTP = await cacheHelper.get(otpKey);
-
-  if (!storedOTP || String(storedOTP) !== String(otp)) {
-    throw ApiError.badRequest(ERROR_MESSAGES.INVALID_OTP);
-  }
+  await otpService.verifyOTP(phone, otp);
 
   const user = await User.findByPhone(phone);
   if (!user) {
@@ -390,7 +367,6 @@ const resetPassword = async (phone, otp, newPassword) => {
 
   user.password = newPassword;
   await user.save();
-  await cacheHelper.del(otpKey);
 
   return {
     message: 'Password reset successfully'
