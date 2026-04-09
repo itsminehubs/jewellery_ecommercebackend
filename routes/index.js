@@ -16,6 +16,7 @@ const storeRoutes = require('../modules/store/store.routes');
 const goldRateRoutes = require('../modules/gold-rate/gold-rate.routes');
 const posOrderRoutes = require('../modules/pos-order/pos-order.routes');
 const couponRoutes = require('../modules/coupon/coupon.routes');
+const vendorPurchaseRoutes = require('../modules/vendor-purchase/vendor-purchase.routes');
 const { handleWebhook } = require('../modules/payment/razorpay.webhook');
 
 // Webhook endpoint (before JSON parsing middleware)
@@ -37,6 +38,9 @@ router.use('/gold-rates', goldRateRoutes);
 router.use('/pos-orders', posOrderRoutes);
 router.use('/coupons', couponRoutes);
 router.use('/reviews', reviewRoutes);
+router.use('/procurement', vendorPurchaseRoutes);
+router.use('/audit', require('../modules/audit/audit.routes'));
+router.use('/accounting', require('../modules/accounting/accounting.routes'));
 
 // API info
 router.get('/', (req, res) => {

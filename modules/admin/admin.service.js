@@ -6,6 +6,7 @@ const { Parser } = require('json2csv');
 const Order = require('../order/order.model');
 const ApiError = require('../../utils/ApiError');
 const logger = require('../../utils/logger');
+const inventoryService = require('../product/inventory.service');
 
 const getDashboardStats = async (shopId = null) => {
   const filter = shopId ? { shop_id: shopId } : {};
@@ -479,6 +480,16 @@ const importProductsFromCSV = async (filePath) => {
   });
 };
 
+const adjustStock = async (productId, quantityChange, userId, notes) => {
+    return await inventoryService.updateStock(productId, quantityChange, {
+        type: 'adjustment',
+        action: 'MANUAL_ADJUSTMENT',
+        referenceId: userId, 
+        performedBy: userId,
+        notes: notes || 'Manual inventory adjustment'
+    });
+};
+
 module.exports = {
   getDashboardStats,
   getAllOrders,
@@ -494,5 +505,6 @@ module.exports = {
   getStockList,
   exportProductsToCSV,
   importProductsFromCSV,
-  adjustLoyaltyPoints
+  adjustLoyaltyPoints,
+  adjustStock
 };

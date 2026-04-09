@@ -6,15 +6,46 @@ const productSchema = new mongoose.Schema({
   description: { type: String, required: true },
   category: { type: String, required: true, index: true },
   metalType: { type: String, required: true, enum: Object.values(METAL_TYPES) },
-  purity: { type: String },
-  weight: { type: Number, required: true },
-  price: { type: Number, required: true, min: 0 },
+  purity: { type: String }, // e.g., '18K', '22K'
+  
+  // UNIQUE ITEM TRACKING (1 Piece = 1 Product)
+  huid: { type: String, unique: true, sparse: true, index: true }, // Hallmarking Unique ID
+  tagId: { type: String, unique: true, sparse: true, index: true }, // Internal Barcode Tag
+  certificationUrl: { type: String }, // GIA/IGI/Hallmark link
+  
+  // PRECISION WEIGHTS (Grams)
+  grossWeight: { type: Number, required: true },
+  stoneWeight: { type: Number, default: 0 },
+  netWeight: { type: Number, required: true },
+  wastage: { type: Number, default: 0 }, // %
+  
+  // DYNAMIC PRICING BASE
+  price: { type: Number, required: true, min: 0 }, // This can stay as a sale price or base price
+  purchasePrice: { type: Number, default: 0 }, // WAC or specific cost
+  makingCharges: { type: Number, default: 0 },
+  makingChargeType: { type: String, enum: ['fixed', 'per_gram'], default: 'per_gram' },
+  stoneCharges: { type: Number, default: 0 },
+  
   discount: { type: Number, default: 0, min: 0, max: 100 },
   finalPrice: { type: Number },
-  stock: { type: Number, default: 0, min: 0 },
+  
+  // STOCK STATUS (Unique Item)
+  stock: { type: Number, default: 1, enum: [0, 1] }, // 1 = Available, 0 = Sold/Unavailable
+  status: { 
+    type: String, 
+    enum: Object.values(PRODUCT_STATUS), 
+    default: PRODUCT_STATUS.ACTIVE 
+  },
+  
   images: [{ url: String, public_id: String }],
   specifications: { type: Map, of: String },
-  status: { type: String, enum: Object.values(PRODUCT_STATUS), default: PRODUCT_STATUS.ACTIVE },
+  
+  // TAX & ORIGIN
+  hsnCode: { type: String, default: '7113' },
+  gstRate: { type: Number, default: 3 },
+  vendor: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor' },
+  shop_id: { type: String, index: true },
+
   rating: { type: Number, default: 0 },
   numReviews: { type: Number, default: 0 },
   views: { type: Number, default: 0 },
@@ -22,17 +53,6 @@ const productSchema = new mongoose.Schema({
   featured: { type: Boolean, default: false },
   trending: { type: Boolean, default: false },
   sku: { type: String, unique: true, index: true },
-  hsnCode: { type: String, default: '7113' },
-  gstRate: { type: Number, default: 3 },
-  // POS Specific fields
-  grossWeight: { type: Number, required: true },
-  stoneWeight: { type: Number, default: 0 },
-  netWeight: { type: Number, required: true },
-  makingCharges: { type: Number, default: 0 },
-  makingChargeType: { type: String, enum: ['fixed', 'per_gram'], default: 'per_gram' },
-  stoneCharges: { type: Number, default: 0 },
-  wastage: { type: Number, default: 0 }, // %
-  shop_id: { type: String, index: true }, // Store isolation if needed
 }, { timestamps: true });
 
 productSchema.index({ name: 'text', description: 'text', sku: 'text' });

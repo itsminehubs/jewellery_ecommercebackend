@@ -68,7 +68,14 @@ const PERMISSIONS = {
   // Community & Reviews
   MANAGE_REVIEWS: 'manage_reviews',
   MANAGE_CATEGORIES: 'manage_categories',
-  MANAGE_CONTACTS: 'manage_contacts'
+  MANAGE_CONTACTS: 'manage_contacts',
+
+  // Vendor & Procurement
+  VENDOR_MANAGE: 'vendor_manage',
+  PURCHASE_ORDER_VIEW: 'purchase_order_view',
+  PURCHASE_ORDER_CREATE: 'purchase_order_create',
+  PURCHASE_ORDER_RECEIVE: 'purchase_order_receive',
+  VIEW_PROFIT_REPORTS: 'view_profit_reports'
 };
 
 // Role-Permission Mapping
@@ -115,7 +122,8 @@ const ROLE_PERMISSIONS = {
 
   [USER_ROLES.ACCOUNTS_FINANCE]: [
     PERMISSIONS.VIEW_FINANCIAL_REPORTS, PERMISSIONS.ORDER_VIEW_ALL, 
-    PERMISSIONS.VIEW_GLOBAL_REPORTS, PERMISSIONS.PRODUCT_BULK_MANAGE // Export invoices
+    PERMISSIONS.VIEW_GLOBAL_REPORTS, PERMISSIONS.PRODUCT_BULK_MANAGE, // Export invoices
+    PERMISSIONS.VIEW_PROFIT_REPORTS, PERMISSIONS.PURCHASE_ORDER_VIEW
   ],
 
   [USER_ROLES.USER]: []
@@ -149,7 +157,12 @@ const PAYMENT_STATUS = {
 const PAYMENT_METHODS = {
   RAZORPAY: 'razorpay',
   COD: 'cod',
-  WALLET: 'wallet'
+  WALLET: 'wallet',
+  CASH: 'cash',
+  CARD: 'card',
+  UPI: 'upi',
+  CREDIT: 'credit', // Udhar
+  EXCHANGE: 'exchange'
 };
 
 // Product Categories

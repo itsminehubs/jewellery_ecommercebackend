@@ -6,6 +6,7 @@ const couponService = require('../coupon/coupon.service');
 const Coupon = require('../coupon/coupon.model');
 const ApiError = require('../../utils/ApiError');
 const logger = require('../../utils/logger');
+const inventoryService = require('../product/inventory.service');
 
 const createOrder = async (userId, orderData) => {
   const session = await Order.startSession();
@@ -46,12 +47,19 @@ const createOrder = async (userId, orderData) => {
         image: product.images?.[0]?.url,
         quantity: cartItem.quantity,
         price,
+        costPrice: product.purchasePrice || 0,
         gstRate: itemGstRate,
         taxAmount: itemTax
       });
 
-      product.stock -= cartItem.quantity;
-      await product.save({ session });
+      await inventoryService.updateStock(product._id, -cartItem.quantity, {
+        type: 'sale',
+        action: 'ITEM_SOLD',
+        referenceId: null, // Will update after order save if needed, or use a temp ID
+        performedBy: userId,
+        session,
+        notes: 'Online Store Sale'
+      });
     }
 
     let discount = 0;
@@ -140,8 +148,12 @@ const cancelOrder = async (orderId, userId, reason) => {
 
   // Restore stock on cancellation
   for (const item of order.items) {
-    await Product.findByIdAndUpdate(item.product, {
-      $inc: { stock: item.quantity }
+    await inventoryService.updateStock(item.product, item.quantity, {
+      type: 'refund',
+      action: 'ORDER_CANCELLED',
+      referenceId: order._id,
+      performedBy: userId,
+      notes: `Order ${order._id} cancelled by user`
     });
   }
 
@@ -168,8 +180,12 @@ const deleteOrder = async (orderId, userId) => {
 
   // Restore product stock
   for (const item of order.items) {
-    await Product.findByIdAndUpdate(item.product, {
-      $inc: { stock: item.quantity }
+    await inventoryService.updateStock(item.product, item.quantity, {
+      type: 'adjustment',
+      action: 'PAYMENT_FAILURE_RESTORE',
+      referenceId: order._id,
+      performedBy: userId,
+      notes: 'Payment failed, restoring stock'
     });
   }
 

@@ -18,6 +18,7 @@ const posOrderItemSchema = new mongoose.Schema({
     stoneCharge: Number,
     gstAmount: Number,
     totalAmount: Number,
+    costPrice: { type: Number, default: 0 },
     quantity: { type: Number, default: 1 }
 });
 
@@ -48,13 +49,18 @@ const posOrderSchema = new mongoose.Schema({
     payments: [{
         method: {
             type: String,
-            enum: ['cash', 'card', 'upi', 'bank_transfer', 'exchange'],
+            enum: ['cash', 'card', 'upi', 'bank_transfer', 'exchange', 'credit'],
             required: true
         },
         amount: { type: Number, required: true },
         transactionId: String, // For card/UPI
         notes: String
     }],
+
+    // Udhar / Credit specific tracking
+    isCreditSale: { type: Boolean, default: false },
+    creditAmount: { type: Number, default: 0 },
+    customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // Linked user for ledger
 
     // Exchange Details (if any)
     exchangeItems: [{

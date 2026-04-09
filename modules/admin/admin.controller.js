@@ -2,6 +2,7 @@ const adminService = require('./admin.service');
 const ApiResponse = require('../../utils/ApiResponse');
 const { asyncHandler } = require('../../middlewares/error.middleware');
 const ApiError = require('../../utils/ApiError');
+const financeService = require('./finance.service');
 
 const adjustLoyaltyPoints = asyncHandler(async (req, res) => {
   const { points, reason } = req.body;
@@ -114,6 +115,29 @@ const createEmployee = asyncHandler(async (req, res) => {
   ApiResponse.success(employee, 'Employee created successfully').send(res);
 });
 
+const getGrossProfit = asyncHandler(async (req, res) => {
+    const { startDate, endDate } = req.query;
+    if (!startDate || !endDate) {
+        throw ApiError.badRequest('StartDate and EndDate are required (YYYY-MM-DD)');
+    }
+    const profitData = await financeService.calculateGrossProfit(startDate, endDate);
+    ApiResponse.success(profitData, 'Gross profit analytics fetched').send(res);
+});
+
+const getInventoryValue = asyncHandler(async (req, res) => {
+    const valueData = await financeService.calculateInventoryValue();
+    ApiResponse.success(valueData, 'Total inventory valuation fetched').send(res);
+});
+
+const adjustStock = asyncHandler(async (req, res) => {
+    const { productId, quantityChange, notes } = req.body;
+    if (quantityChange === 0) {
+        throw ApiError.badRequest('Quantity change cannot be zero');
+    }
+    const product = await adminService.adjustStock(productId, quantityChange, req.user._id, notes);
+    ApiResponse.success(product, 'Inventory adjusted successfully').send(res);
+});
+
 module.exports = {
   getDashboard,
   getAllOrders,
@@ -129,5 +153,8 @@ module.exports = {
   updateEmployee,
   adjustLoyaltyPoints,
   createEmployee,
-  deleteUser
+  deleteUser,
+  getGrossProfit,
+  getInventoryValue,
+  adjustStock
 };

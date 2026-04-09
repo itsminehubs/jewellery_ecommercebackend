@@ -150,6 +150,20 @@ const userSchema = new mongoose.Schema({
   lastPointsUpdateDate: {
     type: Date,
     default: Date.now
+  },
+
+  // FINANCIAL / UDHAR (CREDIT) SYSTEM
+  outstandingBalance: {
+    type: Number,
+    default: 0, // Positive value means customer owes shop
+    index: true
+  },
+  creditLimit: {
+    type: Number,
+    default: 50000 // Default credit limit for customers
+  },
+  lastPaymentDate: {
+    type: Date
   }
 }, {
   timestamps: true,

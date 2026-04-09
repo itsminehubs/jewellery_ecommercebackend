@@ -5,6 +5,7 @@ const { cacheHelper } = require('../../config');
 const { CACHE_KEYS, PAGINATION } = require('../../utils/constants');
 const logger = require('../../utils/logger');
 const { PRODUCT_CATEGORIES } = require('../../utils/constants');
+const auditService = require('../audit/audit.service');
 
 const getAllProducts = async (filters = {}, options = {}) => {
   const { 
@@ -76,6 +77,13 @@ const createProduct = async (productData, imagePaths = []) => {
   const product = new Product({ ...productData, images });
   await product.save();
 
+  // 📝 LOG AUDIT: Centralized Stock Arrival
+  await inventoryService.updateStock(product._id, product.stock, {
+    type: 'purchase',
+    action: 'INITIAL_STOCK',
+    notes: 'Initial product stock entry'
+  });
+
   // Clear listing caches if exists
   await cacheHelper.delPattern(`${CACHE_KEYS.PRODUCT_DETAIL}:*`);
 
@@ -92,8 +100,20 @@ const updateProduct = async (productId, updateData, imagePaths = []) => {
     product.images.push(...newImages);
   }
 
+  const beforeStock = product.stock;
+  const newStock = updateData.stock !== undefined ? updateData.stock : beforeStock;
+  
   Object.assign(product, updateData);
   await product.save();
+
+  // 📝 LOG AUDIT: Centralized Adjustment
+  if (beforeStock !== newStock) {
+    await inventoryService.updateStock(product._id, newStock - beforeStock, {
+      type: 'adjustment',
+      action: 'ADMIN_UPDATE',
+      notes: 'Manual stock update from admin panel'
+    });
+  }
 
   // Clear caches: detail and listings
   await cacheHelper.del(`${CACHE_KEYS.PRODUCT_DETAIL}:${productId}`);
@@ -112,6 +132,17 @@ const deleteProduct = async (productId) => {
       await deleteImage(image.public_id);
     }
   }
+
+  // 📝 LOG AUDIT: Stock Removal
+  await auditService.logStockChange({
+    type: 'removal',
+    action: 'delete',
+    product: product._id,
+    beforeQuantity: product.stock,
+    afterQuantity: 0,
+    quantityChanged: -product.stock,
+    notes: 'Product deleted from system'
+  });
 
   // Delete product document
   await product.deleteOne();

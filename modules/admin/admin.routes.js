@@ -31,6 +31,9 @@ router.patch('/users/:id/adjust-loyalty', checkPermission(PERMISSIONS.CUSTOMER_B
 router.get('/stock-analytics', checkAnyPermission([PERMISSIONS.VIEW_GLOBAL_REPORTS, PERMISSIONS.VIEW_STORE_REPORTS]), adminController.getStockAnalytics);
 router.get('/sales-reports', checkAnyPermission([PERMISSIONS.VIEW_GLOBAL_REPORTS, PERMISSIONS.VIEW_STORE_REPORTS]), adminController.getSalesReports);
 router.get('/stock-list', checkPermission(PERMISSIONS.STOCK_MANAGE), adminController.getStockList);
+router.get('/gross-profit', checkPermission(PERMISSIONS.VIEW_FINANCIAL_REPORTS), adminController.getGrossProfit);
+router.get('/inventory-value', checkPermission(PERMISSIONS.VIEW_FINANCIAL_REPORTS), adminController.getInventoryValue);
+router.post('/adjust-stock', checkPermission(PERMISSIONS.STOCK_MANAGE), adminController.adjustStock);
 
 // Products
 router.get('/bulk-export', checkAnyPermission([PERMISSIONS.PRODUCT_BULK_MANAGE, PERMISSIONS.VIEW_FINANCIAL_REPORTS]), adminController.exportProducts);

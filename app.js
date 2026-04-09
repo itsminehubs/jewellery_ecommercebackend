@@ -66,13 +66,24 @@ app.use((req, res, next) => {
   next();
 });
 
-// Health check
+// Health check (Enterprise Edition)
 app.get('/health', (req, res) => {
+  const memoryUsage = process.memoryUsage();
   res.status(200).json({
     success: true,
     message: 'Server is healthy',
-    uptime: process.uptime(),
-    timestamp: new Date().toISOString()
+    system: {
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString(),
+      workerId: process.pid,
+      memory: {
+        rss: `${Math.round(memoryUsage.rss / 1024 / 1024 * 100) / 100} MB`,
+        heapTotal: `${Math.round(memoryUsage.heapTotal / 1024 / 1024 * 100) / 100} MB`,
+        heapUsed: `${Math.round(memoryUsage.heapUsed / 1024 / 1024 * 100) / 100} MB`,
+      },
+      nodeVersion: process.version,
+      platform: process.platform
+    }
   });
 });
 
