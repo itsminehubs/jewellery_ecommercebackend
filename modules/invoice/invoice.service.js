@@ -6,6 +6,8 @@ const { generateInvoicePDF, getInvoicePath } = require('../../utils/constants');
 const fs = require('fs');
 const path = require('path');
 const logger = require('../../utils/logger');
+const { generatePDF, amountToWords } = require('../../utils/pdfService');
+const Store = require('../store/store.model');
 
 const generateInvoice = async (orderId, adminId) => {
   const order = await Order.findById(orderId).populate('user').populate('items.product').lean();
@@ -30,7 +32,7 @@ const generateInvoice = async (orderId, adminId) => {
     })),
     subtotal: order.subtotal,
     tax: order.tax,
-    total: order.totalAmount,
+    total: order.total,
     status: 'sent',
     metadata: {
       generatedBy: adminId
@@ -43,14 +45,37 @@ const generateInvoice = async (orderId, adminId) => {
 };
 
 const downloadInvoice = async (invoiceId) => {
-  const invoice = await Invoice.findById(invoiceId);
+  const invoice = await Invoice.findById(invoiceId).populate('user');
   if (!invoice) throw ApiError.notFound('Invoice not found');
-  
-  // Logic to return file path or generate on the fly
+
+  const order = await Order.findById(invoice.order).populate('user').populate('items.product').lean();
+  if (!order) throw ApiError.notFound('Order not found');
+
+  const stores = await Store.find({ status: 'active' });
+  const store = stores[0] || { 
+      name: 'Jewellery Store', 
+      address: 'Main Market', 
+      city: 'City', 
+      state: 'State', 
+      pincode: '000000', 
+      phone: '0000000000' 
+  };
+
+  // Get shipping address from order/user
+  const shippingAddress = order.shippingAddress || (order.user && order.user.addresses && order.user.addresses.find(a => a.isDefault)) || {};
+
+  const pdfBuffer = await generatePDF('invoice', {
+      invoice,
+      order,
+      store: store.toObject ? store.toObject() : store,
+      shippingAddress,
+      amountInWords: amountToWords(order.total),
+      adminName: 'Admin'
+  });
+
   return {
-    filePath: path.join(process.cwd(), 'uploads', 'invoices', `${invoice.invoiceNumber}.pdf`),
-    fileName: `${invoice.invoiceNumber}.pdf`,
-    contentType: 'application/pdf'
+    buffer: pdfBuffer,
+    fileName: `INV-${invoice.invoiceNumber}.pdf`
   };
 };
 

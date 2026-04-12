@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tax Invoice - <%= invoice.invoiceNumber %></title>
+    <title>Purchase Order - <%= po.poNumber %></title>
     <style>
         :root {
             --primary: #2C3E50;
@@ -29,7 +29,7 @@
             line-height: 1.5;
         }
 
-        .invoice-container {
+        .po-container {
             width: 100%;
             max-width: 800px;
             margin: 0 auto;
@@ -59,11 +59,11 @@
             font-size: 10px;
         }
 
-        .title-section {
+        .po-title {
             text-align: right;
         }
 
-        .title-section h2 {
+        .po-title h2 {
             margin: 0;
             font-size: 32px;
             color: var(--primary);
@@ -166,7 +166,7 @@
         }
 
         .col-sl { width: 40px; text-align: center; }
-        .col-qty { width: 60px; text-align: center; }
+        .col-qty { width: 80px; text-align: center; }
         .col-price { width: 120px; text-align: right; }
         .col-total { width: 140px; text-align: right; font-weight: bold; }
 
@@ -251,72 +251,65 @@
     </style>
 </head>
 <body>
-    <div class="invoice-container">
+    <div class="po-container">
         <!-- Header -->
         <div class="header">
             <div class="logo-section">
                 <h1><%= store.name.toUpperCase() %></h1>
                 <p>Luxury Jewellery & Craftsmanship</p>
             </div>
-            <div class="title-section">
-                <h2>Tax Invoice</h2>
+            <div class="po-title">
+                <h2>Purchase Order</h2>
             </div>
         </div>
 
         <!-- Meta Bar -->
         <div class="meta-bar">
             <div class="meta-item">
-                <label>Invoice #</label>
-                <span><%= invoice.invoiceNumber %></span>
+                <label>PO #</label>
+                <span><%= po.poNumber %></span>
             </div>
             <div class="meta-item">
                 <label>Date</label>
-                <span><%= new Date(invoice.issueDate).toLocaleDateString('en-IN') %></span>
+                <span><%= new Date(po.purchaseDate).toLocaleDateString('en-IN') %></span>
             </div>
             <div class="meta-item">
-                <label>Order #</label>
-                <span><%= order.orderNumber %></span>
+                <label>Terms</label>
+                <span>Net 30</span>
             </div>
             <div class="meta-item" style="text-align: right;">
-                <label>Payment</label>
-                <span><%= order.paymentStatus.toUpperCase() %></span>
+                <label>Status</label>
+                <span><%= po.status.toUpperCase() %></span>
             </div>
         </div>
 
         <!-- Addresses -->
         <div class="address-section">
             <div class="address-box">
-                <h3>Sold By</h3>
+                <h3>Billing Address</h3>
                 <div class="address-content">
                     <strong><%= store.name %></strong>
                     <%= store.address %><br>
                     <%= store.city %>, <%= store.state %> - <%= store.pincode %><br>
-                    GSTIN: <%= store.gstin || 'N/A' %><br>
                     Tel: <%= store.phone %>
                 </div>
             </div>
             <div class="address-box">
-                <h3>Bill To</h3>
+                <h3>Vendor Address</h3>
                 <div class="address-content">
-                    <strong><%= order.user.name %></strong>
-                    <%= shippingAddress.addressLine1 %><br>
-                    <% if (shippingAddress.addressLine2) { %>
-                        <%= shippingAddress.addressLine2 %><br>
-                    <% } %>
-                    <%= shippingAddress.city %>, <%= shippingAddress.state %> - <%= shippingAddress.pincode %><br>
-                    Tel: <%= shippingAddress.phone || order.user.phone %>
+                    <strong><%= po.vendor.name %></strong>
+                    <%= po.vendor.address || 'Address not listed' %><br>
+                    GSTIN: <%= po.vendor.gstin || 'N/A' %><br>
+                    Tel: <%= po.vendor.phone %>
                 </div>
             </div>
             <div class="address-box">
-                <h3>Ship To</h3>
+                <h3>Shipping Address</h3>
                 <div class="address-content">
-                    <strong><%= shippingAddress.name %></strong>
-                    <%= shippingAddress.addressLine1 %><br>
-                    <% if (shippingAddress.addressLine2) { %>
-                        <%= shippingAddress.addressLine2 %><br>
-                    <% } %>
-                    <%= shippingAddress.city %>, <%= shippingAddress.state %> - <%= shippingAddress.pincode %><br>
-                    Tel: <%= shippingAddress.phone %>
+                    <strong><%= store.name %> Warehouse</strong>
+                    <%= store.address %><br>
+                    <%= store.city %>, <%= store.state %> - <%= store.pincode %><br>
+                    Attn: Procurement Dept.
                 </div>
             </div>
         </div>
@@ -326,28 +319,23 @@
             <thead>
                 <tr>
                     <th class="col-sl">SL.</th>
-                    <th>Product Description</th>
-                    <th class="col-qty">Qty</th>
+                    <th>Item Description</th>
+                    <th class="col-qty">Quantity</th>
                     <th class="col-price">Unit Price</th>
                     <th class="col-total">Total</th>
                 </tr>
             </thead>
             <tbody>
-                <% order.items.forEach((item, index) => { %>
+                <% po.items.forEach((item, index) => { %>
                     <tr class="<%= index % 2 === 1 ? 'alt-row' : '' %>">
                         <td class="col-sl"><%= index + 1 %></td>
                         <td>
                             <strong><%= item.product.name %></strong><br>
-                            <span style="font-size: 9px; color: var(--text-muted);">
-                                SKU: <%= item.product.sku %> | 
-                                HSN: <%= item.product.hsnCode || '7113' %> |
-                                Weight: <%= item.product.grossWeight %>g |
-                                Purity: <%= item.product.purity || 'N/A' %>
-                            </span>
+                            <span style="font-size: 9px; color: var(--text-muted);">SKU: <%= item.product.sku %> | Category: <%= item.product.category %></span>
                         </td>
                         <td class="col-qty"><%= item.quantity %></td>
-                        <td class="col-price">₹<%= item.price.toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
-                        <td class="col-total">₹<%= (item.price * item.quantity).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
+                        <td class="col-price">₹<%= item.purchasePrice.toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
+                        <td class="col-total">₹<%= item.totalPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
                     </tr>
                 <% }); %>
             </tbody>
@@ -362,25 +350,15 @@
             <table class="total-table">
                 <tr>
                     <td>Subtotal:</td>
-                    <td style="text-align: right;">₹<%= order.subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
-                </tr>
-                <% if (order.discount > 0) { %>
-                    <tr>
-                        <td>Discount:</td>
-                        <td style="text-align: right;">-₹<%= order.discount.toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
-                    </tr>
-                <% } %>
-                <tr>
-                    <td>GST (3%):</td>
-                    <td style="text-align: right;">₹<%= (order.tax || (order.subtotal * 0.03)).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
+                    <td style="text-align: right;">₹<%= po.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
                 </tr>
                 <tr>
-                    <td>Shipping:</td>
-                    <td style="text-align: right;">₹<%= (order.shippingCost || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
+                    <td>Tax (GST 3%):</td>
+                    <td style="text-align: right;">₹0.00</td>
                 </tr>
                 <tr class="grand-total-row">
-                    <td>GRAND TOTAL:</td>
-                    <td style="text-align: right;">₹<%= order.total.toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
+                    <td>TOTAL:</td>
+                    <td style="text-align: right;">₹<%= po.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
                 </tr>
             </table>
         </div>
@@ -389,14 +367,14 @@
         <div class="footer">
             <div class="terms">
                 <h4>Terms and Conditions:</h4>
-                <p>1. All jewellery items are BIS Hallmarked where applicable.</p>
-                <p>2. Goods once sold can only be returned or exchanged as per company policy.</p>
-                <p>3. Return value is calculated based on current market gold/diamond rates minus wastage/making charges.</p>
-                <p>4. This is a computer-generated tax invoice and requires no physical signature under IT Act 2000.</p>
+                <p>1. Please include the PO number on all invoices and packaging slips.</p>
+                <p>2. We reserve the right to reject items that do not meet quality standards.</p>
+                <p>3. Payments will be processed within 30 days of receiving a valid invoice and the goods.</p>
+                <p>4. This is a computer-generated document and serves as a formal agreement.</p>
             </div>
             <div class="signatures">
                 <div class="sig-box">
-                    Digitally Signed
+                    <%= po.employee.name %>
                 </div>
                 <div class="sig-label">Authorized Signatory</div>
             </div>

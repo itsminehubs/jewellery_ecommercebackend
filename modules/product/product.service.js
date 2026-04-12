@@ -27,7 +27,13 @@ const getAllProducts = async (filters = {}, options = {}) => {
   const query = { status: 'active', ...filters };
 
   if (sku) query.sku = sku;
-  if (search) query.$text = { $search: search };
+  if (search) {
+    // Search by text index OR SKU regex
+    query.$or = [
+      { $text: { $search: search } },
+      { sku: { $regex: search, $options: 'i' } }
+    ];
+  }
   if (category) query.category = category;
   
   if (minPrice || maxPrice) {
@@ -171,7 +177,11 @@ const getProductsByCategory = async (category, options = {}) => {
 
   // 🔍 Text search
   if (search) {
-    query.$text = { $search: search };
+    query.$or = [
+      { sku: { $regex: search, $options: 'i' } },
+      { name: { $regex: search, $options: 'i' } },
+      { description: { $regex: search, $options: 'i' } }
+    ];
   }
 
   // 💰 Price filter

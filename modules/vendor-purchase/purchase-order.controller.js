@@ -27,10 +27,30 @@ const receivePO = asyncHandler(async (req, res) => {
     ApiResponse.success(po, 'PO marked as Received. Inventory updated.').send(res);
 });
 
+const downloadPO = asyncHandler(async (req, res) => {
+    const po = await poService.getPurchaseOrderById(req.params.id);
+    const pdfBuffer = await poService.generatePOPDF(po);
+
+    res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename=PO-${po.poNumber}.pdf`,
+        'Content-Length': pdfBuffer.length
+    });
+
+    res.send(pdfBuffer);
+});
+
+const deletePO = asyncHandler(async (req, res) => {
+    await poService.deletePurchaseOrder(req.params.id);
+    ApiResponse.success(null, 'Purchase Order deleted successfully').send(res);
+});
+
 module.exports = {
     createPO,
     getAllPOs,
     getPOById,
     updatePO,
-    receivePO
+    receivePO,
+    downloadPO,
+    deletePO
 };

@@ -2,6 +2,8 @@ const PurchaseOrder = require('./purchase-order.model');
 const inventoryService = require('../product/inventory.service');
 const ApiError = require('../../utils/ApiError');
 const mongoose = require('mongoose');
+const { generatePDF, amountToWords } = require('../../utils/pdfService');
+const Store = require('../store/store.model');
 
 const createPurchaseOrder = async (poData, userId) => {
     // Calculate totals for each item
@@ -140,10 +142,41 @@ const receivePurchaseOrder = async (id, itemDetails, userId) => {
     }
 };
 
+const deletePurchaseOrder = async (id) => {
+    const po = await PurchaseOrder.findById(id);
+    if (!po) throw ApiError.notFound('Purchase Order not found');
+
+    if (po.status !== 'draft') {
+        throw ApiError.badRequest(`Cannot delete a Purchase Order that is already ${po.status}`);
+    }
+
+    return await po.deleteOne();
+};
+
+const generatePOPDF = async (po) => {
+    const stores = await Store.find({ status: 'active' });
+    const store = stores[0] || { 
+        name: 'Jewellery Store', 
+        address: 'Main Market', 
+        city: 'City', 
+        state: 'State', 
+        pincode: '000000', 
+        phone: '0000000000' 
+    };
+
+    return await generatePDF('purchase-order', {
+        po: po.toObject(),
+        store: store.toObject ? store.toObject() : store,
+        amountInWords: amountToWords(po.totalAmount)
+    });
+};
+
 module.exports = {
     createPurchaseOrder,
     getPurchaseOrders,
     getPurchaseOrderById,
     updatePurchaseOrder,
-    receivePurchaseOrder
+    receivePurchaseOrder,
+    deletePurchaseOrder,
+    generatePOPDF
 };

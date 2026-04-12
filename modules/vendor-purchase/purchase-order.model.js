@@ -65,7 +65,7 @@ const purchaseOrderSchema = new mongoose.Schema({
 });
 
 // Auto-generate PO Number (e.g., PO-20240307-001)
-purchaseOrderSchema.pre('validate', async function (next) {
+purchaseOrderSchema.pre('validate', async function () {
   if (!this.poNumber) {
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const count = await mongoose.model('PurchaseOrder').countDocuments({
@@ -73,7 +73,6 @@ purchaseOrderSchema.pre('validate', async function (next) {
     }) + 1;
     this.poNumber = `PO-${dateStr}-${count.toString().padStart(4, '0')}`;
   }
-  next();
 });
 
 const PurchaseOrder = mongoose.model('PurchaseOrder', purchaseOrderSchema);

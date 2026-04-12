@@ -135,10 +135,10 @@ const createEmployee = async (employeeData, requesterRole) => {
   }
 
   // Check if user already exists
-  const existingUser = await User.findOne({ 
-    $or: [{ phone }, { email: email?.toLowerCase() }] 
+  const existingUser = await User.findOne({
+    $or: [{ phone }, { email: email?.toLowerCase() }]
   });
-  
+
   if (existingUser) {
     throw ApiError.badRequest('User with this phone or email already exists');
   }
@@ -156,7 +156,7 @@ const createEmployee = async (employeeData, requesterRole) => {
 
   await employee.save();
   logger.info(`Admin (${requesterRole}) created new employee: ${employee._id} with role ${employee.role}`);
-  
+
   return employee;
 };
 
@@ -172,7 +172,7 @@ const updateEmployee = async (userId, updateData, requesterRole) => {
     if (targetUser.role === USER_ROLES.ADMIN || targetUser.role === USER_ROLES.SUPER_ADMIN) {
       throw ApiError.forbidden('Admins cannot modify other administrators.');
     }
-    
+
     // Restriction: If role is being changed, ADMIN cannot promote to administrative roles
     if (role && (role === USER_ROLES.ADMIN || role === USER_ROLES.SUPER_ADMIN)) {
       throw ApiError.forbidden('Admins cannot promote users to administrative roles.');
@@ -198,7 +198,7 @@ const updateEmployee = async (userId, updateData, requesterRole) => {
 
   await targetUser.save();
   logger.info(`Admin (${requesterRole}) updated employee: ${userId}`);
-  
+
   return targetUser;
 };
 
@@ -215,7 +215,7 @@ const toggleUserStatus = async (userId) => {
 
 const updateUserRole = async (userId, role, requesterRole) => {
   const { USER_ROLES } = require('../../utils/constants');
-  
+
   const targetUser = await User.findById(userId);
   if (!targetUser) throw ApiError.notFound('User not found');
 
@@ -224,7 +224,7 @@ const updateUserRole = async (userId, role, requesterRole) => {
     if (targetUser.role === USER_ROLES.ADMIN || targetUser.role === USER_ROLES.SUPER_ADMIN) {
       throw ApiError.forbidden('Admins cannot modify roles of other administrators.');
     }
-    
+
     // Restriction: ADMIN cannot promote someone to ADMIN or SUPER_ADMIN
     if (role === USER_ROLES.ADMIN || role === USER_ROLES.SUPER_ADMIN) {
       throw ApiError.forbidden('Admins cannot promote users to administrative roles.');
@@ -240,7 +240,7 @@ const updateUserRole = async (userId, role, requesterRole) => {
 
 const deleteUser = async (userId, requesterRole) => {
   const { USER_ROLES } = require('../../utils/constants');
-  
+
   const user = await User.findById(userId);
   if (!user) throw ApiError.notFound('User not found');
 
@@ -252,7 +252,7 @@ const deleteUser = async (userId, requesterRole) => {
   }
 
   await User.findByIdAndDelete(userId);
-  
+
   logger.info(`Admin (${requesterRole}) deleted user: ${userId}`);
   return { message: 'User deleted successfully' };
 };
@@ -358,7 +358,11 @@ const getStockList = async (options = {}) => {
   const query = {};
 
   if (search) {
-    query.$text = { $search: search };
+    query.$or = [
+      { sku: { $regex: search, $options: 'i' } },
+      { name: { $regex: search, $options: 'i' } },
+      { description: { $regex: search, $options: 'i' } }
+    ];
   }
 
   if (category) {
@@ -376,7 +380,7 @@ const getStockList = async (options = {}) => {
   }
 
   const stockList = await Product.find(query)
-    .select('name category stock price images status')
+    .select('name sku category metalType purity stock price purchasePrice finalPrice images status grossWeight')
     .sort(status === 'low_stock' ? 'stock' : '-updatedAt')
     .skip(skip)
     .limit(Number(limit));
@@ -481,13 +485,13 @@ const importProductsFromCSV = async (filePath) => {
 };
 
 const adjustStock = async (productId, quantityChange, userId, notes) => {
-    return await inventoryService.updateStock(productId, quantityChange, {
-        type: 'adjustment',
-        action: 'MANUAL_ADJUSTMENT',
-        referenceId: userId, 
-        performedBy: userId,
-        notes: notes || 'Manual inventory adjustment'
-    });
+  return await inventoryService.updateStock(productId, quantityChange, {
+    type: 'adjustment',
+    action: 'MANUAL_ADJUSTMENT',
+    referenceId: userId,
+    performedBy: userId,
+    notes: notes || 'Manual inventory adjustment'
+  });
 };
 
 module.exports = {

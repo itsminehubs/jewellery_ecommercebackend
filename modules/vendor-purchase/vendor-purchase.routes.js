@@ -20,6 +20,8 @@ router.get('/purchase-orders', checkPermission(PERMISSIONS.PURCHASE_ORDER_VIEW),
 router.post('/purchase-orders', checkPermission(PERMISSIONS.PURCHASE_ORDER_CREATE), poController.createPO);
 router.get('/purchase-orders/:id', checkPermission(PERMISSIONS.PURCHASE_ORDER_VIEW), poController.getPOById);
 router.patch('/purchase-orders/:id', checkPermission(PERMISSIONS.PURCHASE_ORDER_CREATE), poController.updatePO);
+router.delete('/purchase-orders/:id', checkPermission(PERMISSIONS.PURCHASE_ORDER_CREATE), poController.deletePO);
 router.post('/purchase-orders/:id/receive', checkPermission(PERMISSIONS.PURCHASE_ORDER_RECEIVE), poController.receivePO);
+router.get('/purchase-orders/:id/download', checkPermission(PERMISSIONS.PURCHASE_ORDER_VIEW), poController.downloadPO);
 
 module.exports = router;

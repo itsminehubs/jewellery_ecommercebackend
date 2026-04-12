@@ -5,8 +5,6 @@ const { asyncHandler } = require('../../middlewares/error.middleware');
 const Invoice = require('./invoice.model');
 const Order = require('../order/order.model');
 const User = require('../user/user.model');
-const fs = require('fs');
-const path = require('path');
 
 const generateInvoice = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
@@ -17,14 +15,14 @@ const generateInvoice = asyncHandler(async (req, res) => {
 const downloadInvoice = asyncHandler(async (req, res) => {
   const { invoiceId } = req.params;
   const fileInfo = await invoiceService.downloadInvoice(invoiceId);
-  res.setHeader('Content-Type', fileInfo.contentType);
-  res.setHeader('Content-Disposition', `attachment; filename="${fileInfo.fileName}"`);
-  const fileStream = fs.createReadStream(fileInfo.filePath);
-  fileStream.pipe(res);
-  fileStream.on('error', (error) => {
-    console.error('File stream error:', error);
-    res.status(500).end();
+  
+  res.set({
+    'Content-Type': 'application/pdf',
+    'Content-Disposition': `attachment; filename="${fileInfo.fileName}"`,
+    'Content-Length': fileInfo.buffer.length
   });
+
+  res.send(fileInfo.buffer);
 });
 
 const getInvoice = asyncHandler(async (req, res) => {

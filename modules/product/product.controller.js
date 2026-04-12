@@ -15,6 +15,11 @@ const getProduct = asyncHandler(async (req, res) => {
   ApiResponse.success(product, 'Product fetched successfully').send(res);
 });
 
+const getProductBySku = asyncHandler(async (req, res) => {
+  const product = await productService.getProductBySku(req.params.sku);
+  ApiResponse.success(product, 'Product found successfully').send(res);
+});
+
 const createProduct = asyncHandler(async (req, res) => {
   const imagePaths = req.files ? req.files.map(f => f.path) : [];
   const product = await productService.createProduct(req.body, imagePaths);
@@ -76,6 +81,7 @@ const getTrendingProducts = asyncHandler(async (req, res) => {
 module.exports = {
   getAllProducts,
   getProduct,
+  getProductBySku,
   createProduct,
   updateProduct,
   deleteProduct,

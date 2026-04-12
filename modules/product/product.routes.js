@@ -11,6 +11,7 @@ const { PERMISSIONS } = require('../../utils/constants');
 router.get('/', productController.getAllProducts);
 router.get('/featured', productController.getFeaturedProducts);
 router.get('/trending', productController.getTrendingProducts);
+router.get('/sku/:sku', productController.getProductBySku);
 router.get('/:id', productController.getProduct);
 router.get('/category/:category', productController.getProductsByCategory);
 
