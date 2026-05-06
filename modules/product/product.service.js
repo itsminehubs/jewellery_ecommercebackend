@@ -6,6 +6,7 @@ const { CACHE_KEYS, PAGINATION } = require('../../utils/constants');
 const logger = require('../../utils/logger');
 const { PRODUCT_CATEGORIES } = require('../../utils/constants');
 const auditService = require('../audit/audit.service');
+const inventoryService = require('./inventory.service');
 
 const getAllProducts = async (filters = {}, options = {}) => {
   const { 
@@ -78,7 +79,7 @@ const getProductById = async (productId) => {
   return productData;
 };
 
-const createProduct = async (productData, imagePaths = []) => {
+const createProduct = async (productData, imagePaths = [], userId = null) => {
   const images = imagePaths.length > 0 ? await uploadMultipleImages(imagePaths, 'products') : [];
   const product = new Product({ ...productData, images });
   await product.save();
@@ -87,6 +88,7 @@ const createProduct = async (productData, imagePaths = []) => {
   await inventoryService.updateStock(product._id, product.stock, {
     type: 'purchase',
     action: 'INITIAL_STOCK',
+    performedBy: userId,
     notes: 'Initial product stock entry'
   });
 
@@ -97,7 +99,7 @@ const createProduct = async (productData, imagePaths = []) => {
   return product;
 };
 
-const updateProduct = async (productId, updateData, imagePaths = []) => {
+const updateProduct = async (productId, updateData, imagePaths = [], userId = null) => {
   const product = await Product.findById(productId);
   if (!product) throw ApiError.notFound('Product not found');
 
@@ -117,6 +119,7 @@ const updateProduct = async (productId, updateData, imagePaths = []) => {
     await inventoryService.updateStock(product._id, newStock - beforeStock, {
       type: 'adjustment',
       action: 'ADMIN_UPDATE',
+      performedBy: userId,
       notes: 'Manual stock update from admin panel'
     });
   }
@@ -128,7 +131,7 @@ const updateProduct = async (productId, updateData, imagePaths = []) => {
   return product;
 };
 
-const deleteProduct = async (productId) => {
+const deleteProduct = async (productId, userId = null) => {
   const product = await Product.findById(productId);
   if (!product) throw ApiError.notFound('Product not found');
 
@@ -147,6 +150,7 @@ const deleteProduct = async (productId) => {
     beforeQuantity: product.stock,
     afterQuantity: 0,
     quantityChanged: -product.stock,
+    performedBy: userId,
     notes: 'Product deleted from system'
   });
 

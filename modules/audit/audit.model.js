@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const auditLogSchema = new mongoose.Schema({
   type: {
     type: String,
-    enum: ['purchase', 'sale', 'adjustment', 'refund'],
+    enum: ['purchase', 'sale', 'adjustment', 'refund', 'removal'],
     required: true
   },
   action: {
@@ -29,16 +29,16 @@ const auditLogSchema = new mongoose.Schema({
   },
   costImpact: {
     type: Number, // The price involved in the change
-    required: true
+    default: 0
   },
   referenceId: {
     type: mongoose.Schema.Types.ObjectId, // Could be PO ID or Order ID
-    required: true
+    required: false
   },
   performedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true
+    required: false
   },
   notes: String
 }, {
