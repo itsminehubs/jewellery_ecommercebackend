@@ -14,13 +14,13 @@ const productSchema = new mongoose.Schema({
   certificationUrl: { type: String }, // GIA/IGI/Hallmark link
   
   // PRECISION WEIGHTS (Grams)
-  grossWeight: { type: Number, required: true },
+  grossWeight: { type: Number },
   stoneWeight: { type: Number, default: 0 },
-  netWeight: { type: Number, required: true },
+  netWeight: { type: Number },
   wastage: { type: Number, default: 0 }, // %
   
   // DYNAMIC PRICING BASE
-  price: { type: Number, required: true, min: 0 }, // This can stay as a sale price or base price
+  price: { type: Number, min: 0 }, // This can stay as a sale price or base price
   purchasePrice: { type: Number, default: 0 }, // WAC or specific cost
   makingCharges: { type: Number, default: 0 },
   makingChargeType: { type: String, enum: ['fixed', 'per_gram'], default: 'per_gram' },
@@ -29,8 +29,8 @@ const productSchema = new mongoose.Schema({
   discount: { type: Number, default: 0, min: 0, max: 100 },
   finalPrice: { type: Number },
   
-  // STOCK STATUS (Unique Item)
-  stock: { type: Number, default: 1, enum: [0, 1] }, // 1 = Available, 0 = Sold/Unavailable
+  // STOCK STATUS (Quantity)
+  stock: { type: Number, default: 0 }, 
   status: { 
     type: String, 
     enum: Object.values(PRODUCT_STATUS), 

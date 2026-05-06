@@ -6,9 +6,11 @@ const logger = require('../../utils/logger');
 const createReview = async (reviewData) => {
     const { user, product, rating, title, comment, images } = reviewData;
 
-    // Check if user already reviewed this product
-    const existing = await Review.findOne({ user, product });
-    if (existing) throw ApiError.conflict('You have already reviewed this product');
+    // Check if user already reviewed this product (only for registered users)
+    if (user) {
+        const existing = await Review.findOne({ user, product });
+        if (existing) throw ApiError.conflict('You have already reviewed this product');
+    }
 
     const review = await Review.create({
         user,

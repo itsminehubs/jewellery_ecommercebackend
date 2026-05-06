@@ -4,7 +4,17 @@ const reviewSchema = new mongoose.Schema({
     user: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
-        required: true
+        required: false
+    },
+    guestName: {
+        type: String,
+        trim: true,
+        maxLength: 50
+    },
+    guestEmail: {
+        type: String,
+        trim: true,
+        lowercase: true
     },
     product: {
         type: mongoose.Schema.Types.ObjectId,
@@ -44,6 +54,9 @@ const reviewSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // Prevent multiple reviews from same user for same product
-reviewSchema.index({ user: 1, product: 1 }, { unique: true });
+reviewSchema.index({ user: 1, product: 1 }, { 
+    unique: true, 
+    partialFilterExpression: { user: { $exists: true, $ne: null } } 
+});
 
 module.exports = mongoose.model('Review', reviewSchema);

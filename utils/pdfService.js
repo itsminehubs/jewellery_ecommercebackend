@@ -1,4 +1,4 @@
-const puppeteer = require('puppeteer');
+const { chromium } = require('playwright');
 const ejs = require('ejs');
 const path = require('path');
 const fs = require('fs').promises;
@@ -19,16 +19,16 @@ const generatePDF = async (templateName, data, outputPath = null) => {
         // Render HTML using EJS
         const html = await ejs.renderFile(templatePath, data);
 
-        // Launch Puppeteer
-        browser = await puppeteer.launch({
-            headless: 'new',
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
+        // Launch Playwright (Chromium)
+        browser = await chromium.launch({
+            headless: true
         });
 
-        const page = await browser.newPage();
+        const context = await browser.newContext();
+        const page = await context.newPage();
         
         // Set content and wait for it to be fully loaded
-        await page.setContent(html, { waitUntil: 'networkidle0' });
+        await page.setContent(html, { waitUntil: 'networkidle' });
 
         // Generate PDF
         const pdfBuffer = await page.pdf({

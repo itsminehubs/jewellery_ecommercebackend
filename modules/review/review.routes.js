@@ -8,10 +8,10 @@ const { reviewImageUpload } = require('../../middlewares/upload.middleware');
 
 // Public routes
 router.get('/product/:productId', reviewController.getProductReviews);
+router.post('/', reviewImageUpload, reviewController.createReview);
 
 // Protected routes
 router.use(authenticate);
-router.post('/', reviewImageUpload, reviewController.createReview);
 
 // Admin routes
 router.use(checkPermission(PERMISSIONS.MANAGE_REVIEWS));

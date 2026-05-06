@@ -5,7 +5,7 @@ const ApiResponse = require('../../utils/ApiResponse');
 const createReview = asyncHandler(async (req, res) => {
     const review = await reviewService.createReview({
         ...req.body,
-        user: req.user._id,
+        user: req.user?._id,
         images: req.files ? req.files.map(file => ({ url: file.path, public_id: file.filename })) : []
     });
     ApiResponse.created(review, 'Review submitted successfully. It will be visible after approval.').send(res);
