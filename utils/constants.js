@@ -185,9 +185,33 @@ const METAL_TYPES = {
   GOLD: 'gold',
   SILVER: 'silver',
   PLATINUM: 'platinum',
+  ARTIFICIAL: 'artificial'
+};
+
+// Metal Colors
+const METAL_COLORS = {
+  YELLOW: 'yellow',
+  WHITE: 'white',
+  ROSE: 'rose',
+  TWO_TONE: 'two_tone'
+};
+
+// Stone Types
+const STONE_TYPES = {
+  NONE: 'none',
   DIAMOND: 'diamond',
-  ROSE_GOLD: 'rose_gold',
-  WHITE_GOLD: 'white_gold'
+  RUBY: 'ruby',
+  EMERALD: 'emerald',
+  SAPPHIRE: 'sapphire',
+  CZ: 'cubic_zirconia',
+  PEARL: 'pearl'
+};
+
+// Diamond Attributes
+const DIAMOND_ATTRIBUTES = {
+  COLOR: ['D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'GH', 'IJ'],
+  CLARITY: ['FL', 'IF', 'VVS1', 'VVS2', 'VS1', 'VS2', 'SI1', 'SI2', 'I1', 'SI'],
+  CUT: ['Excellent', 'Very Good', 'Good', 'Fair', 'Poor']
 };
 
 // Gold Purity
@@ -195,7 +219,26 @@ const GOLD_PURITY = {
   KARAT_24: '24K',
   KARAT_22: '22K',
   KARAT_18: '18K',
-  KARAT_14: '14K'
+  KARAT_14: '14K',
+  KARAT_10: '10K',
+  KARAT_9: '9K'
+};
+
+// Gender
+const GENDER_TYPES = {
+  WOMEN: 'women',
+  MEN: 'men',
+  UNISEX: 'unisex',
+  KIDS: 'kids'
+};
+
+// Occasions
+const OCCASION_TYPES = {
+  DAILY_WEAR: 'daily_wear',
+  WEDDING: 'wedding',
+  PARTY_WEAR: 'party_wear',
+  FESTIVE: 'festive',
+  GIFTING: 'gifting'
 };
 
 // Product Status
@@ -396,7 +439,12 @@ module.exports = {
   PAYMENT_METHODS,
   PRODUCT_CATEGORIES,
   METAL_TYPES,
+  METAL_COLORS,
+  STONE_TYPES,
+  DIAMOND_ATTRIBUTES,
   GOLD_PURITY,
+  GENDER_TYPES,
+  OCCASION_TYPES,
   PRODUCT_STATUS,
   BANNER_TYPES,
   BANNER_STATUS,

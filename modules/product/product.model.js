@@ -5,31 +5,50 @@ const productSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true, index: true },
   description: { type: String, required: true },
   category: { type: String, required: true, index: true },
-  metalType: { type: String, required: true, enum: Object.values(METAL_TYPES) },
-  purity: { type: String }, // e.g., '18K', '22K'
   
-  // UNIQUE ITEM TRACKING (1 Piece = 1 Product)
-  huid: { type: String, unique: true, sparse: true, index: true }, // Hallmarking Unique ID
-  tagId: { type: String, unique: true, sparse: true, index: true }, // Internal Barcode Tag
-  certificationUrl: { type: String }, // GIA/IGI/Hallmark link
+  // METAL INFORMATION
+  metalDetails: {
+    metalType: { type: String, enum: Object.values(METAL_TYPES) },
+    metalColor: { type: String }, // e.g., 'Yellow', 'White', 'Rose'
+    purity: { type: String }, // e.g., '18K', '22K'
+    grossWeight: { type: Number },
+    netWeight: { type: Number },
+  },
+
+  // STONE / DIAMOND INFORMATION
+  stoneDetails: [{
+    stoneType: { type: String }, // e.g., 'Diamond', 'Ruby', 'None'
+    color: { type: String },
+    clarity: { type: String },
+    carat: { type: String },
+    cut: { type: String },
+    certification: { type: String },
+  }],
+
+  // BASIC INFORMATION
+  basicDetails: {
+    gender: { type: String }, // e.g., 'Women', 'Men', 'Unisex'
+    brand: { type: String },
+    occasion: { type: String },
+  },
+
+  // CATEGORY-SPECIFIC (Dynamic: Size, Length, Diameter)
+  categoryAttributes: { type: Map, of: String },
+
+  // UNIQUE ITEM TRACKING
+  huid: { type: String, unique: true, sparse: true, index: true },
+  tagId: { type: String, unique: true, sparse: true, index: true },
+  certificationUrl: { type: String },
   
-  // PRECISION WEIGHTS (Grams)
-  grossWeight: { type: Number },
-  stoneWeight: { type: Number, default: 0 },
-  netWeight: { type: Number },
-  wastage: { type: Number, default: 0 }, // %
-  
-  // DYNAMIC PRICING BASE
-  price: { type: Number, min: 0 }, // This can stay as a sale price or base price
-  purchasePrice: { type: Number, default: 0 }, // WAC or specific cost
+  // PRICING & STOCK
+  price: { type: Number, min: 0 },
+  purchasePrice: { type: Number, default: 0 },
   makingCharges: { type: Number, default: 0 },
   makingChargeType: { type: String, enum: ['fixed', 'per_gram'], default: 'per_gram' },
   stoneCharges: { type: Number, default: 0 },
-  
+  wastage: { type: Number, default: 0 }, // %
   discount: { type: Number, default: 0, min: 0, max: 100 },
   finalPrice: { type: Number },
-  
-  // STOCK STATUS (Quantity)
   stock: { type: Number, default: 0 }, 
   status: { 
     type: String, 
@@ -38,7 +57,7 @@ const productSchema = new mongoose.Schema({
   },
   
   images: [{ url: String, public_id: String }],
-  specifications: { type: Map, of: String },
+  specifications: { type: Map, of: String }, // Keep for any other custom fields
   
   // TAX & ORIGIN
   hsnCode: { type: String, default: '7113' },
@@ -76,7 +95,7 @@ productSchema.pre('save', async function () {
   if (!this.sku) {
     try {
       const categoryCode = (this.category || 'GEN').split('-')[0].split('_')[0].substring(0, 3).toUpperCase();
-      const metalCode = (this.metalType || 'GEN').substring(0, 3).toUpperCase();
+      const metalCode = (this.metalDetails?.metalType || 'GEN').substring(0, 3).toUpperCase();
 
       // Use YYYYMMDD + random 6-char entropy for 1M concurrent scale
       const datePart = new Date().toISOString().slice(2, 10).replace(/-/g, ''); // YYMMDD
