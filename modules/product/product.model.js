@@ -18,6 +18,9 @@ const productSchema = new mongoose.Schema({
   // STONE / DIAMOND INFORMATION
   stoneDetails: [{
     stoneType: { type: String }, // e.g., 'Diamond', 'Ruby', 'None'
+    synthetic: { type: Boolean, default: false },
+    shape: { type: String, enum: ['Round', 'Pear', 'Marquis', 'Oval', 'Emerald', 'Cushion', 'Heart'] },
+    netWeight: { type: Number },
     color: { type: String },
     clarity: { type: String },
     carat: { type: String },

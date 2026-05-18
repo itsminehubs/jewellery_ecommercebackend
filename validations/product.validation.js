@@ -18,6 +18,9 @@ const createProduct = {
 
         stoneDetails: Joi.array().items(Joi.object({
             stoneType: Joi.string().allow('', null),
+            synthetic: Joi.boolean().default(false),
+            shape: Joi.string().valid('Round', 'Pear', 'Marquis', 'Oval', 'Emerald', 'Cushion', 'Heart').allow('', null),
+            netWeight: Joi.number().min(0).allow(null).optional(),
             color: Joi.string().allow('', null),
             clarity: Joi.string().allow('', null),
             carat: Joi.string().allow('', null),
@@ -75,6 +78,9 @@ const updateProduct = {
 
         stoneDetails: Joi.array().items(Joi.object({
             stoneType: Joi.string().allow('', null),
+            synthetic: Joi.boolean().default(false),
+            shape: Joi.string().valid('Round', 'Pear', 'Marquis', 'Oval', 'Emerald', 'Cushion', 'Heart').allow('', null),
+            netWeight: Joi.number().min(0).allow(null).optional(),
             color: Joi.string().allow('', null),
             clarity: Joi.string().allow('', null),
             carat: Joi.string().allow('', null),
