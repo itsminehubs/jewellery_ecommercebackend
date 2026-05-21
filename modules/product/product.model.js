@@ -88,15 +88,63 @@ productSchema.index({ trending: 1, status: 1 });
 productSchema.index({ featured: 1, status: 1 });
 productSchema.index({ shop_id: 1, createdAt: -1 });
 
-productSchema.pre('save', async function () {
-  // Update final price
-  if (this.isModified('price') || this.isModified('discount')) {
-    this.finalPrice = this.price - (this.price * this.discount / 100);
-  }
+productSchema.pre('save', async function (next) {
+  // --- DYNAMIC PRICING CALCULATION ---
+  try {
+    let metalValue = 0;
+    // Check if we have metal details to calculate rate
+    if (this.metalDetails && this.metalDetails.metalType && this.metalDetails.purity) {
+      // Lazy load GoldRate to prevent circular dependency issues
+      const GoldRate = mongoose.model('GoldRate');
+      const latestRate = await GoldRate.findOne({
+        metal: this.metalDetails.metalType.toLowerCase(),
+        purity: this.metalDetails.purity
+      }).sort({ effectiveDate: -1 });
 
-  // Autogenerate SKU if not present (Mass-scale ready)
-  if (!this.sku) {
-    try {
+      if (latestRate) {
+        const ratePerGram = latestRate.ratePerGram;
+        const netWeight = this.metalDetails.netWeight || 0;
+        metalValue = ratePerGram * netWeight;
+
+        // Apply wastage percentage if any
+        const wastagePercent = this.wastage || 0;
+        metalValue += metalValue * (wastagePercent / 100);
+      }
+    }
+
+    // Calculate Making Charges
+    let makingValue = 0;
+    const makingCharges = this.makingCharges || 0;
+    if (this.makingChargeType === 'per_gram') {
+      const weightForMaking = this.metalDetails?.grossWeight || this.metalDetails?.netWeight || 0;
+      makingValue = makingCharges * weightForMaking;
+    } else {
+      makingValue = makingCharges; // Fixed
+    }
+
+    // Calculate Stone Charges
+    const stoneValue = this.stoneCharges || 0;
+
+    // Total subtotal
+    const subtotal = metalValue + makingValue + stoneValue;
+
+    // Apply GST
+    const gstRate = this.gstRate || 3; // default 3% for jewelry
+    const totalCalculatedPrice = subtotal + (subtotal * (gstRate / 100));
+
+    // Update the base price if we have calculated values
+    if (subtotal > 0) {
+      this.price = Math.round(totalCalculatedPrice);
+    }
+
+    // Update final price based on discount
+    if (this.price !== undefined) {
+      const discount = this.discount || 0;
+      this.finalPrice = Math.round(this.price - (this.price * (discount / 100)));
+    }
+
+    // Autogenerate SKU if not present (Mass-scale ready)
+    if (!this.sku) {
       const categoryCode = (this.category || 'GEN').split('-')[0].split('_')[0].substring(0, 3).toUpperCase();
       const metalCode = (this.metalDetails?.metalType || 'GEN').substring(0, 3).toUpperCase();
 
@@ -105,9 +153,11 @@ productSchema.pre('save', async function () {
       const randomPart = Math.random().toString(36).substring(2, 6).toUpperCase();
 
       this.sku = `${categoryCode}-${metalCode}-${datePart}-${randomPart}`;
-    } catch (error) {
-      throw error;
     }
+
+    next();
+  } catch (error) {
+    next(error);
   }
 });
 
