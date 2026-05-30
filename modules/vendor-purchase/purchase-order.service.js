@@ -26,7 +26,7 @@ const getPurchaseOrders = async (filters = {}) => {
     return await PurchaseOrder.find(filters)
         .populate('vendor', 'name phone')
         .populate('employee', 'name')
-        .populate('items.product', 'name sku')
+        .populate('items.product', 'name sku category')
         .sort('-createdAt');
 };
 
@@ -34,7 +34,7 @@ const getPurchaseOrderById = async (id) => {
     const po = await PurchaseOrder.findById(id)
         .populate('vendor')
         .populate('employee', 'name')
-        .populate('items.product', 'name sku');
+        .populate('items.product', 'name sku category');
     if (!po) throw ApiError.notFound('Purchase Order not found');
     return po;
 };

@@ -330,8 +330,8 @@
                     <tr class="<%= index % 2 === 1 ? 'alt-row' : '' %>">
                         <td class="col-sl"><%= index + 1 %></td>
                         <td>
-                            <strong><%= item.product.name %></strong><br>
-                            <span style="font-size: 9px; color: var(--text-muted);">SKU: <%= item.product.sku %> | Category: <%= item.product.category %></span>
+                            <strong><%= item.product ? item.product.name : 'Deleted Product' %></strong><br>
+                            <span style="font-size: 9px; color: var(--text-muted);">SKU: <%= item.product ? item.product.sku : 'N/A' %> | Category: <%= item.product ? item.product.category : 'N/A' %></span>
                         </td>
                         <td class="col-qty"><%= item.quantity %></td>
                         <td class="col-price">₹<%= item.purchasePrice.toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
