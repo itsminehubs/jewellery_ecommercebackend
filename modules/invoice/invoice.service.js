@@ -52,25 +52,25 @@ const downloadInvoice = async (invoiceId) => {
   if (!order) throw ApiError.notFound('Order not found');
 
   const stores = await Store.find({ status: 'active' });
-  const store = stores[0] || { 
-      name: 'Jewellery Store', 
-      address: 'Main Market', 
-      city: 'City', 
-      state: 'State', 
-      pincode: '000000', 
-      phone: '0000000000' 
+  const store = stores[0] || {
+    name: 'Jewellery Store',
+    address: 'Main Market',
+    city: 'City',
+    state: 'State',
+    pincode: '000000',
+    phone: '0000000000'
   };
 
   // Get shipping address from order/user
   const shippingAddress = order.shippingAddress || (order.user && order.user.addresses && order.user.addresses.find(a => a.isDefault)) || {};
 
   const pdfBuffer = await generatePDF('invoice', {
-      invoice,
-      order,
-      store: store.toObject ? store.toObject() : store,
-      shippingAddress,
-      amountInWords: amountToWords(order.total),
-      adminName: 'Admin'
+    invoice,
+    order,
+    store: store.toObject ? store.toObject() : store,
+    shippingAddress,
+    amountInWords: amountToWords(order.total),
+    adminName: 'Admin'
   });
 
   return {

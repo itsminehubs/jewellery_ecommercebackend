@@ -5,7 +5,7 @@ const productSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true, index: true },
   description: { type: String, required: true },
   category: { type: String, required: true, index: true },
-  
+
   // METAL INFORMATION
   metalDetails: {
     metalType: { type: String, enum: Object.values(METAL_TYPES) },
@@ -26,6 +26,7 @@ const productSchema = new mongoose.Schema({
     carat: { type: String },
     cut: { type: String },
     certification: { type: String },
+    rate: { type: Number, default: 0 }, // Rate per carat/gram for dynamic stone calculation
   }],
 
   // BASIC INFORMATION
@@ -42,7 +43,7 @@ const productSchema = new mongoose.Schema({
   huid: { type: String, unique: true, sparse: true, index: true },
   tagId: { type: String, unique: true, sparse: true, index: true },
   certificationUrl: { type: String },
-  
+
   // PRICING & STOCK
   price: { type: Number, min: 0 },
   purchasePrice: { type: Number, default: 0 },
@@ -52,16 +53,16 @@ const productSchema = new mongoose.Schema({
   wastage: { type: Number, default: 0 }, // %
   discount: { type: Number, default: 0, min: 0, max: 100 },
   finalPrice: { type: Number },
-  stock: { type: Number, default: 0 }, 
-  status: { 
-    type: String, 
-    enum: Object.values(PRODUCT_STATUS), 
-    default: PRODUCT_STATUS.ACTIVE 
+  stock: { type: Number, default: 0 },
+  status: {
+    type: String,
+    enum: Object.values(PRODUCT_STATUS),
+    default: PRODUCT_STATUS.ACTIVE
   },
-  
+
   images: [{ url: String, public_id: String }],
   specifications: { type: Map, of: String }, // Keep for any other custom fields
-  
+
   // TAX & ORIGIN
   hsnCode: { type: String, default: '7113' },
   gstRate: { type: Number, default: 3 },
@@ -89,68 +90,94 @@ productSchema.index({ featured: 1, status: 1 });
 productSchema.index({ shop_id: 1, createdAt: -1 });
 
 productSchema.pre('save', async function () {
+  // Helpers
+  const roundTo2 = (num) => Number((Math.round((num + Number.EPSILON) * 100) / 100).toFixed(2));
+
   // --- DYNAMIC PRICING CALCULATION ---
-  // No need for next() in async Mongoose hooks
+  const grossWeight = this.metalDetails?.grossWeight || 0;
+
+  // 1. Calculate Stone Weight and Value Dynamically
+  let totalStoneWeight = 0;
+  let dynamicStoneValue = 0;
+
+  if (this.stoneDetails && this.stoneDetails.length > 0) {
+    this.stoneDetails.forEach(stone => {
+      const stoneWeight = stone.netWeight || 0;
+      totalStoneWeight += stoneWeight;
+      dynamicStoneValue += stoneWeight * (stone.rate || 0);
+    });
+  }
+
+  // Fallback to flat stone charges if dynamic calculation returns 0
+  const stoneValue = roundTo2(dynamicStoneValue > 0 ? dynamicStoneValue : (this.stoneCharges || 0));
+
+  // 2. Net Gold Weight
+  const netWeight = roundTo2(Math.max(0, grossWeight - totalStoneWeight));
+  if (this.metalDetails) {
+    this.metalDetails.netWeight = netWeight; // update the stored netWeight field
+  }
+
   let metalValue = 0;
-  // Check if we have metal details to calculate rate
+  let latestRate = null;
+
+  // 3. Fetch latest rate if metal details are set
   if (this.metalDetails && this.metalDetails.metalType && this.metalDetails.purity) {
-    // Lazy load GoldRate to prevent circular dependency issues
     const GoldRate = mongoose.model('GoldRate');
-    const latestRate = await GoldRate.findOne({
+    latestRate = await GoldRate.findOne({
       metal: this.metalDetails.metalType.toLowerCase(),
       purity: this.metalDetails.purity
-    }).sort({ effectiveDate: -1 });
+    }).sort({ effectiveDate: -1, createdAt: -1 });
 
     if (latestRate) {
       const ratePerGram = latestRate.ratePerGram;
-      const netWeight = this.metalDetails.netWeight || 0;
-      metalValue = ratePerGram * netWeight;
 
-      // Apply wastage percentage if any
+      // 4. Wastage & Final Gold Weight Calculation
       const wastagePercent = this.wastage || 0;
-      metalValue += metalValue * (wastagePercent / 100);
+      const wastageWeight = netWeight * (wastagePercent / 100);
+      const finalGoldWeight = netWeight + wastageWeight;
+
+      metalValue = roundTo2(finalGoldWeight * ratePerGram);
     }
   }
 
-  // Calculate Making Charges
+  // 5. Calculate Making Charges
   let makingValue = 0;
   const makingCharges = this.makingCharges || 0;
   if (this.makingChargeType === 'per_gram') {
-    const weightForMaking = this.metalDetails?.grossWeight || this.metalDetails?.netWeight || 0;
-    makingValue = makingCharges * weightForMaking;
+    makingValue = roundTo2(makingCharges * grossWeight);
   } else {
-    makingValue = makingCharges; // Fixed
+    makingValue = roundTo2(makingCharges); // Fixed
   }
 
-  // Calculate Stone Charges
-  const stoneValue = this.stoneCharges || 0;
+  // 6. GST Split (3% Metal, 5% Making, 0.25% Stones)
+  const gst = roundTo2(
+    (metalValue * 0.03) +
+    (makingValue * 0.05) +
+    (stoneValue * 0.0025)
+  );
 
-  // Total subtotal
-  const subtotal = metalValue + makingValue + stoneValue;
+  // 7. Subtotal and Totals
+  const subtotal = roundTo2(metalValue + makingValue + stoneValue);
+  const totalCalculatedPrice = roundTo2(subtotal + gst);
 
-  // Apply GST
-  const gstRate = this.gstRate || 3; // default 3% for jewelry
-  const totalCalculatedPrice = subtotal + (subtotal * (gstRate / 100));
-
-  // Update the base price if we have calculated values
+  // 8. Update the base price if we have calculated values
   if (subtotal > 0) {
-    this.price = Math.round(totalCalculatedPrice);
+    this.price = Math.round(totalCalculatedPrice); // Keep standard integer rounding for billing if needed
   }
 
-  // Update final price based on discount
+  // 9. Update final price based on discount
   if (this.price !== undefined) {
     const discount = this.discount || 0;
     this.finalPrice = Math.round(this.price - (this.price * (discount / 100)));
   }
 
-  // Autogenerate SKU if not present (Mass-scale ready)
+  // Autogenerate SKU if not present (6 character high-entropy random part)
   if (!this.sku) {
     const categoryCode = (this.category || 'GEN').split('-')[0].split('_')[0].substring(0, 3).toUpperCase();
     const metalCode = (this.metalDetails?.metalType || 'GEN').substring(0, 3).toUpperCase();
 
-    // Use YYYYMMDD + random 6-char entropy for 1M concurrent scale
     const datePart = new Date().toISOString().slice(2, 10).replace(/-/g, ''); // YYMMDD
-    const randomPart = Math.random().toString(36).substring(2, 6).toUpperCase();
+    const randomPart = Math.random().toString(36).substring(2, 8).toUpperCase(); // 6-character entropy
 
     this.sku = `${categoryCode}-${metalCode}-${datePart}-${randomPart}`;
   }

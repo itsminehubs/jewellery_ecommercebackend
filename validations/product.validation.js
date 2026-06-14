@@ -52,6 +52,11 @@ const createProduct = {
         stoneCharges: Joi.number().min(0).default(0),
         wastage: Joi.number().min(0).default(0),
         shop_id: Joi.string().allow('', null),
+        huid: Joi.string().allow('', null).optional(),
+        tagId: Joi.string().allow('', null).optional(),
+        hsnCode: Joi.string().allow('', null).optional().default('7113'),
+        gstRate: Joi.number().min(0).optional().default(3),
+        purchasePrice: Joi.number().min(0).optional().default(0),
 
         // Legacy root fields (Making optional to avoid errors during transition)
         metalType: Joi.string().valid(...Object.values(METAL_TYPES)).optional(),
@@ -109,6 +114,11 @@ const updateProduct = {
         stoneCharges: Joi.number().min(0),
         wastage: Joi.number().min(0),
         shop_id: Joi.string().allow('', null),
+        huid: Joi.string().allow('', null).optional(),
+        tagId: Joi.string().allow('', null).optional(),
+        hsnCode: Joi.string().allow('', null).optional(),
+        gstRate: Joi.number().min(0).optional(),
+        purchasePrice: Joi.number().min(0).optional(),
 
         // Legacy root fields (Optional)
         metalType: Joi.string().valid(...Object.values(METAL_TYPES)).optional(),

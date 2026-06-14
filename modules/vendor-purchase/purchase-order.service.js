@@ -48,7 +48,7 @@ const updatePurchaseOrder = async (id, updateData) => {
     }
 
     Object.assign(po, updateData);
-    
+
     // Recalculate totals if items changed
     if (updateData.items) {
         po.items = updateData.items.map(item => ({
@@ -95,7 +95,7 @@ const receivePurchaseOrder = async (id, itemDetails, userId) => {
             // Get base product template if any, or create from scratch
             // In a unique-item ERP, we typically create a NEW product record for every piece
             const baseProduct = await Product.findById(item.product).session(session);
-            
+
             // Create a NEW unique product record
             const uniqueProductData = {
                 ...baseProduct.toObject(),
@@ -146,7 +146,7 @@ const deletePurchaseOrder = async (id) => {
     const po = await PurchaseOrder.findById(id);
     if (!po) throw ApiError.notFound('Purchase Order not found');
 
-    if (po.status !== 'draft') {
+    if (po.status !== 'draft' && po.status !== 'cancelled') {
         throw ApiError.badRequest(`Cannot delete a Purchase Order that is already ${po.status}`);
     }
 
@@ -155,13 +155,13 @@ const deletePurchaseOrder = async (id) => {
 
 const generatePOPDF = async (po) => {
     const stores = await Store.find({ status: 'active' });
-    const store = stores[0] || { 
-        name: 'Jewellery Store', 
-        address: 'Main Market', 
-        city: 'City', 
-        state: 'State', 
-        pincode: '000000', 
-        phone: '0000000000' 
+    const store = stores[0] || {
+        name: 'Jewellery Store',
+        address: 'Main Market',
+        city: 'City',
+        state: 'State',
+        pincode: '000000',
+        phone: '0000000000'
     };
 
     return await generatePDF('purchase-order', {
