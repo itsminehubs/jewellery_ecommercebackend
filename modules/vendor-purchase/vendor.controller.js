@@ -3,7 +3,7 @@ const ApiResponse = require('../../utils/ApiResponse');
 const { asyncHandler } = require('../../middlewares/error.middleware');
 
 const createVendor = asyncHandler(async (req, res) => {
-  const vendor = await vendorService.createVendor(req.body);
+  const vendor = await vendorService.createVendor(req.body, req.user?.role);
   ApiResponse.created(vendor, 'Vendor created successfully').send(res);
 });
 
@@ -18,7 +18,7 @@ const getVendorById = asyncHandler(async (req, res) => {
 });
 
 const updateVendor = asyncHandler(async (req, res) => {
-  const vendor = await vendorService.updateVendor(req.params.id, req.body);
+  const vendor = await vendorService.updateVendor(req.params.id, req.body, req.user?.role);
   ApiResponse.success(vendor, 'Vendor updated successfully').send(res);
 });
 

@@ -1,6 +1,12 @@
 const mongoose = require('mongoose');
 
 const vendorSchema = new mongoose.Schema({
+  vendorId: {
+    type: String,
+    unique: true,
+    sparse: true,
+    trim: true
+  },
   name: {
     type: String,
     required: true,
@@ -22,12 +28,26 @@ const vendorSchema = new mongoose.Schema({
     lowercase: true
   },
   address: {
-    type: String
+    addressLine1: { type: String, trim: true },
+    addressLine2: { type: String, trim: true },
+    country: { type: String, trim: true },
+    state: { type: String, trim: true },
+    city: { type: String, trim: true },
+    pincode: { type: String, trim: true }
   },
   gstin: {
     type: String,
     trim: true,
     uppercase: true
+  },
+  panNumber: {
+    type: String,
+    trim: true,
+    uppercase: true
+  },
+  category: {
+    type: String,
+    trim: true
   },
   metalSpecialization: [{
     type: String

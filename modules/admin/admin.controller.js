@@ -18,7 +18,28 @@ const getDashboard = asyncHandler(async (req, res) => {
 
 const getAllOrders = asyncHandler(async (req, res) => {
   // Extract pagination from query
-  const { page = 1, limit = 20, ...filters } = req.query;
+  const { page = 1, limit = 20, search, status, ...otherFilters } = req.query;
+  const filters = { ...otherFilters };
+
+  if (status && status !== 'all') {
+    filters.status = status;
+  }
+
+  if (search) {
+    // If search is a valid ObjectId, search by _id
+    const mongoose = require('mongoose');
+    if (mongoose.Types.ObjectId.isValid(search)) {
+      filters._id = search;
+    } else {
+      // Need to search by user name/phone, but that requires joining or searching user first.
+      // Alternatively, we can search by shippingAddress.name or shippingAddress.phone
+      filters.$or = [
+        { 'shippingAddress.name': { $regex: search, $options: 'i' } },
+        { 'shippingAddress.phone': { $regex: search, $options: 'i' } },
+        { 'shippingAddress.city': { $regex: search, $options: 'i' } }
+      ];
+    }
+  }
 
   const result = await adminService.getAllOrders(filters, {
     page: parseInt(page),
@@ -36,11 +57,18 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
 });
 
 const getAllUsers = asyncHandler(async (req, res) => {
-  const { page = 1, limit = 20, role, isActive } = req.query;
+  const { page = 1, limit = 20, role, isActive, search } = req.query;
 
   const filters = {};
   if (role) filters.role = role;
   if (isActive !== undefined) filters.isActive = isActive === 'true';
+  if (search) {
+    filters.$or = [
+      { name: { $regex: search, $options: 'i' } },
+      { email: { $regex: search, $options: 'i' } },
+      { phone: { $regex: search, $options: 'i' } }
+    ];
+  }
 
   const options = { page, limit };
 
@@ -61,7 +89,7 @@ const updateEmployee = asyncHandler(async (req, res) => {
 });
 
 const toggleUserStatus = asyncHandler(async (req, res) => {
-  const user = await adminService.toggleUserStatus(req.params.id);
+  const user = await adminService.toggleUserStatus(req.params.id, req.user.role);
   ApiResponse.success(user, 'User status updated').send(res);
 });
 

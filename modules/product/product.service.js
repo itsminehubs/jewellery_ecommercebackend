@@ -99,9 +99,31 @@ const createProduct = async (productData, imagePaths = [], userId = null) => {
   return product;
 };
 
-const updateProduct = async (productId, updateData, imagePaths = [], userId = null) => {
+const updateProduct = async (productId, updateData, imagePaths = [], imagesToDelete = [], userId = null) => {
   const product = await Product.findById(productId);
   if (!product) throw ApiError.notFound('Product not found');
+
+  // Handle image deletions
+  if (imagesToDelete && imagesToDelete.length > 0) {
+    for (const imageId of imagesToDelete) {
+      const imageIndex = product.images.findIndex(img => 
+        img._id?.toString() === imageId.toString() || 
+        img.public_id === imageId || 
+        img.url === imageId
+      );
+      if (imageIndex !== -1) {
+        const image = product.images[imageIndex];
+        if (image.public_id) {
+          try {
+            await deleteImage(image.public_id);
+          } catch (error) {
+            logger.warn(`Failed to delete image ${image.public_id} from Cloudinary`);
+          }
+        }
+        product.images.splice(imageIndex, 1);
+      }
+    }
+  }
 
   if (imagePaths.length > 0) {
     const newImages = await uploadMultipleImages(imagePaths, 'products');

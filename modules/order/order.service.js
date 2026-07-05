@@ -73,6 +73,10 @@ const createOrder = async (userId, orderData) => {
     const shippingCost = orderData.shippingCost || 0;
     const total = subtotal + totalTax + shippingCost - discount;
 
+    if (total >= 200000 && !orderData.customerPan) {
+      throw ApiError.badRequest('PAN number is required for orders above ₹2,00,000');
+    }
+
     const order = new Order({
       user: userId,
       items,
@@ -83,6 +87,7 @@ const createOrder = async (userId, orderData) => {
       shippingCost,
       discount,
       total,
+      customerPan: orderData.customerPan,
       statusHistory: [{ status: 'pending', timestamp: new Date() }]
     });
 

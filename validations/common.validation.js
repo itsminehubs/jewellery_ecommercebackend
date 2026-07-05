@@ -19,6 +19,7 @@ const address = Joi.object({
   addressLine2: Joi.string().trim().allow(''),
   city: Joi.string().required().trim(),
   state: Joi.string().required().trim(),
+  country: Joi.string().required().trim(),
   pincode: Joi.string().pattern(/^[1-9][0-9]{5}$/).required(),
   landmark: Joi.string().trim().allow(''),
   isDefault: Joi.boolean().default(false)

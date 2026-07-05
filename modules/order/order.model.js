@@ -22,6 +22,7 @@ const orderSchema = new mongoose.Schema({
     addressLine2: String,
     city: String,
     state: String,
+    country: String,
     pincode: String,
     landmark: String
   },
@@ -38,7 +39,8 @@ const orderSchema = new mongoose.Schema({
   statusHistory: [{ status: String, timestamp: { type: Date, default: Date.now }, note: String }],
   notes: String,
   cancelReason: String,
-  deliveredAt: Date
+  deliveredAt: Date,
+  customerPan: String
 }, { timestamps: true });
 
 orderSchema.index({ user: 1, createdAt: -1 });

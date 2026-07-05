@@ -127,7 +127,8 @@ const createEmployee = async (employeeData, requesterRole) => {
       USER_ROLES.INVENTORY_STAFF,
       USER_ROLES.CUSTOMER_SUPPORT,
       USER_ROLES.MARKETING_EXECUTIVE,
-      USER_ROLES.ACCOUNTS_FINANCE
+      USER_ROLES.ACCOUNTS_FINANCE,
+      USER_ROLES.USER
     ];
     if (!allowedRolesForAdmin.includes(role)) {
       throw ApiError.forbidden('Admins can only create operational staff, not other administrators.');
@@ -202,7 +203,13 @@ const updateEmployee = async (userId, updateData, requesterRole) => {
   return targetUser;
 };
 
-const toggleUserStatus = async (userId) => {
+const toggleUserStatus = async (userId, requesterRole) => {
+  const { USER_ROLES } = require('../../utils/constants');
+  
+  if (requesterRole !== USER_ROLES.ADMIN && requesterRole !== USER_ROLES.SUPER_ADMIN) {
+    throw ApiError.forbidden('Only administrators can activate or deactivate accounts.');
+  }
+
   const user = await User.findById(userId);
   if (!user) throw ApiError.notFound('User not found');
 

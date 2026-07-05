@@ -28,7 +28,18 @@ const createProduct = asyncHandler(async (req, res) => {
 
 const updateProduct = asyncHandler(async (req, res) => {
   const imagePaths = req.files ? req.files.map(f => f.path) : [];
-  const product = await productService.updateProduct(req.params.id, req.body, imagePaths, req.user?._id);
+  
+  // Parse imagesToDelete
+  let imagesToDelete = [];
+  if (req.body.imagesToDelete) {
+    try {
+      imagesToDelete = JSON.parse(req.body.imagesToDelete);
+    } catch (e) {
+      imagesToDelete = Array.isArray(req.body.imagesToDelete) ? req.body.imagesToDelete : [req.body.imagesToDelete];
+    }
+  }
+
+  const product = await productService.updateProduct(req.params.id, req.body, imagePaths, imagesToDelete, req.user?._id);
   ApiResponse.success(product, 'Product updated successfully').send(res);
 });
 

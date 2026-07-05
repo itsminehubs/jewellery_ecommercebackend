@@ -119,6 +119,7 @@ const updateProduct = {
         hsnCode: Joi.string().allow('', null).optional(),
         gstRate: Joi.number().min(0).optional(),
         purchasePrice: Joi.number().min(0).optional(),
+        imagesToDelete: Joi.string().allow('', null).optional(),
 
         // Legacy root fields (Optional)
         metalType: Joi.string().valid(...Object.values(METAL_TYPES)).optional(),
