@@ -43,6 +43,7 @@ const createProduct = {
         status: Joi.string().valid(...Object.values(PRODUCT_STATUS)).default(PRODUCT_STATUS.ACTIVE),
         featured: Joi.boolean().default(false),
         trending: Joi.boolean().default(false),
+        forHer: Joi.boolean().default(false),
         sku: Joi.string().allow('', null),
         specifications: Joi.object().pattern(Joi.string(), Joi.string()),
 
@@ -107,6 +108,7 @@ const updateProduct = {
         status: Joi.string().valid(...Object.values(PRODUCT_STATUS)),
         featured: Joi.boolean(),
         trending: Joi.boolean(),
+        forHer: Joi.boolean(),
         specifications: Joi.object().pattern(Joi.string(), Joi.string()),
 
         makingCharges: Joi.number().min(0),

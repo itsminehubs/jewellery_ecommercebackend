@@ -75,6 +75,7 @@ const productSchema = new mongoose.Schema({
   sales: { type: Number, default: 0 },
   featured: { type: Boolean, default: false },
   trending: { type: Boolean, default: false },
+  forHer: { type: Boolean, default: false },
   sku: { type: String, unique: true, index: true },
 }, { timestamps: true });
 
@@ -87,6 +88,7 @@ productSchema.index({ createdAt: -1 });
 productSchema.index({ category: 1, status: 1, finalPrice: 1 });
 productSchema.index({ trending: 1, status: 1 });
 productSchema.index({ featured: 1, status: 1 });
+productSchema.index({ forHer: 1, status: 1 });
 productSchema.index({ shop_id: 1, createdAt: -1 });
 
 productSchema.pre('save', async function () {

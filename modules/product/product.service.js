@@ -22,7 +22,8 @@ const getAllProducts = async (filters = {}, options = {}) => {
     purity,
     gemstones,
     style,
-    minDiscount
+    minDiscount,
+    forHer
   } = options;
   
   const query = { status: 'active', ...filters };
@@ -48,6 +49,7 @@ const getAllProducts = async (filters = {}, options = {}) => {
   if (gemstones) query.gemstones = gemstones;
   if (style) query.style = style;
   if (minDiscount) query.discount = { $gte: Number(minDiscount) };
+  if (forHer === 'true' || forHer === true) query.forHer = true;
 
   const skip = (page - 1) * limit;
   const products = await Product.find(query).sort(sort).skip(skip).limit(Number(limit));
