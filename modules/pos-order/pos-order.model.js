@@ -19,7 +19,9 @@ const posOrderItemSchema = new mongoose.Schema({
     gstAmount: Number,
     totalAmount: Number,
     costPrice: { type: Number, default: 0 },
-    quantity: { type: Number, default: 1 }
+    quantity: { type: Number, default: 1 },
+    returned: { type: Boolean, default: false },
+    returnReason: String
 });
 
 const posOrderSchema = new mongoose.Schema({
@@ -49,7 +51,7 @@ const posOrderSchema = new mongoose.Schema({
     payments: [{
         method: {
             type: String,
-            enum: ['cash', 'card', 'upi', 'bank_transfer', 'exchange', 'credit'],
+            enum: ['cash', 'card', 'upi', 'bank_transfer', 'exchange', 'credit', 'scheme_redemption'],
             required: true
         },
         amount: { type: Number, required: true },
@@ -61,6 +63,9 @@ const posOrderSchema = new mongoose.Schema({
     isCreditSale: { type: Boolean, default: false },
     creditAmount: { type: Number, default: 0 },
     customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // Linked user for ledger
+
+    // Scheme tracking
+    redeemedSchemeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Scheme' },
 
     // Exchange Details (if any)
     exchangeItems: [{
@@ -74,9 +79,19 @@ const posOrderSchema = new mongoose.Schema({
 
     status: {
         type: String,
-        enum: ['completed', 'cancelled', 'refunded'],
+        enum: ['completed', 'cancelled', 'refunded', 'partially_refunded'],
         default: 'completed'
     },
+    refunds: [{
+        method: {
+            type: String,
+            enum: ['cash', 'card', 'upi', 'bank_transfer', 'credit'],
+            required: true
+        },
+        amount: { type: Number, required: true },
+        date: { type: Date, default: Date.now },
+        notes: String
+    }],
     billedBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
@@ -86,6 +101,10 @@ const posOrderSchema = new mongoose.Schema({
 }, {
     timestamps: true
 });
+
+// Compound Indexes for high-performance reporting queries
+posOrderSchema.index({ shop_id: 1, status: 1, createdAt: -1 });
+posOrderSchema.index({ 'items.product': 1 });
 
 // Auto-generate a professional Order ID (e.g., POS-SHOP01-20240307-001)
 posOrderSchema.pre('save', async function () {

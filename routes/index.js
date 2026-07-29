@@ -42,6 +42,8 @@ router.use('/reviews', reviewRoutes);
 router.use('/procurement', vendorPurchaseRoutes);
 router.use('/audit', require('../modules/audit/audit.routes'));
 router.use('/accounting', require('../modules/accounting/accounting.routes'));
+router.use('/schemes', require('../modules/scheme/scheme.routes'));
+router.use('/reports', require('../modules/reports/reports.routes'));
 
 // API info
 router.get('/', (req, res) => {

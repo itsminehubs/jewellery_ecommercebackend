@@ -44,9 +44,22 @@ const getStoreAnalytics = asyncHandler(async (req, res) => {
     ApiResponse.success(analytics, 'Analytics fetched successfully').send(res);
 });
 
+const processReturn = asyncHandler(async (req, res) => {
+    const orderId = req.params.id;
+    const returnData = req.body;
+    
+    if (!returnData.items || returnData.items.length === 0) {
+        return ApiResponse.error('No items provided for return', 400).send(res);
+    }
+
+    const order = await posOrderService.processReturn(orderId, returnData, req.user._id);
+    ApiResponse.success(order, 'Return processed successfully').send(res);
+});
+
 module.exports = {
     createOrder,
     getStoreOrders,
     getOrderById,
-    getStoreAnalytics
+    getStoreAnalytics,
+    processReturn
 };

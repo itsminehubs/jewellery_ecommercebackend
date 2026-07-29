@@ -13,6 +13,13 @@ const getProfile = asyncHandler(async (req, res) => {
   ApiResponse.success(user, 'Profile fetched successfully').send(res);
 });
 
+const getUserByPhone = asyncHandler(async (req, res) => {
+  const phone = req.query.phone;
+  if (!phone) throw ApiError.badRequest('Phone number is required');
+  const user = await userService.getUserByPhone(phone);
+  ApiResponse.success(user, 'User fetched successfully').send(res);
+});
+
 const updateProfile = asyncHandler(async (req, res) => {
   const user = await userService.updateProfile(req.user._id, req.body);
   ApiResponse.success(user, 'Profile updated successfully').send(res);
@@ -141,6 +148,7 @@ const updateFcmToken = asyncHandler(async (req, res) => {
 
 module.exports = {
   getProfile,
+  getUserByPhone,
   updateProfile,
   uploadProfileImage,
   addAddress,

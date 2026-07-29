@@ -48,5 +48,6 @@ const customerLedgerSchema = new mongoose.Schema({
 });
 
 customerLedgerSchema.index({ createdAt: -1 });
+customerLedgerSchema.index({ customer: 1, createdAt: -1 });
 
 module.exports = mongoose.model('CustomerLedger', customerLedgerSchema);

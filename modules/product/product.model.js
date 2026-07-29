@@ -90,6 +90,7 @@ productSchema.index({ trending: 1, status: 1 });
 productSchema.index({ featured: 1, status: 1 });
 productSchema.index({ forHer: 1, status: 1 });
 productSchema.index({ shop_id: 1, createdAt: -1 });
+productSchema.index({ shop_id: 1, status: 1 }); // For Reports Stock Valuation
 
 productSchema.pre('save', async function () {
   // Helpers

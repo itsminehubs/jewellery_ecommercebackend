@@ -20,6 +20,15 @@ const getUser = async (userId) => {
   return user;
 };
 
+const getUserByPhone = async (phone) => {
+  if (!phone) throw ApiError.badRequest('Phone number is required');
+  const user = await User.findOne({ phone }).select('-password -refreshToken');
+  if (!user) {
+    throw ApiError.notFound('User not found');
+  }
+  return user;
+};
+
 const updateProfile = async (userId, updateData) => {
   const user = await User.findById(userId);
   if (!user) {
@@ -292,6 +301,7 @@ const updateFcmToken = async (userId, fcmToken) => {
 
 module.exports = {
   getUser,
+  getUserByPhone,
   updateProfile,
   uploadProfileImage,
   addAddress,

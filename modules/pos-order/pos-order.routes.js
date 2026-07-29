@@ -9,5 +9,6 @@ router.post('/', posOrderController.createOrder);
 router.get('/', posOrderController.getStoreOrders);
 router.get('/analytics', posOrderController.getStoreAnalytics);
 router.get('/:id', posOrderController.getOrderById);
+router.post('/:id/return', posOrderController.processReturn);
 
 module.exports = router;
