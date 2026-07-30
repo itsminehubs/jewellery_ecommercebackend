@@ -9,6 +9,7 @@ const { profileImageUpload } = require('../../middlewares/upload.middleware');
 // Profile routes
 router.get('/profile', authenticate, userController.getProfile);
 router.get('/phone', authenticate, userController.getUserByPhone);
+router.post('/quick-customer', authenticate, userController.createQuickCustomer);
 router.put('/profile', authenticate, userController.updateProfile);
 router.post('/profile/image', authenticate, profileImageUpload, userController.uploadProfileImage);
 

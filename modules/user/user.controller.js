@@ -20,6 +20,11 @@ const getUserByPhone = asyncHandler(async (req, res) => {
   ApiResponse.success(user, 'User fetched successfully').send(res);
 });
 
+const createQuickCustomer = asyncHandler(async (req, res) => {
+  const user = await userService.createQuickCustomer(req.body);
+  ApiResponse.created(user, 'Quick customer created successfully').send(res);
+});
+
 const updateProfile = asyncHandler(async (req, res) => {
   const user = await userService.updateProfile(req.user._id, req.body);
   ApiResponse.success(user, 'Profile updated successfully').send(res);
@@ -149,6 +154,7 @@ const updateFcmToken = asyncHandler(async (req, res) => {
 module.exports = {
   getProfile,
   getUserByPhone,
+  createQuickCustomer,
   updateProfile,
   uploadProfileImage,
   addAddress,

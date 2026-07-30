@@ -1,4 +1,5 @@
 const User = require('./user.model');
+const POSOrder = require('../pos-order/pos-order.model');
 const ApiError = require('../../utils/ApiError');
 const { cacheHelper } = require('../../config');
 const { CACHE_KEYS, CACHE_TTL } = require('../../utils/constants');
@@ -22,11 +23,41 @@ const getUser = async (userId) => {
 
 const getUserByPhone = async (phone) => {
   if (!phone) throw ApiError.badRequest('Phone number is required');
-  const user = await User.findOne({ phone }).select('-password -refreshToken');
+  const user = await User.findOne({ phone }).select('-password -refreshToken').lean();
   if (!user) {
     throw ApiError.notFound('User not found');
   }
-  return user;
+
+  // Fetch recent purchases
+  const recentOrders = await POSOrder.find({ 'customer.phone': phone })
+    .sort({ createdAt: -1 })
+    .limit(5)
+    .select('orderId grandTotal items createdAt')
+    .lean();
+
+  return { ...user, recentOrders };
+};
+
+const createQuickCustomer = async (customerData) => {
+  const { name, phone, email } = customerData;
+  if (!phone) throw ApiError.badRequest('Phone is required');
+
+  const existingUser = await User.findOne({ phone });
+  if (existingUser) throw ApiError.badRequest('User with this phone already exists');
+
+  // Random 12-char secure password for walk-in
+  const randomPassword = Math.random().toString(36).slice(-12);
+
+  const user = await User.create({
+    name: name || 'Walk-in Customer',
+    phone,
+    email,
+    password: randomPassword,
+    role: 'user',
+    isPhoneVerified: true // Assumption for POS in-person
+  });
+
+  return await User.findById(user._id).select('-password -refreshToken').lean();
 };
 
 const updateProfile = async (userId, updateData) => {
@@ -302,6 +333,7 @@ const updateFcmToken = async (userId, fcmToken) => {
 module.exports = {
   getUser,
   getUserByPhone,
+  createQuickCustomer,
   updateProfile,
   uploadProfileImage,
   addAddress,
