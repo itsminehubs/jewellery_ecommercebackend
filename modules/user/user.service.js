@@ -28,18 +28,17 @@ const getUserByPhone = async (phone) => {
     throw ApiError.notFound('User not found');
   }
 
-  // Fetch recent purchases
+  // Fetch recent purchases (up to 50 for complete POS history)
   const recentOrders = await POSOrder.find({ 'customer.phone': phone })
     .sort({ createdAt: -1 })
-    .limit(5)
-    .select('orderId grandTotal items createdAt')
+    .limit(50)
     .lean();
 
   return { ...user, recentOrders };
 };
 
 const createQuickCustomer = async (customerData) => {
-  const { name, phone, email } = customerData;
+  const { name, phone, email, addresses } = customerData;
   if (!phone) throw ApiError.badRequest('Phone is required');
 
   const existingUser = await User.findOne({ phone });
@@ -52,6 +51,7 @@ const createQuickCustomer = async (customerData) => {
     name: name || 'Walk-in Customer',
     phone,
     email,
+    addresses: addresses || [],
     password: randomPassword,
     role: 'user',
     isPhoneVerified: true // Assumption for POS in-person

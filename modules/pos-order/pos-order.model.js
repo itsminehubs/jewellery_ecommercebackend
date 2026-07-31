@@ -107,7 +107,7 @@ posOrderSchema.index({ shop_id: 1, status: 1, createdAt: -1 });
 posOrderSchema.index({ 'items.product': 1 });
 
 // Auto-generate a professional Order ID (e.g., POS-SHOP01-20240307-001)
-posOrderSchema.pre('save', async function () {
+posOrderSchema.pre('validate', async function () {
     if (!this.orderId) {
         const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
         const count = await mongoose.model('POSOrder').countDocuments({

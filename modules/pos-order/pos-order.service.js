@@ -143,10 +143,36 @@ const createOrder = async (orderData) => {
 /**
  * Get all orders for a store
  */
-const getStoreOrders = async (shop_id, filter = {}) => {
-    return await POSOrder.find({ shop_id, ...filter })
+const getStoreOrders = async (shop_id, query = {}) => {
+    const { page = 1, limit = 20, search = '' } = query;
+    const skip = (page - 1) * limit;
+
+    const filter = { shop_id };
+    
+    if (search) {
+        filter.$or = [
+            { orderId: { $regex: search, $options: 'i' } },
+            { 'customer.name': { $regex: search, $options: 'i' } },
+            { 'customer.phone': { $regex: search, $options: 'i' } }
+        ];
+    }
+
+    const items = await POSOrder.find(filter)
         .populate('billedBy', 'name')
-        .sort({ createdAt: -1 });
+        .sort({ createdAt: -1 })
+        .skip(parseInt(skip))
+        .limit(parseInt(limit));
+
+    const total = await POSOrder.countDocuments(filter);
+
+    return {
+        items,
+        pagination: {
+            totalItems: total,
+            currentPage: parseInt(page),
+            totalPages: Math.ceil(total / limit)
+        }
+    };
 };
 
 /**
