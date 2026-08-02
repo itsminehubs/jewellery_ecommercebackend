@@ -44,10 +44,18 @@ const getAllProducts = async (filters = {}, options = {}) => {
     if (maxPrice) query.finalPrice.$lte = Number(maxPrice);
   }
 
-  if (metalType) query.metalType = metalType;
-  if (purity) query.purity = purity;
-  if (gemstones) query.gemstones = gemstones;
-  if (style) query.style = style;
+  if (metalType) {
+    query['metalDetails.metalType'] = { $in: metalType.split(',').map(m => new RegExp(`^${m.trim()}$`, 'i')) };
+  }
+  if (purity) {
+    query['metalDetails.purity'] = { $in: purity.split(',').map(p => new RegExp(`^${p.trim()}$`, 'i')) };
+  }
+  if (gemstones) {
+    query['stoneDetails.stoneType'] = { $in: gemstones.split(',').map(g => new RegExp(`^${g.trim()}$`, 'i')) };
+  }
+  if (style) {
+    query['basicDetails.occasion'] = { $in: style.split(',').map(s => new RegExp(`^${s.trim()}$`, 'i')) };
+  }
   if (minDiscount) query.discount = { $gte: Number(minDiscount) };
   if (forHer === 'true' || forHer === true) query.forHer = true;
 

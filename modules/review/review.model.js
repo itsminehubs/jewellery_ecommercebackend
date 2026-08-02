@@ -50,13 +50,33 @@ const reviewSchema = new mongoose.Schema({
     isVerifiedPurchase: {
         type: Boolean,
         default: false
+    },
+    helpfulCount: {
+        type: Number,
+        default: 0
+    },
+    notHelpfulCount: {
+        type: Number,
+        default: 0
+    },
+    reported: {
+        type: Boolean,
+        default: false
+    },
+    reportReasons: [{
+        type: String
+    }],
+    reply: {
+        message: String,
+        adminId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User'
+        },
+        date: Date
     }
 }, { timestamps: true });
 
-// Prevent multiple reviews from same user for same product
-reviewSchema.index({ user: 1, product: 1 }, { 
-    unique: true, 
-    partialFilterExpression: { user: { $exists: true, $ne: null } } 
-});
+// Index for fetching product reviews faster
+reviewSchema.index({ product: 1, status: 1 });
 
 module.exports = mongoose.model('Review', reviewSchema);
