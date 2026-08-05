@@ -26,7 +26,7 @@ const parseProductData = (req, res, next) => {
 router.get('/', productController.getAllProducts);
 router.get('/featured', productController.getFeaturedProducts);
 router.get('/trending', productController.getTrendingProducts);
-router.get('/sku/:sku', productController.getProductBySku);
+router.get('/scan/:code', productController.scanProduct);
 router.get('/:id', productController.getProduct);
 router.get('/category/:category', productController.getProductsByCategory);
 

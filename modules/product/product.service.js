@@ -196,9 +196,21 @@ const deleteProduct = async (productId, userId = null) => {
   logger.info(`Product deleted: ${productId}`);
 };
 
-const getProductBySku = async (sku) => {
-  const product = await Product.findOne({ sku });
-  if (!product) throw ApiError.notFound('Product not found with this SKU');
+const getProductByScannedCode = async (scannedCode) => {
+  let product = await Product.findOne({ sku: scannedCode });
+  
+  if (!product) {
+    product = await Product.findOne({ tagId: scannedCode });
+  }
+
+  if (!product) {
+    product = await Product.findOne({ huid: scannedCode });
+  }
+
+  if (!product) {
+    throw ApiError.notFound('Product not found with this barcode');
+  }
+
   return product;
 };
 const getProductsByCategory = async (category, options = {}) => {
@@ -293,8 +305,8 @@ module.exports = {
   createProduct,
   updateProduct,
   deleteProduct,
+  getProductByScannedCode,
   getProductsByCategory,
   getFeaturedProducts,
-  getTrendingProducts,
-  getProductBySku
+  getTrendingProducts
 };

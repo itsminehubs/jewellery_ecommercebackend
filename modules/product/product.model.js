@@ -76,6 +76,7 @@ const productSchema = new mongoose.Schema({
   featured: { type: Boolean, default: false },
   trending: { type: Boolean, default: false },
   forHer: { type: Boolean, default: false },
+  carbonsmithworld: { type: Boolean, default: false },
   sku: { type: String, unique: true, index: true },
 }, { timestamps: true });
 
@@ -89,6 +90,7 @@ productSchema.index({ category: 1, status: 1, finalPrice: 1 });
 productSchema.index({ trending: 1, status: 1 });
 productSchema.index({ featured: 1, status: 1 });
 productSchema.index({ forHer: 1, status: 1 });
+productSchema.index({ carbonsmithworld: 1, status: 1 });
 productSchema.index({ shop_id: 1, createdAt: -1 });
 productSchema.index({ shop_id: 1, status: 1 }); // For Reports Stock Valuation
 
@@ -102,13 +104,37 @@ productSchema.pre('save', async function () {
   // 1. Calculate Stone Weight and Value Dynamically
   let totalStoneWeight = 0;
   let dynamicStoneValue = 0;
+  
+  // Ensure DiamondRate model is available
+  const DiamondRate = mongoose.models.DiamondRate || require('../diamond-rate/diamondRate.model');
 
   if (this.stoneDetails && this.stoneDetails.length > 0) {
-    this.stoneDetails.forEach(stone => {
+    for (let stone of this.stoneDetails) {
       const stoneWeight = stone.netWeight || 0;
       totalStoneWeight += stoneWeight;
-      dynamicStoneValue += stoneWeight * (stone.rate || 0);
-    });
+      
+      let rate = stone.rate || 0;
+
+      // Smart calculation for Diamond
+      if (stone.stoneType === 'Diamond') {
+        const query = {
+          cut: stone.cut || 'All',
+          color: stone.color || 'All',
+          clarity: stone.clarity || 'All'
+        };
+        // Fallback matching to 'All' if exact match not found
+        let diamondRateDoc = await DiamondRate.findOne(query).sort({ effectiveDate: -1, createdAt: -1 });
+        if (!diamondRateDoc) {
+          diamondRateDoc = await DiamondRate.findOne({ cut: 'All', color: 'All', clarity: 'All' }).sort({ effectiveDate: -1, createdAt: -1 });
+        }
+        if (diamondRateDoc) {
+          rate = diamondRateDoc.ratePerCarat;
+          stone.rate = rate; // Update the stone rate on the document so it's saved
+        }
+      }
+
+      dynamicStoneValue += stoneWeight * rate;
+    }
   }
 
   // Fallback to flat stone charges if dynamic calculation returns 0
@@ -133,56 +159,61 @@ productSchema.pre('save', async function () {
 
     if (latestRate) {
       const ratePerGram = latestRate.ratePerGram;
-
-      // 4. Wastage & Final Gold Weight Calculation
       const wastagePercent = this.wastage || 0;
       const wastageWeight = netWeight * (wastagePercent / 100);
       const finalGoldWeight = netWeight + wastageWeight;
-
       metalValue = roundTo2(finalGoldWeight * ratePerGram);
     }
   }
 
-  // 5. Calculate Making Charges
+  // 5. Calculate Making Charges & Apply Discount
   let makingValue = 0;
   const makingCharges = this.makingCharges || 0;
   if (this.makingChargeType === 'per_gram') {
-    makingValue = roundTo2(makingCharges * grossWeight);
+    makingValue = makingCharges * grossWeight;
   } else {
-    makingValue = roundTo2(makingCharges); // Fixed
+    makingValue = makingCharges; // Fixed
   }
 
-  // 6. GST Split (3% Metal, 5% Making, 0.25% Stones)
+  const discount = this.discount || 0;
+  // ONLY makingValue gets discounted
+  let discountedMakingValue = makingValue - (makingValue * (discount / 100));
+  discountedMakingValue = roundTo2(discountedMakingValue);
+
+  // 6. GST Split (3% Metal, 5% Making (on discounted), 0.25% Stones)
   const gst = roundTo2(
     (metalValue * 0.03) +
-    (makingValue * 0.05) +
+    (discountedMakingValue * 0.05) +
     (stoneValue * 0.0025)
   );
 
   // 7. Subtotal and Totals
-  const subtotal = roundTo2(metalValue + makingValue + stoneValue);
+  const subtotal = roundTo2(metalValue + discountedMakingValue + stoneValue);
   const totalCalculatedPrice = roundTo2(subtotal + gst);
 
-  // 8. Update the base price if we have calculated values
+  // 8. Update the base price and final price
   if (subtotal > 0) {
-    this.price = Math.round(totalCalculatedPrice); // Keep standard integer rounding for billing if needed
+    // Price and finalPrice are now identical, discount was applied during makingValue calculation
+    this.price = Math.round(totalCalculatedPrice); 
+    this.finalPrice = Math.round(totalCalculatedPrice);
   }
 
-  // 9. Update final price based on discount
-  if (this.price !== undefined) {
-    const discount = this.discount || 0;
-    this.finalPrice = Math.round(this.price - (this.price * (discount / 100)));
-  }
-
-  // Autogenerate SKU if not present (6 character high-entropy random part)
-  if (!this.sku) {
+  // Autogenerate SKU and tagId if not present
+  if (!this.sku || !this.tagId) {
     const categoryCode = (this.category || 'GEN').split('-')[0].split('_')[0].substring(0, 3).toUpperCase();
     const metalCode = (this.metalDetails?.metalType || 'GEN').substring(0, 3).toUpperCase();
+    const firstLetter = (this.name || 'X').charAt(0).toUpperCase();
 
-    const datePart = new Date().toISOString().slice(2, 10).replace(/-/g, ''); // YYMMDD
-    const randomPart = Math.random().toString(36).substring(2, 8).toUpperCase(); // 6-character entropy
+    if (!this.sku) {
+      const randomPartSku = Math.floor(100000 + Math.random() * 900000); // 6-digit random
+      this.sku = `CS-${categoryCode}-${metalCode}-${firstLetter}-${randomPartSku}`;
+    }
 
-    this.sku = `${categoryCode}-${metalCode}-${datePart}-${randomPart}`;
+    if (!this.tagId) {
+      // Ensure it's different from SKU just in case, but same format
+      const randomPartTag = Math.floor(100000 + Math.random() * 900000);
+      this.tagId = `CS-${categoryCode}-${metalCode}-${firstLetter}-${randomPartTag}`;
+    }
   }
 });
 

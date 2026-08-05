@@ -51,11 +51,12 @@ const posOrderSchema = new mongoose.Schema({
     payments: [{
         method: {
             type: String,
-            enum: ['cash', 'card', 'upi', 'bank_transfer', 'exchange', 'credit', 'scheme_redemption'],
+            enum: ['cash', 'card', 'upi', 'bank_transfer', 'exchange', 'credit', 'scheme_redemption', 'credit_memo'],
             required: true
         },
         amount: { type: Number, required: true },
         transactionId: String, // For card/UPI
+        referenceId: String, // For credit_memo (e.g. CM-1001)
         notes: String
     }],
 

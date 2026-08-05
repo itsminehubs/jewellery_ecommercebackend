@@ -17,15 +17,17 @@ const createProduct = {
         }).required(),
 
         stoneDetails: Joi.array().items(Joi.object({
+            id: Joi.any().optional(),
             stoneType: Joi.string().allow('', null),
             synthetic: Joi.boolean().default(false),
-            shape: Joi.string().valid('Round', 'Pear', 'Marquis', 'Oval', 'Emerald', 'Cushion', 'Heart').allow('', null),
+            shape: Joi.string().allow('', null),
             netWeight: Joi.number().min(0).allow(null).optional(),
             color: Joi.string().allow('', null),
             clarity: Joi.string().allow('', null),
             carat: Joi.string().allow('', null),
             cut: Joi.string().allow('', null),
             certification: Joi.string().allow('', null),
+            rate: Joi.any().optional(),
         })).default([]),
 
         basicDetails: Joi.object({
@@ -44,6 +46,7 @@ const createProduct = {
         featured: Joi.boolean().default(false),
         trending: Joi.boolean().default(false),
         forHer: Joi.boolean().default(false),
+        carbonsmithworld: Joi.boolean().default(false),
         sku: Joi.string().allow('', null),
         specifications: Joi.object().pattern(Joi.string(), Joi.string()),
 
@@ -83,15 +86,17 @@ const updateProduct = {
         }),
 
         stoneDetails: Joi.array().items(Joi.object({
+            id: Joi.any().optional(),
             stoneType: Joi.string().allow('', null),
             synthetic: Joi.boolean().default(false),
-            shape: Joi.string().valid('Round', 'Pear', 'Marquis', 'Oval', 'Emerald', 'Cushion', 'Heart').allow('', null),
+            shape: Joi.string().allow('', null),
             netWeight: Joi.number().min(0).allow(null).optional(),
             color: Joi.string().allow('', null),
             clarity: Joi.string().allow('', null),
             carat: Joi.string().allow('', null),
             cut: Joi.string().allow('', null),
             certification: Joi.string().allow('', null),
+            rate: Joi.any().optional(),
         })),
 
         basicDetails: Joi.object({
@@ -109,6 +114,7 @@ const updateProduct = {
         featured: Joi.boolean(),
         trending: Joi.boolean(),
         forHer: Joi.boolean(),
+        carbonsmithworld: Joi.boolean(),
         specifications: Joi.object().pattern(Joi.string(), Joi.string()),
 
         makingCharges: Joi.number().min(0),

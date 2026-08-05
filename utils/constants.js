@@ -162,7 +162,8 @@ const PAYMENT_METHODS = {
   CARD: 'card',
   UPI: 'upi',
   CREDIT: 'credit', // Udhar
-  EXCHANGE: 'exchange'
+  EXCHANGE: 'exchange',
+  CREDIT_MEMO: 'credit_memo'
 };
 
 // Product Categories

@@ -3,6 +3,7 @@ const POSOrder = require('./pos-order.model');
 const Product = require('../product/product.model');
 const User = require('../user/user.model');
 const Scheme = require('../scheme/scheme.model');
+const CreditMemo = require('../credit-memo/creditMemo.model');
 const loyaltyService = require('../user/loyalty.service');
 const inventoryService = require('../product/inventory.service');
 const auditService = require('../audit/audit.service');
@@ -49,6 +50,7 @@ const createOrder = async (orderData) => {
             let totalOnline = 0;
             let totalCredit = 0;
             let totalSchemeRedemption = 0;
+            let totalCreditMemo = 0;
 
             for (const payment of orderData.payments) {
                 if (payment.method === 'cash') totalCash += payment.amount;
@@ -60,6 +62,9 @@ const createOrder = async (orderData) => {
                 }
                 else if (payment.method === 'scheme_redemption') {
                     totalSchemeRedemption += payment.amount;
+                }
+                else if (payment.method === 'credit_memo') {
+                    totalCreditMemo += payment.amount;
                 }
             }
 
@@ -80,12 +85,48 @@ const createOrder = async (orderData) => {
                 
                 // Mark scheme as redeemed
                 scheme.status = 'redeemed';
-                scheme.redemptionOrder = orderObj._id;
-                scheme.redemptionDate = new Date();
-                scheme.redemptionValue = totalSchemeRedemption;
+                scheme.redeemedOn = new Date();
+                scheme.redeemedOrderId = orderObj.orderId;
                 await scheme.save({ session });
                 
                 orderObj.redeemedSchemeId = scheme._id;
+            }
+
+            // Handle Credit Memo Redemption
+            if (totalCreditMemo > 0) {
+                for (const payment of orderData.payments) {
+                    if (payment.method === 'credit_memo') {
+                        if (!payment.referenceId) throw new Error('Reference ID (Credit Memo ID) is required for credit_memo payment');
+                        // Concurrency-Safe Atomic Redemption
+                        const memo = await CreditMemo.findOneAndUpdate(
+                            { 
+                                memoId: payment.referenceId,
+                                balance: { $gte: payment.amount }
+                            },
+                            { 
+                                $inc: { balance: -payment.amount },
+                                $push: { 
+                                    redemptions: { 
+                                        orderId: orderObj.orderId, 
+                                        amountUsed: payment.amount 
+                                    } 
+                                }
+                            },
+                            { new: true, session }
+                        );
+                        
+                        if (!memo) {
+                            throw new Error(`Credit Memo ${payment.referenceId} not found or insufficient balance.`);
+                        }
+                        
+                        // We must explicitly trigger save() if we rely on pre-save hooks for status
+                        // Alternatively, we can just update status in the findOneAndUpdate
+                        // Let's manually trigger the hook by loading and saving it, 
+                        // but since balance is already deducted atomically, it's safe.
+                        const updatedMemo = await CreditMemo.findById(memo._id).session(session);
+                        await updatedMemo.save({ session });
+                    }
+                }
             }
 
             // 4. Update Daily Cashbook

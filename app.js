@@ -24,10 +24,13 @@ const app = express();
 app.set('trust proxy', 1);
 
 // Security
-const allowedOrigins = (process.env.CORS_ORIGINS || "")
-  .split(",")
-  .map(origin => origin.trim())
-  .filter(Boolean);
+const allowedOrigins = [
+  "http://thecarbonsmith.com",
+  "https://thecarbonsmith.com",
+  "http://www.thecarbonsmith.com",
+  "https://www.thecarbonsmith.com",
+  ...(process.env.CORS_ORIGINS || "").split(",").map(origin => origin.trim()).filter(Boolean)
+];
 
 app.use(helmet());
 app.use(cors({

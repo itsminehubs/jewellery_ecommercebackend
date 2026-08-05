@@ -15,8 +15,8 @@ const getProduct = asyncHandler(async (req, res) => {
   ApiResponse.success(product, 'Product fetched successfully').send(res);
 });
 
-const getProductBySku = asyncHandler(async (req, res) => {
-  const product = await productService.getProductBySku(req.params.sku);
+const scanProduct = asyncHandler(async (req, res) => {
+  const product = await productService.getProductByScannedCode(req.params.code);
   ApiResponse.success(product, 'Product found successfully').send(res);
 });
 
@@ -92,7 +92,7 @@ const getTrendingProducts = asyncHandler(async (req, res) => {
 module.exports = {
   getAllProducts,
   getProduct,
-  getProductBySku,
+  scanProduct,
   createProduct,
   updateProduct,
   deleteProduct,
