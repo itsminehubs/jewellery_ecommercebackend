@@ -20,42 +20,76 @@ const logger = require('./utils/logger');
 
 const app = express();
 
-// Trust proxy
+// Trust proxy (important for nginx / load balancer)
 app.set('trust proxy', 1);
 
-// Security
+// ============================
+// ✅ CORS CONFIG (FIXED)
+// ============================
+
 const allowedOrigins = [
   "http://thecarbonsmith.com",
   "https://thecarbonsmith.com",
   "http://www.thecarbonsmith.com",
   "https://www.thecarbonsmith.com",
-  ...(process.env.CORS_ORIGINS || "").split(",").map(origin => origin.trim()).filter(Boolean)
+  ...(process.env.CORS_ORIGINS || "")
+    .split(",")
+    .map(o => o.trim())
+    .filter(Boolean)
 ];
 
-app.use(helmet());
-app.use(cors({
-  origin: (origin, callback) => {
-    // Reflect the requesting origin automatically to prevent CORS errors on any deployed frontend/POS
-    callback(null, true);
+const corsOptions = {
+  origin: function (origin, callback) {
+    // allow Postman / mobile apps / server-to-server
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    } else {
+      return callback(new Error(`CORS not allowed for: ${origin}`));
+    }
   },
-  credentials: true
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  exposedHeaders: ["Content-Length"],
+  optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // handle preflight
+
+// ============================
+// ✅ SECURITY
+// ============================
+
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
-// Parsers
+// ============================
+// ✅ BODY PARSERS
+// ============================
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Compression
+// ============================
+// ✅ COMPRESSION
+// ============================
+
 app.use(compression());
 
-// Logging
+// ============================
+// ✅ LOGGING
+// ============================
+
 app.use(
   morgan('combined', {
     stream: { write: (message) => logger.info(message.trim()) }
   })
 );
 
-// Custom logger
 app.use((req, res, next) => {
   const start = Date.now();
   res.on('finish', () => {
@@ -64,20 +98,24 @@ app.use((req, res, next) => {
   next();
 });
 
-// Health check (Enterprise Edition)
+// ============================
+// ✅ HEALTH CHECK
+// ============================
+
 app.get('/health', (req, res) => {
   const memoryUsage = process.memoryUsage();
+
   res.status(200).json({
     success: true,
     message: 'Server is healthy',
     system: {
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
-      workerId: process.pid,
+      pid: process.pid,
       memory: {
-        rss: `${Math.round(memoryUsage.rss / 1024 / 1024 * 100) / 100} MB`,
-        heapTotal: `${Math.round(memoryUsage.heapTotal / 1024 / 1024 * 100) / 100} MB`,
-        heapUsed: `${Math.round(memoryUsage.heapUsed / 1024 / 1024 * 100) / 100} MB`,
+        rss: `${(memoryUsage.rss / 1024 / 1024).toFixed(2)} MB`,
+        heapTotal: `${(memoryUsage.heapTotal / 1024 / 1024).toFixed(2)} MB`,
+        heapUsed: `${(memoryUsage.heapUsed / 1024 / 1024).toFixed(2)} MB`,
       },
       nodeVersion: process.version,
       platform: process.platform
@@ -85,7 +123,10 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Routes
+// ============================
+// ✅ RATE LIMITER
+// ============================
+
 const mainLimiter = process.env.NODE_ENV === 'production'
   ? redisRateLimiter({
     max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
@@ -94,12 +135,22 @@ const mainLimiter = process.env.NODE_ENV === 'production'
   })
   : apiLimiter;
 
+// ============================
+// ✅ ROUTES
+// ============================
+
 app.use('/api/v1', mainLimiter, routes);
 
-// 404
+// ============================
+// ❌ 404 HANDLER
+// ============================
+
 app.use(notFound);
 
-// Errors
+// ============================
+// ❌ ERROR HANDLERS
+// ============================
+
 app.use(handleValidationError);
 app.use(handleJWTError);
 app.use(handleMulterError);
