@@ -1,7 +1,7 @@
 const DiamondRate = require('./diamondRate.model');
 const ApiResponse = require('../../utils/ApiResponse');
 const ApiError = require('../../utils/ApiError');
-const asyncHandler = require('../../utils/asyncHandler');
+const { asyncHandler } = require('../../middlewares/error.middleware');
 
 // @desc    Add a new diamond rate
 // @route   POST /api/v1/diamond-rates
