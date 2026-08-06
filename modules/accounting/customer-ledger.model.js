@@ -23,7 +23,7 @@ const customerLedgerSchema = new mongoose.Schema({
     },
     transactionType: {
         type: String,
-        enum: ['sale', 'payment', 'return', 'initial_balance', 'adjustment'],
+        enum: ['sale', 'payment', 'return', 'initial_balance', 'adjustment', 'advance_payment', 'reversal'],
         required: true
     },
     referenceId: {
@@ -32,11 +32,11 @@ const customerLedgerSchema = new mongoose.Schema({
     },
     referenceModel: {
         type: String,
-        enum: ['Order', 'POSOrder', 'ExchangeRecord']
+        enum: ['Order', 'POSOrder', 'ExchangeRecord', 'CreditMemo']
     },
     paymentMethod: {
         type: String,
-        enum: ['cash', 'online', 'card', 'exchange', 'check']
+        enum: ['cash', 'online', 'card', 'exchange', 'check', 'upi', 'bank_transfer']
     },
     notes: String,
     performedBy: {

@@ -110,7 +110,7 @@ const createCreditMemo = asyncHandler(async (req, res) => {
             type: 'credit',
             amount: originalAmount,
             transactionType: 'advance_payment',
-            referenceId: memoId,
+            referenceId: creditMemo._id,
             referenceModel: 'CreditMemo',
             paymentMethod: paymentMethod,
             notes: notes || 'Advance deposit for Credit Memo',
@@ -170,7 +170,7 @@ const deleteCreditMemo = asyncHandler(async (req, res) => {
             type: 'debit', // Reverse the initial credit
             amount: creditMemo.originalAmount,
             transactionType: 'reversal',
-            referenceId: creditMemo.memoId,
+            referenceId: creditMemo._id,
             referenceModel: 'CreditMemo',
             paymentMethod: creditMemo.paymentMethod,
             notes: 'Reversal: Deletion of Credit Memo',
