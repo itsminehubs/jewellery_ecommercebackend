@@ -61,13 +61,12 @@ const creditMemoSchema = new mongoose.Schema({
 });
 
 // Auto-update status before saving
-creditMemoSchema.pre('save', function (next) {
+creditMemoSchema.pre('save', async function () {
     if (this.balance === 0 && (this.status === 'active' || this.status === 'partially_used')) {
         this.status = 'used';
     } else if (this.balance > 0 && this.balance < this.originalAmount && this.status === 'active') {
         this.status = 'partially_used';
     }
-    next();
 });
 
 module.exports = mongoose.model('CreditMemo', creditMemoSchema);

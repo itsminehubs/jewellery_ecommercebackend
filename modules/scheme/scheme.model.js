@@ -63,7 +63,7 @@ const schemeSchema = new mongoose.Schema({
 });
 
 // Auto-generate Scheme ID
-schemeSchema.pre('save', async function (next) {
+schemeSchema.pre('save', async function () {
     if (!this.schemeId) {
         const dateStr = new Date().toISOString().slice(0, 7).replace(/-/g, ''); // YYYYMM
         const count = await mongoose.model('Scheme').countDocuments({
@@ -77,8 +77,6 @@ schemeSchema.pre('save', async function (next) {
     if (this.status === 'active' && this.installments.length >= this.totalMonths) {
         this.status = 'matured';
     }
-    
-    next();
 });
 
 const Scheme = mongoose.model('Scheme', schemeSchema);
