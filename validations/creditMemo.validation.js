@@ -14,6 +14,7 @@ const createCreditMemoSchema = {
             'any.required': 'Payment method is required',
             'any.only': 'Invalid payment method'
         }),
+        totalProductPrice: Joi.number().min(0).optional(),
         notes: Joi.string().allow('').optional(),
         linkedItems: Joi.array().items(
             Joi.object({

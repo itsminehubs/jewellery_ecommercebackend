@@ -22,6 +22,16 @@ const creditMemoSchema = new mongoose.Schema({
         required: true,
         min: 0
     },
+    totalProductPrice: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
+    remainingAmount: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
     paymentMethod: {
         type: String,
         enum: ['cash', 'card', 'upi', 'bank_transfer', 'exchange'],
@@ -66,6 +76,13 @@ creditMemoSchema.pre('save', async function () {
         this.status = 'used';
     } else if (this.balance > 0 && this.balance < this.originalAmount && this.status === 'active') {
         this.status = 'partially_used';
+    }
+    
+    // Auto-calculate remaining amount if total product price exists
+    if (this.totalProductPrice > 0) {
+        this.remainingAmount = Math.max(0, this.totalProductPrice - this.originalAmount);
+    } else {
+        this.remainingAmount = 0;
     }
 });
 

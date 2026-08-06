@@ -1,5 +1,6 @@
 const CreditMemo = require('./creditMemo.model');
 const User = require('../user/user.model');
+const Product = require('../product/product.model');
 const { recordTransaction } = require('../accounting/customer-ledger.service');
 const ApiResponse = require('../../utils/ApiResponse');
 const { asyncHandler } = require('../../middlewares/error.middleware');
@@ -66,7 +67,7 @@ const searchActiveMemos = asyncHandler(async (req, res) => {
 
 // Create new Credit Memo
 const createCreditMemo = asyncHandler(async (req, res) => {
-    const { customer, originalAmount, paymentMethod, notes, shop_id, linkedItems } = req.body;
+    const { customer, originalAmount, paymentMethod, notes, shop_id, linkedItems, totalProductPrice } = req.body;
     
     if (!customer || !originalAmount || !paymentMethod) {
         return ApiResponse.error('Customer ID, originalAmount, and paymentMethod are required', 400).send(res);
@@ -80,15 +81,32 @@ const createCreditMemo = asyncHandler(async (req, res) => {
     
     try {
         // Generate CM-ID
-        const latestMemo = await CreditMemo.findOne().sort({ createdAt: -1 });
-        let nextIdNumber = 1000;
-        if (latestMemo && latestMemo.memoId && latestMemo.memoId.startsWith('CM-')) {
-            const parts = latestMemo.memoId.split('-');
-            if (parts.length === 2 && !isNaN(parts[1])) {
-                nextIdNumber = parseInt(parts[1]) + 1;
+        let metalCode = 'GEN';
+        if (validLinkedItems && validLinkedItems.length > 0) {
+            const firstProduct = await Product.findById(validLinkedItems[0].product);
+            if (firstProduct) {
+                if (firstProduct.metalDetails && firstProduct.metalDetails.metalType) {
+                    metalCode = firstProduct.metalDetails.metalType.toUpperCase();
+                } else if (firstProduct.basicDetails && firstProduct.basicDetails.name) {
+                    metalCode = firstProduct.basicDetails.name.substring(0, 4).toUpperCase();
+                } else if (firstProduct.name) {
+                    metalCode = firstProduct.name.substring(0, 4).toUpperCase();
+                } else if (firstProduct.category) {
+                    metalCode = firstProduct.category.substring(0, 4).toUpperCase();
+                }
             }
         }
-        const memoId = `CM-${nextIdNumber}`;
+
+        let isUnique = false;
+        let memoId = '';
+        while (!isUnique) {
+            const randomNum = Math.floor(10000 + Math.random() * 90000);
+            memoId = `CS-${metalCode}-${randomNum}`;
+            const exists = await CreditMemo.exists({ memoId });
+            if (!exists) {
+                isUnique = true;
+            }
+        }
 
         const creditMemo = new CreditMemo({
             memoId,
@@ -97,6 +115,7 @@ const createCreditMemo = asyncHandler(async (req, res) => {
             balance: originalAmount,
             paymentMethod,
             notes,
+            totalProductPrice: totalProductPrice ? Number(totalProductPrice) : 0,
             linkedItems: validLinkedItems,
             shop_id: shop_id || 'MAIN',
             createdBy: req.user._id
