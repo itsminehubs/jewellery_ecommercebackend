@@ -37,7 +37,7 @@ const productSchema = new mongoose.Schema({
   },
 
   // CATEGORY-SPECIFIC (Dynamic: Size, Length, Diameter)
-  categoryAttributes: { type: Map, of: String },
+  categoryAttributes: { type: Object, default: {} },
 
   // UNIQUE ITEM TRACKING
   huid: { type: String, unique: true, sparse: true, index: true },
@@ -104,7 +104,7 @@ productSchema.pre('save', async function () {
   // 1. Calculate Stone Weight and Value Dynamically
   let totalStoneWeight = 0;
   let dynamicStoneValue = 0;
-  
+
   // Ensure DiamondRate model is available
   const DiamondRate = mongoose.models.DiamondRate || require('../diamond-rate/diamondRate.model');
 
@@ -112,7 +112,7 @@ productSchema.pre('save', async function () {
     for (let stone of this.stoneDetails) {
       const stoneWeight = stone.netWeight || 0;
       totalStoneWeight += stoneWeight;
-      
+
       let rate = stone.rate || 0;
 
       // Smart calculation for Diamond
@@ -194,7 +194,7 @@ productSchema.pre('save', async function () {
   // 8. Update the base price and final price
   if (subtotal > 0) {
     // Price and finalPrice are now identical, discount was applied during makingValue calculation
-    this.price = Math.round(totalCalculatedPrice); 
+    this.price = Math.round(totalCalculatedPrice);
     this.finalPrice = Math.round(totalCalculatedPrice);
   }
 
