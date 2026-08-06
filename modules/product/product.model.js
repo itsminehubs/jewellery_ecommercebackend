@@ -19,7 +19,7 @@ const productSchema = new mongoose.Schema({
   stoneDetails: [{
     stoneType: { type: String }, // e.g., 'Diamond', 'Ruby', 'None'
     synthetic: { type: Boolean, default: false },
-    shape: { type: String, enum: ['Round', 'Pear', 'Marquis', 'Oval', 'Emerald', 'Cushion', 'Heart'] },
+    shape: { type: String },
     netWeight: { type: Number },
     color: { type: String },
     clarity: { type: String },
