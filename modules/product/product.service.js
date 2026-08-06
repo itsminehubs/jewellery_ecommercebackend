@@ -23,7 +23,8 @@ const getAllProducts = async (filters = {}, options = {}) => {
     gemstones,
     style,
     minDiscount,
-    forHer
+    forHer,
+    carbonsmithworld
   } = options;
   
   const query = { status: 'active', ...filters };
@@ -58,6 +59,7 @@ const getAllProducts = async (filters = {}, options = {}) => {
   }
   if (minDiscount) query.discount = { $gte: Number(minDiscount) };
   if (forHer === 'true' || forHer === true) query.forHer = true;
+  if (carbonsmithworld === 'true' || carbonsmithworld === true) query.carbonsmithworld = true;
 
   const skip = (page - 1) * limit;
   const products = await Product.find(query).sort(sort).skip(skip).limit(Number(limit));
