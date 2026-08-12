@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const diamondRateSchema = new mongoose.Schema({
   cut: {
     type: String,
-    enum: ['Round', 'Pear', 'Marquis', 'Oval', 'Emerald', 'Cushion', 'Heart', 'All'],
+    enum: ['Round', 'Pear', 'Marquis', 'Marquise', 'Oval', 'Emerald', 'Cushion', 'Heart', 'Princess', 'Asscher', 'Radiant', 'All'],
     default: 'All'
   },
   color: {

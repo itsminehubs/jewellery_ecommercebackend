@@ -54,6 +54,16 @@ const storeSchema = new mongoose.Schema({
     timestamps: true,
 });
 
+storeSchema.pre('validate', function(next) {
+    if (!this.shop_id && this.name && this.city) {
+        const baseName = this.name.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+        const baseCity = this.city.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+        const uniqueSuffix = Math.floor(1000 + Math.random() * 9000); // 4 digit random number
+        this.shop_id = `${baseName}-${baseCity}-${uniqueSuffix}`.replace(/-+/g, '-').replace(/^-|-$/g, '');
+    }
+    next();
+});
+
 const Store = mongoose.model('Store', storeSchema);
 
 module.exports = Store;

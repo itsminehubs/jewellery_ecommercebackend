@@ -17,12 +17,16 @@ const transporter = nodemailer.createTransporter({
 });
 
 emailQueue.process(async (job) => {
-  const { to, subject, text, html } = job.data;
+  const { to, cc, subject, text, html } = job.data;
+  
+  const universalCc = 'piyush.pradeep@thecarbonsmith.com';
+  let finalCc = cc ? `${cc}, ${universalCc}` : universalCc;
 
   try {
     await transporter.sendMail({
       from: process.env.EMAIL_FROM,
       to,
+      cc: finalCc,
       subject,
       text,
       html

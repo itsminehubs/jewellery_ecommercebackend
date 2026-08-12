@@ -118,6 +118,11 @@ const getAllUsers = async (filters = {}, options = {}) => {
 const createEmployee = async (employeeData, requesterRole) => {
   const { phone, email, name, role, password } = employeeData;
   const { USER_ROLES } = require('../../utils/constants');
+  const { sendEmail } = require('../../jobs/email.job');
+
+  if (!name || !email) {
+    throw ApiError.badRequest('Name and Email ID are mandatory for creating a new employee.');
+  }
 
   // Restriction: ADMIN can only create operational staff
   if (requesterRole === USER_ROLES.ADMIN) {
@@ -157,6 +162,26 @@ const createEmployee = async (employeeData, requesterRole) => {
 
   await employee.save();
   logger.info(`Admin (${requesterRole}) created new employee: ${employee._id} with role ${employee.role}`);
+
+  // Send email to new employee
+  const loginUrl = process.env.POS_URL || 'https://pos.thecarbonsmith.com';
+  await sendEmail({
+    to: employee.email,
+    subject: 'Welcome to CarbonSmith - Your Account Details',
+    text: `Hello ${employee.name},\n\nYour employee account has been successfully created.\n\nRole: ${employee.role}\nEmail: ${employee.email}\nPassword: ${password}\n\nYou can log in at: ${loginUrl}\n\nBest regards,\nCarbonSmith Team`,
+    html: `
+      <h2>Welcome to CarbonSmith!</h2>
+      <p>Hello <strong>${employee.name}</strong>,</p>
+      <p>Your employee account has been successfully created.</p>
+      <ul>
+        <li><strong>Role:</strong> ${employee.role}</li>
+        <li><strong>Email:</strong> ${employee.email}</li>
+        <li><strong>Password:</strong> ${password}</li>
+      </ul>
+      <p>You can log in to the POS dashboard here: <a href="${loginUrl}">${loginUrl}</a></p>
+      <p>Best regards,<br/>CarbonSmith Team</p>
+    `
+  });
 
   return employee;
 };
@@ -205,7 +230,7 @@ const updateEmployee = async (userId, updateData, requesterRole) => {
 
 const toggleUserStatus = async (userId, requesterRole) => {
   const { USER_ROLES } = require('../../utils/constants');
-  
+
   if (requesterRole !== USER_ROLES.ADMIN && requesterRole !== USER_ROLES.SUPER_ADMIN) {
     throw ApiError.forbidden('Only administrators can activate or deactivate accounts.');
   }
