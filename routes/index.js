@@ -19,8 +19,9 @@ const posOrderRoutes = require('../modules/pos-order/pos-order.routes');
 const couponRoutes = require('../modules/coupon/coupon.routes');
 const vendorPurchaseRoutes = require('../modules/vendor-purchase/vendor-purchase.routes');
 const creditMemoRoutes = require('../modules/credit-memo/creditMemo.routes');
-const { handleWebhook } = require('../modules/payment/razorpay.webhook');
 const customOrderRoutes = require('../modules/order/customOrder.routes');
+const repairRoutes = require('../modules/repair/repair.routes');
+const { handleWebhook } = require('../modules/payment/razorpay.webhook');
 // Webhook endpoint (before JSON parsing middleware)
 router.post('/webhooks/razorpay', express.raw({ type: 'application/json' }), handleWebhook);
 
@@ -48,6 +49,7 @@ router.use('/audit', require('../modules/audit/audit.routes'));
 router.use('/accounting', require('../modules/accounting/accounting.routes'));
 router.use('/schemes', require('../modules/scheme/scheme.routes'));
 router.use('/reports', require('../modules/reports/reports.routes'));
+router.use('/repairs', repairRoutes);
 
 // API info
 router.get('/', (req, res) => {
