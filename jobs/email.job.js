@@ -6,25 +6,50 @@ const emailQueue = new Queue('email-queue', {
   redis: { host: process.env.REDIS_HOST, port: process.env.REDIS_PORT }
 });
 
-const transporter = nodemailer.createTransporter({
-  host: process.env.SMTP_HOST,
-  port: process.env.SMTP_PORT,
-  secure: false,
+const customerTransporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST || 'smtpout.secureserver.net',
+  port: process.env.SMTP_PORT || 465,
+  secure: true, // Use true for 465, false for other ports
   auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASSWORD
+    user: process.env.SMTP_USER_CUSTOMER,
+    pass: process.env.SMTP_PASS_CUSTOMER
+  }
+});
+
+const opsTransporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST || 'smtpout.secureserver.net',
+  port: process.env.SMTP_PORT || 465,
+  secure: true,
+  auth: {
+    user: process.env.SMTP_USER_OPS,
+    pass: process.env.SMTP_PASS_OPS
   }
 });
 
 emailQueue.process(async (job) => {
-  const { to, cc, subject, text, html } = job.data;
+  const { to, cc, subject, text, html, emailType } = job.data;
   
-  const universalCc = 'piyush.pradeep@thecarbonsmith.com';
-  let finalCc = cc ? `${cc}, ${universalCc}` : universalCc;
+  let transporter;
+  let fromAddress;
+  let finalCc = cc ? cc : '';
+
+  if (emailType === 'ops') {
+    transporter = opsTransporter;
+    fromAddress = process.env.SMTP_USER_OPS || 'Operations@thecarbonsmith.com';
+    // No universal CC for ops unless passed explicitly
+  } else {
+    // Default to customer email
+    transporter = customerTransporter;
+    fromAddress = process.env.SMTP_USER_CUSTOMER || 'donotreply@thecarbonsmith.com';
+    
+    // Always append support and akshay to customer emails
+    const customerUniversalCc = 'support@thecarbonsmith.com, akshay.gondhali@thecarbonsmith.com';
+    finalCc = finalCc ? `${finalCc}, ${customerUniversalCc}` : customerUniversalCc;
+  }
 
   try {
     await transporter.sendMail({
-      from: process.env.EMAIL_FROM,
+      from: fromAddress,
       to,
       cc: finalCc,
       subject,
@@ -32,15 +57,16 @@ emailQueue.process(async (job) => {
       html
     });
 
-    logger.info(`Email sent to ${to}`);
+    logger.info(`[${emailType || 'customer'}] Email sent to ${to}`);
     return { success: true };
   } catch (error) {
-    logger.error(`Email failed to ${to}: ${error.message}`);
+    logger.error(`[${emailType || 'customer'}] Email failed to ${to}: ${error.message}`);
     throw error;
   }
 });
 
 const sendEmail = async (emailData) => {
+  // emailData should now optionally include emailType (e.g. 'ops')
   await emailQueue.add(emailData, {
     attempts: 3,
     backoff: { type: 'exponential', delay: 2000 }

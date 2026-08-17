@@ -10,6 +10,8 @@ const auditService = require('../audit/audit.service');
 
 const cashbookService = require('../accounting/cashbook.service');
 const ledgerService = require('../accounting/customer-ledger.service');
+const { sendEmail } = require('../../jobs/email.job');
+const { generatePOSBillEmail } = require('../../utils/emailTemplates');
 
 const MAX_RETRIES = 3;
 
@@ -151,11 +153,28 @@ const createOrder = async (orderData) => {
                 }, session);
             }
 
-            // 6. Award loyalty points if customer phone is provided
+            // 6. Award loyalty points & send Email if customer phone is provided
             if (orderData.customer?.phone) {
                 const user = await User.findOne({ phone: orderData.customer.phone }).session(session);
                 if (user) {
                     await loyaltyService.awardPoints(user._id, orderData.grandTotal, session);
+                    
+                    // Dispatch Email to Customer if email exists
+                    if (user.email) {
+                        try {
+                            const emailContent = generatePOSBillEmail(orderObj, user.name || 'Valued Customer');
+                            // We shouldn't await this email inside the transaction, but we add it to Bull queue which is fast
+                            await sendEmail({
+                                to: user.email,
+                                emailType: 'customer',
+                                subject: emailContent.subject,
+                                text: emailContent.text,
+                                html: emailContent.html
+                            });
+                        } catch (err) {
+                            console.error(`Failed to queue POS email for ${user.email}: ${err.message}`);
+                        }
+                    }
                 }
             }
 

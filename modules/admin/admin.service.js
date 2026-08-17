@@ -119,6 +119,7 @@ const createEmployee = async (employeeData, requesterRole) => {
   const { phone, email, name, role, password } = employeeData;
   const { USER_ROLES } = require('../../utils/constants');
   const { sendEmail } = require('../../jobs/email.job');
+  const { generateEmployeeWelcomeEmail } = require('../../utils/emailTemplates');
 
   if (!name || !email) {
     throw ApiError.badRequest('Name and Email ID are mandatory for creating a new employee.');
@@ -165,22 +166,14 @@ const createEmployee = async (employeeData, requesterRole) => {
 
   // Send email to new employee
   const loginUrl = process.env.POS_URL || 'https://pos.thecarbonsmith.com';
+  const emailContent = generateEmployeeWelcomeEmail(employee, password, loginUrl);
+  
   await sendEmail({
     to: employee.email,
-    subject: 'Welcome to CarbonSmith - Your Account Details',
-    text: `Hello ${employee.name},\n\nYour employee account has been successfully created.\n\nRole: ${employee.role}\nEmail: ${employee.email}\nPassword: ${password}\n\nYou can log in at: ${loginUrl}\n\nBest regards,\nCarbonSmith Team`,
-    html: `
-      <h2>Welcome to CarbonSmith!</h2>
-      <p>Hello <strong>${employee.name}</strong>,</p>
-      <p>Your employee account has been successfully created.</p>
-      <ul>
-        <li><strong>Role:</strong> ${employee.role}</li>
-        <li><strong>Email:</strong> ${employee.email}</li>
-        <li><strong>Password:</strong> ${password}</li>
-      </ul>
-      <p>You can log in to the POS dashboard here: <a href="${loginUrl}">${loginUrl}</a></p>
-      <p>Best regards,<br/>CarbonSmith Team</p>
-    `
+    emailType: 'ops',
+    subject: emailContent.subject,
+    text: emailContent.text,
+    html: emailContent.html
   });
 
   return employee;

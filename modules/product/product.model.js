@@ -110,8 +110,15 @@ productSchema.pre('save', async function () {
 
   if (this.stoneDetails && this.stoneDetails.length > 0) {
     for (let stone of this.stoneDetails) {
-      const stoneWeight = stone.netWeight || 0;
-      totalStoneWeight += stoneWeight;
+      let caratVal = parseFloat(stone.carat) || 0;
+      
+      // Auto-calculate net weight in grams from carat if explicitly provided
+      if (caratVal > 0) {
+        stone.netWeight = roundTo2(caratVal * 0.200);
+      }
+
+      const stoneWeightGrams = stone.netWeight || 0;
+      totalStoneWeight += stoneWeightGrams;
 
       let rate = stone.rate || 0;
 
@@ -131,9 +138,18 @@ productSchema.pre('save', async function () {
           rate = diamondRateDoc.ratePerCarat;
           stone.rate = rate; // Update the stone rate on the document so it's saved
         }
+        
+        // Diamond value is calculated based on Carat * Rate Per Carat
+        const calculationCarat = caratVal > 0 ? caratVal : (stoneWeightGrams / 0.200);
+        dynamicStoneValue += calculationCarat * rate;
+      } else {
+        // Value for other stones: If carat is provided, use it. Otherwise use gram weight.
+        if (caratVal > 0) {
+          dynamicStoneValue += caratVal * rate;
+        } else {
+          dynamicStoneValue += stoneWeightGrams * rate;
+        }
       }
-
-      dynamicStoneValue += stoneWeight * rate;
     }
   }
 

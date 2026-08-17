@@ -8,7 +8,8 @@ const path = require('path');
 const logger = require('../../utils/logger');
 const { generatePDF, amountToWords } = require('../../utils/pdfService');
 const Store = require('../store/store.model');
-
+const { sendEmail } = require('../../jobs/email.job');
+const { generateInvoiceEmail } = require('../../utils/emailTemplates');
 const generateInvoice = async (orderId, adminId) => {
   const order = await Order.findById(orderId).populate('user').populate('items.product').lean();
   if (!order) throw ApiError.notFound('Order not found');
@@ -41,6 +42,23 @@ const generateInvoice = async (orderId, adminId) => {
 
   await invoice.save();
   logger.info(`Invoice generated: ${invoice.invoiceNumber}`);
+
+  // Dispatch Email to Customer
+  if (order.user && order.user.email) {
+    try {
+      const emailContent = generateInvoiceEmail(invoice, order, order.user);
+      await sendEmail({
+        to: order.user.email,
+        emailType: 'customer',
+        subject: emailContent.subject,
+        text: emailContent.text,
+        html: emailContent.html
+      });
+    } catch (err) {
+      logger.error(`Failed to queue invoice email for ${order.user.email}: ${err.message}`);
+    }
+  }
+
   return { invoice, message: 'Invoice generated successfully' };
 };
 
