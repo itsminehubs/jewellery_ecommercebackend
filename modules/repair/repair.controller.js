@@ -1,6 +1,6 @@
 const Repair = require('./repair.model');
-const AppError = require('../../utils/appError');
-const catchAsync = require('../../utils/catchAsync');
+const ApiError = require('../../utils/ApiError');
+const { asyncHandler } = require('../../middlewares/error.middleware');
 
 const generateVoucher = async () => {
     const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
@@ -10,7 +10,7 @@ const generateVoucher = async () => {
     return `REP-${dateStr}-${(count + 1).toString().padStart(3, '0')}`;
 };
 
-exports.createRepair = catchAsync(async (req, res, next) => {
+exports.createRepair = asyncHandler(async (req, res, next) => {
     req.body.receiptVoucher = await generateVoucher();
     req.body.billedBy = req.user.id;
     
@@ -27,7 +27,7 @@ exports.createRepair = catchAsync(async (req, res, next) => {
     });
 });
 
-exports.getAllRepairs = catchAsync(async (req, res, next) => {
+exports.getAllRepairs = asyncHandler(async (req, res, next) => {
     const filter = {};
     // If shop ID is provided, filter by store
     if (req.headers['x-shop-id'] && req.headers['x-shop-id'] !== 'MAIN') {
@@ -52,7 +52,7 @@ exports.getAllRepairs = catchAsync(async (req, res, next) => {
     });
 });
 
-exports.getMyRepairs = catchAsync(async (req, res, next) => {
+exports.getMyRepairs = asyncHandler(async (req, res, next) => {
     const repairs = await Repair.find({ customer: req.user.id })
         .populate('store', 'name address phone')
         .sort('-createdAt');
@@ -64,14 +64,14 @@ exports.getMyRepairs = catchAsync(async (req, res, next) => {
     });
 });
 
-exports.getRepair = catchAsync(async (req, res, next) => {
+exports.getRepair = asyncHandler(async (req, res, next) => {
     const repair = await Repair.findById(req.params.id)
         .populate('customer', 'name phone email address')
         .populate('store', 'name address phone')
         .populate('billedBy', 'name');
 
     if (!repair) {
-        return next(new AppError('No repair found with that ID', 404));
+        return next(ApiError.notFound('No repair found with that ID'));
     }
 
     res.status(200).json({
@@ -80,14 +80,14 @@ exports.getRepair = catchAsync(async (req, res, next) => {
     });
 });
 
-exports.updateRepair = catchAsync(async (req, res, next) => {
+exports.updateRepair = asyncHandler(async (req, res, next) => {
     const repair = await Repair.findByIdAndUpdate(req.params.id, req.body, {
         new: true,
         runValidators: true
     }).populate('customer store billedBy');
 
     if (!repair) {
-        return next(new AppError('No repair found with that ID', 404));
+        return next(ApiError.notFound('No repair found with that ID'));
     }
 
     res.status(200).json({
@@ -96,12 +96,12 @@ exports.updateRepair = catchAsync(async (req, res, next) => {
     });
 });
 
-exports.deleteRepair = catchAsync(async (req, res, next) => {
+exports.deleteRepair = asyncHandler(async (req, res, next) => {
     // Only admins should hit this route (handled by middleware in routes)
     const repair = await Repair.findByIdAndDelete(req.params.id);
 
     if (!repair) {
-        return next(new AppError('No repair found with that ID', 404));
+        return next(ApiError.notFound('No repair found with that ID'));
     }
 
     res.status(204).json({
