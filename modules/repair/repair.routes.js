@@ -1,11 +1,12 @@
 const express = require('express');
 const repairController = require('./repair.controller');
-const authController = require('../auth/auth.controller');
+const { authenticate } = require('../../middlewares/auth.middleware');
+const { hasRole } = require('../../middlewares/admin.middleware');
 
 const router = express.Router();
 
 // Protect all routes
-router.use(authController.protect);
+router.use(authenticate);
 
 // Frontend specific routes
 router.get('/my-repairs', repairController.getMyRepairs);
@@ -14,27 +15,27 @@ router.get('/my-repairs', repairController.getMyRepairs);
 router
     .route('/')
     .get(
-        authController.restrictTo('admin', 'pos_user', 'super_admin'),
+        hasRole(['admin', 'store_manager', 'sales_staff', 'super_admin']),
         repairController.getAllRepairs
     )
     .post(
-        authController.restrictTo('admin', 'pos_user', 'super_admin'),
+        hasRole(['admin', 'store_manager', 'sales_staff', 'super_admin']),
         repairController.createRepair
     );
 
 router
     .route('/:id')
     .get(
-        authController.restrictTo('admin', 'pos_user', 'super_admin'),
+        hasRole(['admin', 'store_manager', 'sales_staff', 'super_admin']),
         repairController.getRepair
     )
     .put(
-        authController.restrictTo('admin', 'pos_user', 'super_admin'),
+        hasRole(['admin', 'store_manager', 'sales_staff', 'super_admin']),
         repairController.updateRepair
     )
     .delete(
         // Strict restriction: Only Admin can delete
-        authController.restrictTo('admin', 'super_admin'),
+        hasRole(['admin', 'super_admin']),
         repairController.deleteRepair
     );
 
