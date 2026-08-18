@@ -1,5 +1,5 @@
 const Queue = require('bull');
-const Product = require('../modules/product/product.model');
+const prisma = require('../config/prisma');
 const { getRedisClient } = require('../config/redis');
 const { CACHE_KEYS } = require('../utils/constants');
 const logger = require('../utils/logger');
@@ -9,7 +9,7 @@ const productViewQueue = new Queue('product-view-queue', {
 });
 
 /**
- * Flush Redis view counts to MongoDB
+ * Flush Redis view counts to Database
  */
 productViewQueue.process(async () => {
     const redis = getRedisClient();
@@ -20,28 +20,28 @@ productViewQueue.process(async () => {
 
     logger.info(`Flushing ${keys.length} product view counters to DB...`);
 
-    const bulkOps = [];
+    const updates = [];
 
     for (const key of keys) {
         const productId = key.split(':')[1];
         const views = await redis.get(key);
 
         if (productId && views > 0) {
-            bulkOps.push({
-                updateOne: {
-                    filter: { _id: productId },
-                    update: { $inc: { views: parseInt(views) } }
-                }
-            });
-            // Reset counter in Redis after adding to bulk ops
+            updates.push({ productId, views: parseInt(views, 10) });
+            // Reset counter in Redis
             await redis.set(key, 0);
         }
     }
 
-    if (bulkOps.length > 0) {
+    if (updates.length > 0) {
         try {
-            await Product.bulkWrite(bulkOps);
-            logger.info(`Successfully flushed ${bulkOps.length} view updates to DB.`);
+            await prisma.$transaction(
+                updates.map(update => prisma.product.update({
+                    where: { id: update.productId },
+                    data: { views: { increment: update.views } }
+                }))
+            );
+            logger.info(`Successfully flushed ${updates.length} view updates to DB.`);
         } catch (error) {
             logger.error(`Failed to flush product views: ${error.message}`);
         }

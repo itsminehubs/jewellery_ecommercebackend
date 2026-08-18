@@ -1,10 +1,10 @@
-const User = require('./user.model');
-const POSOrder = require('../pos-order/pos-order.model');
+const prisma = require('../../config/prisma');
 const ApiError = require('../../utils/ApiError');
 const { cacheHelper } = require('../../config');
 const { CACHE_KEYS, CACHE_TTL } = require('../../utils/constants');
-const { uploadImage, deleteImage } = require('../../config/cloudinary');
+const { uploadImage, deleteImage } = require('../../config/s3');
 const logger = require('../../utils/logger');
+const { hashPassword } = require('../../utils/hash');
 
 const getUser = async (userId) => {
   const cachedUser = await cacheHelper.get(`${CACHE_KEYS.USER}${userId}`);
@@ -12,197 +12,215 @@ const getUser = async (userId) => {
     return typeof cachedUser === 'string' ? JSON.parse(cachedUser) : cachedUser;
   }
 
-  const user = await User.findById(userId).select('-refreshToken').populate('cart.product wishlist');
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      addresses: true,
+      cartItems: { include: { product: true } },
+      wishlist: { include: { product: true } }
+    }
+  });
+
   if (!user) {
     throw ApiError.notFound('User not found');
   }
 
-  await cacheHelper.set(`${CACHE_KEYS.USER}${userId}`, JSON.stringify(user), CACHE_TTL.MEDIUM);
-  return user;
+  const userJson = { ...user };
+  delete userJson.password;
+  delete userJson.refreshToken;
+
+  await cacheHelper.set(`${CACHE_KEYS.USER}${userId}`, JSON.stringify(userJson), CACHE_TTL.MEDIUM);
+  return userJson;
 };
 
 const getUserByPhone = async (phone) => {
   if (!phone) throw ApiError.badRequest('Phone number is required');
-  const user = await User.findOne({ phone }).select('-password -refreshToken').lean();
+  
+  const user = await prisma.user.findUnique({ where: { phone } });
   if (!user) {
     throw ApiError.notFound('User not found');
   }
 
   // Fetch recent purchases (up to 50 for complete POS history)
-  const recentOrders = await POSOrder.find({ 'customer.phone': phone })
-    .sort({ createdAt: -1 })
-    .limit(50)
-    .lean();
+  const recentOrders = await prisma.pOSOrder.findMany({
+    where: { customerId: user.id },
+    orderBy: { createdAt: 'desc' },
+    take: 50
+  });
 
-  return { ...user, recentOrders };
+  const userJson = { ...user };
+  delete userJson.password;
+  delete userJson.refreshToken;
+
+  return { ...userJson, recentOrders };
 };
 
 const createQuickCustomer = async (customerData) => {
   const { name, phone, email, addresses } = customerData;
   if (!phone) throw ApiError.badRequest('Phone is required');
 
-  const existingUser = await User.findOne({ phone });
+  const existingUser = await prisma.user.findUnique({ where: { phone } });
   if (existingUser) throw ApiError.badRequest('User with this phone already exists');
 
   // Random 12-char secure password for walk-in
   const randomPassword = Math.random().toString(36).slice(-12);
+  const hashedPassword = await hashPassword(randomPassword);
 
-  const user = await User.create({
-    name: name || 'Walk-in Customer',
-    phone,
-    email,
-    addresses: addresses || [],
-    password: randomPassword,
-    role: 'user',
-    isPhoneVerified: true // Assumption for POS in-person
+  const addressData = addresses && addresses.length > 0 ? {
+    create: addresses.map(addr => ({
+      ...addr,
+      type: addr.type || 'home',
+      country: addr.country || 'India',
+      isDefault: addr.isDefault || false
+    }))
+  } : undefined;
+
+  const user = await prisma.user.create({
+    data: {
+      name: name || 'Walk-in Customer',
+      phone,
+      email,
+      password: hashedPassword,
+      role: 'USER',
+      isPhoneVerified: true, // Assumption for POS in-person
+      addresses: addressData
+    },
+    include: { addresses: true }
   });
 
-  return await User.findById(user._id).select('-password -refreshToken').lean();
+  const userJson = { ...user };
+  delete userJson.password;
+  delete userJson.refreshToken;
+
+  return userJson;
 };
 
 const updateProfile = async (userId, updateData) => {
-  const user = await User.findById(userId);
-  if (!user) {
-    throw ApiError.notFound('User not found');
-  }
-
   const allowedUpdates = ['name', 'email'];
+  const data = {};
+  
   Object.keys(updateData).forEach(key => {
     if (allowedUpdates.includes(key)) {
-      user[key] = updateData[key];
+      data[key] = updateData[key];
     }
   });
 
-  await user.save();
-  await cacheHelper.del(`${CACHE_KEYS.USER}${userId}`);
+  const user = await prisma.user.update({
+    where: { id: userId },
+    data
+  });
 
+  await cacheHelper.del(`${CACHE_KEYS.USER}${userId}`);
   logger.info(`Profile updated for user: ${userId}`);
-  return user;
+  
+  const userJson = { ...user };
+  delete userJson.password;
+  return userJson;
 };
 
 const uploadProfileImage = async (userId, filePath) => {
-  const user = await User.findById(userId);
-  if (!user) {
-    throw ApiError.notFound('User not found');
-  }
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw ApiError.notFound('User not found');
 
-  if (user.profileImage && user.profileImage.public_id) {
-    await deleteImage(user.profileImage.public_id);
+  if (user.profileImagePublicId) {
+    await deleteImage(user.profileImagePublicId);
   }
 
   const result = await uploadImage(filePath, 'profile-images');
-  user.profileImage = { url: result.url, public_id: result.public_id };
+  
+  const updatedUser = await prisma.user.update({
+    where: { id: userId },
+    data: {
+      profileImageUrl: result.url,
+      profileImagePublicId: result.public_id
+    }
+  });
 
-  await user.save();
   await cacheHelper.del(`${CACHE_KEYS.USER}${userId}`);
-
-  return user;
+  
+  const userJson = { ...updatedUser };
+  delete userJson.password;
+  return userJson;
 };
 
 const addAddress = async (userId, addressData) => {
-  const user = await User.findById(userId);
-  if (!user) {
-    throw ApiError.notFound('User not found');
-  }
-
   if (addressData.isDefault) {
-    user.addresses.forEach(addr => { addr.isDefault = false; });
+    await prisma.address.updateMany({
+      where: { userId },
+      data: { isDefault: false }
+    });
   }
 
-  user.addresses.push(addressData);
-  await user.save();
+  const address = await prisma.address.create({
+    data: {
+      ...addressData,
+      userId
+    }
+  });
+
   await cacheHelper.del(`${CACHE_KEYS.USER}${userId}`);
-
-  return user;
+  return address;
 };
+
 const getAddresses = async (userId) => {
-  const user = await User.findById(userId).select('addresses');
-  if (!user) {
-    throw ApiError.notFound('User not found');
-  }
-  return user.addresses;
+  return await prisma.address.findMany({
+    where: { userId }
+  });
 };
 
 const updateAddress = async (userId, addressId, addressData) => {
-  const user = await User.findById(userId);
-  if (!user) {
-    throw ApiError.notFound('User not found');
-  }
-
-  const address = user.addresses.id(addressId);
-  if (!address) {
-    throw ApiError.notFound('Address not found');
-  }
-
   if (addressData.isDefault) {
-    user.addresses.forEach(addr => { addr.isDefault = false; });
+    await prisma.address.updateMany({
+      where: { userId },
+      data: { isDefault: false }
+    });
   }
 
-  Object.assign(address, addressData);
-  await user.save();
-  await cacheHelper.del(`${CACHE_KEYS.USER}${userId}`);
+  const address = await prisma.address.update({
+    where: { id: addressId, userId },
+    data: addressData
+  });
 
-  return user;
+  await cacheHelper.del(`${CACHE_KEYS.USER}${userId}`);
+  return address;
 };
 
 const deleteAddress = async (userId, addressId) => {
-  const user = await User.findById(userId);
-  if (!user) {
-    throw ApiError.notFound('User not found');
-  }
-
-  const address = user.addresses.id(addressId);
-  if (!address) {
-    throw ApiError.notFound('Address not found');
-  }
-
-  // Preferred way (Mongoose v6+)
-  address.deleteOne();
-
-  await user.save();
+  await prisma.address.delete({
+    where: { id: addressId, userId }
+  });
 
   await cacheHelper.del(`${CACHE_KEYS.USER}${userId}`);
-
-  return user;
+  return { success: true };
 };
 
-
 const getCart = async (userId) => {
-  const user = await User.findById(userId).populate('cart.product');
-  if (!user) {
-    throw ApiError.notFound('User not found');
-  }
-
-  return user.cart;
+  const cartItems = await prisma.cartItem.findMany({
+    where: { userId },
+    include: { product: true }
+  });
+  return cartItems;
 };
 
 const addToCart = async (userId, productId, quantity) => {
-  // Try to increment quantity if product exists
-  let user = await User.findOneAndUpdate(
-    { _id: userId, 'cart.product': productId },
-    { $inc: { 'cart.$.quantity': quantity || 1 } },
-    { new: true, populate: 'cart.product' }
-  );
-
-  // If product doesn't exist in cart, push new item
-  if (!user) {
-    user = await User.findByIdAndUpdate(
+  const q = quantity || 1;
+  
+  await prisma.cartItem.upsert({
+    where: {
+      userId_productId: { userId, productId }
+    },
+    update: {
+      quantity: { increment: q }
+    },
+    create: {
       userId,
-      {
-        $push: {
-          cart: { product: productId, quantity: quantity || 1, addedAt: new Date() }
-        }
-      },
-      { new: true, populate: 'cart.product' }
-    );
-  }
-
-  if (!user) {
-    throw ApiError.notFound('User not found');
-  }
+      productId,
+      quantity: q
+    }
+  });
 
   await cacheHelper.del(`${CACHE_KEYS.CART}${userId}`);
-  return user.cart;
+  return await getCart(userId);
 };
 
 const updateCartItem = async (userId, productId, quantity) => {
@@ -210,105 +228,91 @@ const updateCartItem = async (userId, productId, quantity) => {
     return removeFromCart(userId, productId);
   }
 
-  const user = await User.findOneAndUpdate(
-    { _id: userId, 'cart.product': productId },
-    { $set: { 'cart.$.quantity': quantity } },
-    { new: true, populate: 'cart.product' }
-  );
-
-  if (!user) {
-    throw ApiError.notFound('User or product in cart not found');
-  }
+  await prisma.cartItem.update({
+    where: {
+      userId_productId: { userId, productId }
+    },
+    data: { quantity }
+  });
 
   await cacheHelper.del(`${CACHE_KEYS.CART}${userId}`);
-  return user.cart;
+  return await getCart(userId);
 };
 
 const removeFromCart = async (userId, productId) => {
-  const user = await User.findByIdAndUpdate(
-    userId,
-    { $pull: { cart: { product: productId } } },
-    { new: true, populate: 'cart.product' }
-  );
-
-  if (!user) {
-    throw ApiError.notFound('User not found');
-  }
+  await prisma.cartItem.delete({
+    where: {
+      userId_productId: { userId, productId }
+    }
+  }).catch(() => null); // Ignore if not found
 
   await cacheHelper.del(`${CACHE_KEYS.CART}${userId}`);
-  return user.cart;
+  return await getCart(userId);
 };
 
 const clearCart = async (userId) => {
-  const user = await User.findByIdAndUpdate(
-    userId,
-    { $set: { cart: [] } },
-    { new: true }
-  );
-
-  if (!user) {
-    throw ApiError.notFound('User not found');
-  }
+  await prisma.cartItem.deleteMany({
+    where: { userId }
+  });
 
   await cacheHelper.del(`${CACHE_KEYS.CART}${userId}`);
-  return user.cart;
+  return [];
 };
 
 const getWishlist = async (userId) => {
-  const user = await User.findById(userId).populate('wishlist');
-  if (!user) {
-    throw ApiError.notFound('User not found');
-  }
-
-  return user.wishlist;
+  const items = await prisma.wishlistItem.findMany({
+    where: { userId },
+    include: { product: true }
+  });
+  return items;
 };
 
 const addToWishlist = async (userId, productId) => {
-  const user = await User.findById(userId);
-  if (!user) {
-    throw ApiError.notFound('User not found');
-  }
+  await prisma.wishlistItem.upsert({
+    where: {
+      userId_productId: { userId, productId }
+    },
+    update: {},
+    create: {
+      userId,
+      productId
+    }
+  });
 
-  await user.addToWishlist(productId);
   await cacheHelper.del(`${CACHE_KEYS.WISHLIST}${userId}`);
-
-  return user.wishlist;
+  return await getWishlist(userId);
 };
 
 const removeFromWishlist = async (userId, productId) => {
-  const user = await User.findById(userId);
-  if (!user) {
-    throw ApiError.notFound('User not found');
-  }
+  await prisma.wishlistItem.delete({
+    where: {
+      userId_productId: { userId, productId }
+    }
+  }).catch(() => null);
 
-  await user.removeFromWishlist(productId);
   await cacheHelper.del(`${CACHE_KEYS.WISHLIST}${userId}`);
-
-  return user.wishlist;
+  return await getWishlist(userId);
 };
+
 const clearWishlist = async (userId) => {
-  const user = await User.findById(userId);
-  if (!user) {
-    throw ApiError.notFound('User not found');
-  }
+  await prisma.wishlistItem.deleteMany({
+    where: { userId }
+  });
 
-  await user.clearWishlist();
   await cacheHelper.del(`${CACHE_KEYS.WISHLIST}${userId}`);
-
-  return user.wishlist;
+  return [];
 };
 
 const deleteAccount = async (userId) => {
-  const user = await User.findById(userId);
-  if (!user) {
-    throw ApiError.notFound('User not found');
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw ApiError.notFound('User not found');
+
+  if (user.profileImagePublicId) {
+    await deleteImage(user.profileImagePublicId);
   }
 
-  if (user.profileImage && user.profileImage.public_id) {
-    await deleteImage(user.profileImage.public_id);
-  }
-
-  await User.findByIdAndDelete(userId);
+  // Soft delete or hard delete? Let's use Prisma's delete which cascades according to schema
+  await prisma.user.delete({ where: { id: userId } });
   await cacheHelper.del(`${CACHE_KEYS.USER}${userId}`);
 
   logger.info(`Account deleted for user: ${userId}`);
@@ -316,18 +320,25 @@ const deleteAccount = async (userId) => {
 };
 
 const getLoyaltyInfo = async (userId) => {
-  const user = await User.findById(userId).select('loyaltyPoints loyaltyTier');
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { loyaltyPoints: true, loyaltyTier: true }
+  });
   if (!user) throw ApiError.notFound('User not found');
   return user;
 };
 
 const updateFcmToken = async (userId, fcmToken) => {
-  const user = await User.findById(userId);
-  if (!user) throw ApiError.notFound('User not found');
-  user.fcmToken = fcmToken;
-  await user.save();
+  const user = await prisma.user.update({
+    where: { id: userId },
+    data: { fcmToken }
+  });
+  
   await cacheHelper.del(`${CACHE_KEYS.USER}${userId}`);
-  return user;
+  
+  const userJson = { ...user };
+  delete userJson.password;
+  return userJson;
 };
 
 module.exports = {

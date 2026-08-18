@@ -60,7 +60,7 @@ const isOwnerOrAdmin = (paramName = 'userId') => {
 
       const resourceUserId = req.params[paramName] || req.body[paramName];
 
-      if (req.user.role !== USER_ROLES.ADMIN && req.user._id.toString() !== resourceUserId) {
+      if (req.user.role !== USER_ROLES.ADMIN && req.user.id.toString() !== resourceUserId) {
         throw ApiError.forbidden('Access denied');
       }
 
@@ -89,7 +89,7 @@ const isResourceOwner = (getResourceOwnerId) => {
         throw ApiError.notFound('Resource not found');
       }
 
-      if (req.user._id.toString() !== ownerId.toString()) {
+      if (req.user.id.toString() !== ownerId.toString()) {
         throw ApiError.forbidden('Access denied');
       }
 
@@ -106,3 +106,4 @@ module.exports = {
   isOwnerOrAdmin,
   isResourceOwner
 };
+

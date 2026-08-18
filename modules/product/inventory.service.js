@@ -1,5 +1,4 @@
-const Product = require('./product.model');
-const AuditLog = require('../audit/audit.model');
+const prisma = require('../../config/prisma');
 const ApiError = require('../../utils/ApiError');
 
 /**
@@ -13,11 +12,13 @@ const updateStock = async (productId, quantityChange, options = {}) => {
         referenceId,    // PO ID or Order ID
         performedBy,    // User ID
         notes,
-        session,        // For transactions
+        tx,             // For transactions (Prisma uses tx)
         costImpact      // Purchase Price or Cost at time of sale
     } = options;
 
-    const product = await Product.findById(productId).session(session);
+    const db = tx || prisma;
+
+    const product = await db.product.findUnique({ where: { id: productId } });
     if (!product) throw ApiError.notFound('Product not found');
 
     const beforeQuantity = product.stock;
@@ -27,38 +28,48 @@ const updateStock = async (productId, quantityChange, options = {}) => {
         throw ApiError.badRequest(`Insufficient stock for product ${product.sku || product.name}`);
     }
 
-    // 1. Update Product
-    product.stock = afterQuantity;
-    
+    // Prepare update data
+    const updateData = { stock: afterQuantity };
+
     // If it's a purchase, update the purchasePrice/vendor as well
     if (type === 'purchase' && costImpact) {
-        // Simple weighted average or last cost logic
-        if (product.purchasePrice > 0) {
-            const existingValue = beforeQuantity * product.purchasePrice;
+        if (Number(product.purchasePrice) > 0) {
+            const existingValue = beforeQuantity * Number(product.purchasePrice);
             const newValue = quantityChange * costImpact;
-            product.purchasePrice = (existingValue + newValue) / afterQuantity;
+            updateData.purchasePrice = (existingValue + newValue) / afterQuantity;
         } else {
-            product.purchasePrice = costImpact;
+            updateData.purchasePrice = costImpact;
         }
     }
     
-    await product.save({ session });
+    // 1. Update Product
+    const updatedProduct = await db.product.update({
+        where: { id: productId },
+        data: updateData
+    });
 
     // 2. Automate Audit Logging (Reuse Logic)
-    await AuditLog.create([{
-        type,
-        action,
-        product: productId,
-        beforeQuantity,
-        afterQuantity,
-        quantityChanged: quantityChange,
-        costImpact: costImpact || product.purchasePrice || 0,
-        referenceId,
-        performedBy,
-        notes
-    }], { session });
+    if (performedBy) {
+        await db.audit.create({
+            data: {
+                entityType: 'Product',
+                entityId: productId,
+                action: action || 'UPDATE_STOCK',
+                changes: {
+                    type,
+                    beforeQuantity,
+                    afterQuantity,
+                    quantityChanged: quantityChange,
+                    costImpact: costImpact || Number(product.purchasePrice) || 0,
+                    referenceId,
+                    notes
+                },
+                performedById: performedBy
+            }
+        });
+    }
 
-    return product;
+    return updatedProduct;
 };
 
 module.exports = {

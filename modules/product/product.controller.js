@@ -22,7 +22,7 @@ const scanProduct = asyncHandler(async (req, res) => {
 
 const createProduct = asyncHandler(async (req, res) => {
   const imagePaths = req.files ? req.files.map(f => f.path) : [];
-  const product = await productService.createProduct(req.body, imagePaths, req.user?._id);
+  const product = await productService.createProduct(req.body, imagePaths, req.user?.id);
   ApiResponse.created(product, 'Product created successfully').send(res);
 });
 
@@ -39,12 +39,12 @@ const updateProduct = asyncHandler(async (req, res) => {
     }
   }
 
-  const product = await productService.updateProduct(req.params.id, req.body, imagePaths, imagesToDelete, req.user?._id);
+  const product = await productService.updateProduct(req.params.id, req.body, imagePaths, imagesToDelete, req.user?.id);
   ApiResponse.success(product, 'Product updated successfully').send(res);
 });
 
 const deleteProduct = asyncHandler(async (req, res) => {
-  await productService.deleteProduct(req.params.id, req.user?._id);
+  await productService.deleteProduct(req.params.id, req.user?.id);
   ApiResponse.success(null, 'Product deleted successfully').send(res);
 });
 const getProductsByCategory = asyncHandler(async (req, res) => {

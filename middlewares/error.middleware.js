@@ -42,7 +42,7 @@ const errorHandler = (err, req, res, next) => {
       url: req.originalUrl,
       method: req.method,
       ip: req.ip,
-      userId: req.user?._id
+      userId: req.user?.id
     });
   } else {
     logger.warn('Client Error:', {
@@ -50,7 +50,7 @@ const errorHandler = (err, req, res, next) => {
       url: req.originalUrl,
       method: req.method,
       statusCode,
-      userId: req.user?._id
+      userId: req.user?.id
     });
   }
 
@@ -170,3 +170,4 @@ module.exports = {
   handleJWTError,
   handleMulterError
 };
+

@@ -9,7 +9,7 @@ const { cacheHelper } = require('../../config');
 const { CACHE_KEYS } = require('../../utils/constants');
 
 const getProfile = asyncHandler(async (req, res) => {
-  const user = await userService.getUser(req.user._id);
+  const user = await userService.getUser(req.user.id);
   ApiResponse.success(user, 'Profile fetched successfully').send(res);
 });
 
@@ -26,7 +26,7 @@ const createQuickCustomer = asyncHandler(async (req, res) => {
 });
 
 const updateProfile = asyncHandler(async (req, res) => {
-  const user = await userService.updateProfile(req.user._id, req.body);
+  const user = await userService.updateProfile(req.user.id, req.body);
   ApiResponse.success(user, 'Profile updated successfully').send(res);
 });
 
@@ -35,80 +35,80 @@ const uploadProfileImage = asyncHandler(async (req, res) => {
     throw ApiError.badRequest('Please upload an image');
   }
 
-  const user = await userService.uploadProfileImage(req.user._id, req.file.path);
+  const user = await userService.uploadProfileImage(req.user.id, req.file.path);
   await deleteFile(req.file.path);
 
   ApiResponse.success(user, 'Profile image uploaded successfully').send(res);
 });
 
 const addAddress = asyncHandler(async (req, res) => {
-  const user = await userService.addAddress(req.user._id, req.body);
+  const user = await userService.addAddress(req.user.id, req.body);
   ApiResponse.created(user, 'Address added successfully').send(res);
 });
 const getAddresses = asyncHandler(async (req, res) => {
-  const addresses = await userService.getAddresses(req.user._id);
+  const addresses = await userService.getAddresses(req.user.id);
   ApiResponse.success(addresses, 'Addresses fetched successfully').send(res);
 });
 
 const updateAddress = asyncHandler(async (req, res) => {
   const { addressId } = req.params;
-  const user = await userService.updateAddress(req.user._id, addressId, req.body);
+  const user = await userService.updateAddress(req.user.id, addressId, req.body);
   ApiResponse.success(user, 'Address updated successfully').send(res);
 });
 
 const deleteAddress = asyncHandler(async (req, res) => {
   const { addressId } = req.params;
-  const user = await userService.deleteAddress(req.user._id, addressId);
+  const user = await userService.deleteAddress(req.user.id, addressId);
   ApiResponse.success(user, 'Address deleted successfully').send(res);
 });
 
 const getCart = asyncHandler(async (req, res) => {
-  const cart = await userService.getCart(req.user._id);
+  const cart = await userService.getCart(req.user.id);
   ApiResponse.success(cart, 'Cart fetched successfully').send(res);
 });
 
 const addToCart = asyncHandler(async (req, res) => {
   const { productId, quantity } = req.body;
-  const cart = await userService.addToCart(req.user._id, productId, quantity || 1);
+  const cart = await userService.addToCart(req.user.id, productId, quantity || 1);
   ApiResponse.success(cart, 'Item added to cart').send(res);
 });
 
 const updateCartItem = asyncHandler(async (req, res) => {
   const { productId } = req.params;
   const { quantity } = req.body;
-  const cart = await userService.updateCartItem(req.user._id, productId, quantity);
+  const cart = await userService.updateCartItem(req.user.id, productId, quantity);
   ApiResponse.success(cart, 'Cart updated').send(res);
 });
 
 const removeFromCart = asyncHandler(async (req, res) => {
   const { productId } = req.params;
-  const cart = await userService.removeFromCart(req.user._id, productId);
+  const cart = await userService.removeFromCart(req.user.id, productId);
   ApiResponse.success(cart, 'Item removed from cart').send(res);
 });
 
 const clearCart = asyncHandler(async (req, res) => {
-  const cart = await userService.clearCart(req.user._id);
+  const cart = await userService.clearCart(req.user.id);
   ApiResponse.success(cart, 'Cart cleared').send(res);
 });
 
 const getWishlist = asyncHandler(async (req, res) => {
-  const wishlist = await userService.getWishlist(req.user._id);
+  const wishlist = await userService.getWishlist(req.user.id);
   ApiResponse.success(wishlist, 'Wishlist fetched successfully').send(res);
 });
 
 const addToWishlist = asyncHandler(async (req, res) => {
   const { productId } = req.body;
-  const wishlist = await userService.addToWishlist(req.user._id, productId);
+  const wishlist = await userService.addToWishlist(req.user.id, productId);
   ApiResponse.success(wishlist, 'Added to wishlist').send(res);
 });
 
 const removeFromWishlist = asyncHandler(async (req, res) => {
   const { productId } = req.params;
-  const wishlist = await userService.removeFromWishlist(req.user._id, productId);
+  const wishlist = await userService.removeFromWishlist(req.user.id, productId);
   ApiResponse.success(wishlist, 'Removed from wishlist').send(res);
 });
 const clearWishlist = asyncHandler(async (req, res) => {
-  const wishlist = await userService.clearWishlist(req.user._id);
+  const wishlist = await userService.clearWishlist(req.user.id);
   ApiResponse.success(wishlist, 'Wishlist cleared successfully').send(res);
 });
 
@@ -127,13 +127,13 @@ const deleteAccount = asyncHandler(async (req, res) => {
   
   await otpService.verifyOTP(phone, otp);
 
-  await userService.deleteAccount(req.user._id);
+  await userService.deleteAccount(req.user.id);
 
   ApiResponse.success(null, 'Account deleted successfully').send(res);
 });
 
 const getLoyaltyInfo = asyncHandler(async (req, res) => {
-  const user = await userService.getLoyaltyInfo(req.user._id);
+  const user = await userService.getLoyaltyInfo(req.user.id);
   ApiResponse.success(user, 'Loyalty info fetched successfully').send(res);
 });
 
@@ -142,12 +142,12 @@ const redeemLoyaltyPoints = asyncHandler(async (req, res) => {
   if (!points || points <= 0) {
     throw ApiError.badRequest('Points to redeem are required');
   }
-  const discountAmount = await loyaltyService.redeemPoints(req.user._id, points);
+  const discountAmount = await loyaltyService.redeemPoints(req.user.id, points);
   ApiResponse.success({ discountAmount }, `Redeemed ${points} points for ₹${discountAmount} discount`).send(res);
 });
 
 const updateFcmToken = asyncHandler(async (req, res) => {
-  await userService.updateFcmToken(req.user._id, req.body.fcmToken);
+  await userService.updateFcmToken(req.user.id, req.body.fcmToken);
   ApiResponse.success(null, 'FCM token updated successfully').send(res);
 });
 

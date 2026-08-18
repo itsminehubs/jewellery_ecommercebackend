@@ -32,8 +32,8 @@ const generateEmployeeWelcomeEmail = (employee, password, loginUrl) => {
 };
 
 const generateOrderConfirmationEmail = (order, user) => {
-  // Use order._id as fallback if orderId isn't explicitly set
-  const orderId = order.orderId || order._id;
+  // Use order.id as fallback if orderId isn't explicitly set
+  const orderId = order.orderId || order.id;
   const customerName = user?.name || order.shippingAddress?.name || 'Valued Customer';
   const subject = `Order Confirmation - #${orderId}`;
   
@@ -278,3 +278,4 @@ module.exports = {
   generateInvoiceEmail,
   generatePOSBillEmail
 };
+

@@ -1,25 +1,39 @@
-const Repair = require('./repair.model');
-const AppError = require('../../utils/appError');
-const catchAsync = require('../../utils/catchAsync');
+const prisma = require('../../config/prisma');
+const ApiError = require('../../utils/ApiError');
+const { asyncHandler } = require('../../middlewares/error.middleware');
+const ApiResponse = require('../../utils/ApiResponse');
 
 const generateVoucher = async () => {
     const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
-    const count = await Repair.countDocuments({
-        receiptVoucher: { $regex: `^REP-${dateStr}` }
+    const count = await prisma.repair.count({
+        where: {
+            receiptVoucher: { startsWith: `REP-${dateStr}` }
+        }
     });
     return `REP-${dateStr}-${(count + 1).toString().padStart(3, '0')}`;
 };
 
-exports.createRepair = catchAsync(async (req, res, next) => {
+exports.createRepair = asyncHandler(async (req, res, next) => {
     req.body.receiptVoucher = await generateVoucher();
-    req.body.billedBy = req.user.id;
+    req.body.billedById = req.user.id;
     
-    // In POS, the store is usually passed via headers or body
-    if (!req.body.store && req.headers['x-shop-id']) {
-        req.body.store = req.headers['x-shop-id'];
+    if (!req.body.storeId && req.headers['x-shop-id'] && req.headers['x-shop-id'] !== 'MAIN') {
+        req.body.storeId = req.headers['x-shop-id'];
     }
 
-    const newRepair = await Repair.create(req.body);
+    const newRepair = await prisma.repair.create({
+        data: {
+            receiptVoucher: req.body.receiptVoucher,
+            customerId: req.body.customer || req.body.customerId,
+            storeId: req.body.storeId || req.body.store,
+            billedById: req.body.billedById,
+            itemDescription: req.body.itemDescription,
+            repairDetails: req.body.repairDetails,
+            estimatedCost: req.body.estimatedCost ? Number(req.body.estimatedCost) : 0,
+            status: req.body.status || 'received',
+            dueDate: req.body.dueDate ? new Date(req.body.dueDate) : null
+        }
+    });
 
     res.status(201).json({
         status: 'success',
@@ -27,23 +41,25 @@ exports.createRepair = catchAsync(async (req, res, next) => {
     });
 });
 
-exports.getAllRepairs = catchAsync(async (req, res, next) => {
+exports.getAllRepairs = asyncHandler(async (req, res, next) => {
     const filter = {};
-    // If shop ID is provided, filter by store
     if (req.headers['x-shop-id'] && req.headers['x-shop-id'] !== 'MAIN') {
-        filter.store = req.headers['x-shop-id'];
+        filter.storeId = req.headers['x-shop-id'];
     }
     
-    // Support filtering by customer for the frontend
     if (req.query.customer) {
-        filter.customer = req.query.customer;
+        filter.customerId = req.query.customer;
     }
 
-    const repairs = await Repair.find(filter)
-        .populate('customer', 'name phone email address')
-        .populate('store', 'name address phone')
-        .populate('billedBy', 'name')
-        .sort('-createdAt');
+    const repairs = await prisma.repair.findMany({
+        where: filter,
+        include: {
+            customer: { select: { id: true, name: true, phone: true, email: true, addresses: true } },
+            store: { select: { id: true, name: true, address: true, phone: true } },
+            billedBy: { select: { id: true, name: true } }
+        },
+        orderBy: { createdAt: 'desc' }
+    });
 
     res.status(200).json({
         status: 'success',
@@ -52,10 +68,14 @@ exports.getAllRepairs = catchAsync(async (req, res, next) => {
     });
 });
 
-exports.getMyRepairs = catchAsync(async (req, res, next) => {
-    const repairs = await Repair.find({ customer: req.user.id })
-        .populate('store', 'name address phone')
-        .sort('-createdAt');
+exports.getMyRepairs = asyncHandler(async (req, res, next) => {
+    const repairs = await prisma.repair.findMany({
+        where: { customerId: req.user.id },
+        include: {
+            store: { select: { id: true, name: true, address: true, phone: true } }
+        },
+        orderBy: { createdAt: 'desc' }
+    });
 
     res.status(200).json({
         status: 'success',
@@ -64,14 +84,18 @@ exports.getMyRepairs = catchAsync(async (req, res, next) => {
     });
 });
 
-exports.getRepair = catchAsync(async (req, res, next) => {
-    const repair = await Repair.findById(req.params.id)
-        .populate('customer', 'name phone email address')
-        .populate('store', 'name address phone')
-        .populate('billedBy', 'name');
+exports.getRepair = asyncHandler(async (req, res, next) => {
+    const repair = await prisma.repair.findUnique({
+        where: { id: req.params.id },
+        include: {
+            customer: { select: { id: true, name: true, phone: true, email: true, addresses: true } },
+            store: { select: { id: true, name: true, address: true, phone: true } },
+            billedBy: { select: { id: true, name: true } }
+        }
+    });
 
     if (!repair) {
-        return next(new AppError('No repair found with that ID', 404));
+        return next(ApiError.notFound('No repair found with that ID'));
     }
 
     res.status(200).json({
@@ -80,15 +104,25 @@ exports.getRepair = catchAsync(async (req, res, next) => {
     });
 });
 
-exports.updateRepair = catchAsync(async (req, res, next) => {
-    const repair = await Repair.findByIdAndUpdate(req.params.id, req.body, {
-        new: true,
-        runValidators: true
-    }).populate('customer store billedBy');
-
-    if (!repair) {
-        return next(new AppError('No repair found with that ID', 404));
+exports.updateRepair = asyncHandler(async (req, res, next) => {
+    const repairExists = await prisma.repair.findUnique({ where: { id: req.params.id } });
+    
+    if (!repairExists) {
+        return next(ApiError.notFound('No repair found with that ID'));
     }
+
+    const updateData = {};
+    if (req.body.status) updateData.status = req.body.status;
+    if (req.body.itemDescription) updateData.itemDescription = req.body.itemDescription;
+    if (req.body.repairDetails) updateData.repairDetails = req.body.repairDetails;
+    if (req.body.estimatedCost) updateData.estimatedCost = Number(req.body.estimatedCost);
+    if (req.body.dueDate) updateData.dueDate = new Date(req.body.dueDate);
+
+    const repair = await prisma.repair.update({
+        where: { id: req.params.id },
+        data: updateData,
+        include: { customer: true, store: true, billedBy: true }
+    });
 
     res.status(200).json({
         status: 'success',
@@ -96,13 +130,16 @@ exports.updateRepair = catchAsync(async (req, res, next) => {
     });
 });
 
-exports.deleteRepair = catchAsync(async (req, res, next) => {
-    // Only admins should hit this route (handled by middleware in routes)
-    const repair = await Repair.findByIdAndDelete(req.params.id);
-
-    if (!repair) {
-        return next(new AppError('No repair found with that ID', 404));
+exports.deleteRepair = asyncHandler(async (req, res, next) => {
+    const repairExists = await prisma.repair.findUnique({ where: { id: req.params.id } });
+    
+    if (!repairExists) {
+        return next(ApiError.notFound('No repair found with that ID'));
     }
+
+    await prisma.repair.delete({
+        where: { id: req.params.id }
+    });
 
     res.status(204).json({
         status: 'success',

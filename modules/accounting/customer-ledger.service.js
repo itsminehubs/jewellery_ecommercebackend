@@ -1,11 +1,9 @@
-const CustomerLedger = require('./customer-ledger.model');
-const User = require('../user/user.model');
-const mongoose = require('mongoose');
+const prisma = require('../../config/prisma');
 
 /**
- * Record a transaction in the customer ledger and update user balance
+ * Record a transaction in the customer ledger and update user balance (Prisma Version)
  */
-const recordTransaction = async (data, session = null) => {
+const recordTransactionPrisma = async (data, tx = null) => {
     const { 
         customerId, 
         type,           // 'debit' (customer owes more), 'credit' (customer pays)
@@ -18,38 +16,46 @@ const recordTransaction = async (data, session = null) => {
         performedBy 
     } = data;
 
+    const db = tx || prisma;
+
     // 1. Get current balance from User
-    const user = await User.findById(customerId).session(session);
+    const user = await db.user.findUnique({ where: { id: customerId } });
     if (!user) throw new Error('Customer not found');
 
-    const beforeBalance = user.outstandingBalance || 0;
+    const beforeBalance = user.outstandingBalance ? Number(user.outstandingBalance) : 0;
     
     // Calculate new balance
     // Debit increases debt, Credit decreases debt
-    const newBalance = type === 'debit' ? (beforeBalance + amount) : (beforeBalance - amount);
+    const newBalance = type === 'debit' ? (beforeBalance + Number(amount)) : (beforeBalance - Number(amount));
 
     // 2. Create Ledger Entry
-    const ledgerEntry = await CustomerLedger.create([{
-        customer: customerId,
-        type,
-        amount,
-        runningBalance: newBalance,
-        transactionType,
-        referenceId,
-        referenceModel,
-        paymentMethod,
-        notes,
-        performedBy
-    }], { session });
+    const ledgerEntry = await db.customerLedger.create({
+        data: {
+            customerId,
+            type,
+            amount: Number(amount),
+            runningBalance: newBalance,
+            transactionType,
+            referenceId,
+            referenceModel,
+            paymentMethod,
+            notes,
+            performedById: performedBy
+        }
+    });
 
     // 3. Update User Balance
-    user.outstandingBalance = newBalance;
+    const updateData = { outstandingBalance: newBalance };
     if (transactionType === 'payment') {
-        user.lastPaymentDate = new Date();
+        updateData.lastPaymentDate = new Date();
     }
-    await user.save({ session });
+    
+    await db.user.update({
+        where: { id: customerId },
+        data: updateData
+    });
 
-    return ledgerEntry[0];
+    return ledgerEntry;
 };
 
 /**
@@ -58,21 +64,23 @@ const recordTransaction = async (data, session = null) => {
 const getCustomerStatement = async (customerId, params = {}) => {
     const { startDate, endDate, limit = 50, skip = 0 } = params;
     
-    const query = { customer: customerId };
+    const where = { customerId };
     if (startDate || endDate) {
-        query.createdAt = {};
-        if (startDate) query.createdAt.$gte = new Date(startDate);
-        if (endDate) query.createdAt.$lte = new Date(endDate);
+        where.createdAt = {};
+        if (startDate) where.createdAt.gte = new Date(startDate);
+        if (endDate) where.createdAt.lte = new Date(endDate);
     }
 
-    return await CustomerLedger.find(query)
-        .sort({ createdAt: -1 })
-        .limit(limit)
-        .skip(skip)
-        .populate('performedBy', 'name');
+    return await prisma.customerLedger.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        skip,
+        include: { performedBy: { select: { name: true } } }
+    });
 };
 
 module.exports = {
-    recordTransaction,
+    recordTransactionPrisma,
     getCustomerStatement
 };

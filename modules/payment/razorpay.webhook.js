@@ -1,5 +1,5 @@
 const { verifyWebhookSignature } = require('../../config/razorpay');
-const Order = require('../order/order.model');
+const prisma = require('../../config/prisma');
 const logger = require('../../utils/logger');
 
 const handleWebhook = async (req, res) => {
@@ -35,21 +35,24 @@ const handleWebhook = async (req, res) => {
 };
 
 const handlePaymentCaptured = async (payload) => {
-  const order = await Order.findOne({ razorpayOrderId: payload.order_id });
+  const order = await prisma.order.findUnique({ where: { razorpayOrderId: payload.order_id } });
   if (order) {
-    order.paymentStatus = 'completed';
-    order.status = 'confirmed';
-    await order.save();
-    logger.info(`Payment captured for order: ${order._id}`);
+    await prisma.order.update({
+        where: { id: order.id },
+        data: { paymentStatus: 'completed', orderStatus: 'processing' }
+    });
+    logger.info(`Payment captured for order: ${order.id}`);
   }
 };
 
 const handlePaymentFailed = async (payload) => {
-  const order = await Order.findOne({ razorpayOrderId: payload.order_id });
+  const order = await prisma.order.findUnique({ where: { razorpayOrderId: payload.order_id } });
   if (order) {
-    order.paymentStatus = 'failed';
-    await order.save();
-    logger.info(`Payment failed for order: ${order._id}`);
+    await prisma.order.update({
+        where: { id: order.id },
+        data: { paymentStatus: 'failed' }
+    });
+    logger.info(`Payment failed for order: ${order.id}`);
   }
 };
 

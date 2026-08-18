@@ -1,7 +1,7 @@
 const reviewService = require('./review.service');
 const { asyncHandler } = require('../../middlewares/error.middleware');
 const ApiResponse = require('../../utils/ApiResponse');
-const { uploadMultipleImages } = require('../../config/cloudinary');
+const { uploadMultipleImages } = require('../../config/s3');
 
 const createReview = asyncHandler(async (req, res) => {
     let uploadedImages = [];
@@ -11,7 +11,7 @@ const createReview = asyncHandler(async (req, res) => {
 
     const review = await reviewService.createReview({
         ...req.body,
-        user: req.user?._id,
+        user: req.user?.id,
         images: uploadedImages
     });
     ApiResponse.created(review, 'Review submitted successfully. It will be visible after approval.').send(res);
@@ -33,7 +33,7 @@ const rejectReview = asyncHandler(async (req, res) => {
 });
 
 const replyToReview = asyncHandler(async (req, res) => {
-    const review = await reviewService.replyToReview(req.params.reviewId, req.body.message, req.user._id);
+    const review = await reviewService.replyToReview(req.params.reviewId, req.body.message, req.user.id);
     ApiResponse.success(review, 'Reply posted successfully').send(res);
 });
 
@@ -74,3 +74,5 @@ module.exports = {
     getAllReviews,
     deleteReview
 };
+
+

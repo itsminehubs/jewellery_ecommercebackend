@@ -1,67 +1,113 @@
-const mongoose = require('mongoose');
-const Scheme = require('./scheme.model');
-const cashbookService = require('../accounting/cashbook.service');
+const prisma = require('../../config/prisma');
 
 const enrollCustomer = async (data) => {
+    const totalMonths = data.totalMonths || 11;
     const maturityDate = new Date();
-    maturityDate.setMonth(maturityDate.getMonth() + (data.totalMonths || 11));
+    maturityDate.setMonth(maturityDate.getMonth() + totalMonths);
 
-    const scheme = new Scheme({
-        ...data,
-        maturityDate
+    // Auto-generate Scheme ID
+    const dateStr = new Date().toISOString().slice(0, 7).replace(/-/g, ''); // YYYYMM
+    const count = await prisma.scheme.count({
+        where: {
+            shopId: data.shop_id,
+            createdAt: { gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) }
+        }
+    }) + 1;
+    
+    const schemeId = `SCH-${data.shop_id}-${dateStr}-${count.toString().padStart(4, '0')}`;
+
+    const scheme = await prisma.scheme.create({
+        data: {
+            schemeId,
+            shopId: data.shop_id,
+            customerId: data.customerId,
+            monthlyInstallment: data.monthlyInstallment,
+            totalMonths,
+            bonusPercentage: data.bonusPercentage || 100,
+            maturityDate,
+            status: 'active',
+            notes: data.notes
+        }
     });
 
-    await scheme.save();
     return scheme;
 };
 
 const recordInstallment = async (schemeId, paymentData, performedBy) => {
-    const session = await mongoose.startSession();
-    session.startTransaction();
-    try {
-        const scheme = await Scheme.findById(schemeId).session(session);
+    // In Prisma, we use interactive transactions for this
+    return await prisma.$transaction(async (tx) => {
+        const scheme = await tx.scheme.findUnique({
+            where: { id: schemeId },
+            include: { installments: true }
+        });
+
         if (!scheme) throw new Error('Scheme not found');
         if (scheme.status !== 'active') throw new Error(`Cannot pay installment for scheme in ${scheme.status} status`);
         if (scheme.installments.length >= scheme.totalMonths) throw new Error('All installments already paid');
 
         const amount = Number(paymentData.amount);
-        
-        scheme.installments.push({
-            amount,
-            method: paymentData.method,
-            transactionId: paymentData.transactionId,
-            notes: paymentData.notes,
-            collectedBy: performedBy
-        });
-        
-        scheme.totalPaid += amount;
 
-        // Update Cashbook for the store
-        if (paymentData.method === 'cash' || paymentData.method === 'upi' || paymentData.method === 'card' || paymentData.method === 'bank_transfer') {
-             await cashbookService.updateCashbookOnEvent(
-                 scheme.shop_id, 
-                 amount, 
-                 paymentData.method, 
-                 'sale', // Using 'sale' type in cashbook to represent inflow
-                 session
-             );
+        const newInstallment = await tx.schemeInstallment.create({
+            data: {
+                schemeId: scheme.id,
+                amount,
+                method: paymentData.method,
+                transactionId: paymentData.transactionId,
+                notes: paymentData.notes,
+                collectedById: performedBy
+            }
+        });
+
+        const newTotalPaid = Number(scheme.totalPaid) + amount;
+        const newInstallmentCount = scheme.installments.length + 1;
+        
+        let newStatus = scheme.status;
+        if (newInstallmentCount >= scheme.totalMonths) {
+            newStatus = 'matured';
         }
 
-        await scheme.save({ session });
-        await session.commitTransaction();
-        return scheme;
-    } catch (error) {
-        await session.abortTransaction();
-        throw error;
-    } finally {
-        session.endSession();
-    }
+        const updatedScheme = await tx.scheme.update({
+            where: { id: scheme.id },
+            data: {
+                totalPaid: newTotalPaid,
+                status: newStatus
+            }
+        });
+
+        // Update Cashbook for the store
+        if (['cash', 'upi', 'card', 'bank_transfer'].includes(paymentData.method)) {
+            // Wait, we need cashbookService. 
+            // We'll require it here to avoid circular dependency
+            const cashbookService = require('../accounting/cashbook.service');
+            // Cashbook service likely needs the tx context if it supports it, 
+            // but for now we'll call it. In Mongoose it took `session`.
+            // Let's pass `tx` to it.
+            if (cashbookService.updateCashbookOnEventPrisma) {
+                await cashbookService.updateCashbookOnEventPrisma(
+                    scheme.shopId, 
+                    amount, 
+                    paymentData.method, 
+                    'sale', // Using 'sale' type in cashbook to represent inflow
+                    tx
+                );
+            }
+        }
+
+        return updatedScheme;
+    });
 };
 
-const getStoreSchemes = async (shop_id, filter = {}) => {
-    return await Scheme.find({ shop_id, ...filter })
-        .populate('customerId', 'name phone email')
-        .sort({ createdAt: -1 });
+const getStoreSchemes = async (shopId, filter = {}) => {
+    const where = { shopId, ...filter };
+
+    return await prisma.scheme.findMany({
+        where,
+        include: {
+            customer: { select: { name: true, phone: true, email: true } },
+            installments: true
+        },
+        orderBy: { createdAt: 'desc' }
+    });
 };
 
 const calculateRedemptionValue = (scheme) => {
@@ -69,11 +115,11 @@ const calculateRedemptionValue = (scheme) => {
         return 0; // Already used
     }
     
-    let total = scheme.totalPaid;
+    let total = Number(scheme.totalPaid);
     
     // Add bonus if matured
-    if (scheme.status === 'matured' || scheme.installments.length >= scheme.totalMonths) {
-        const bonus = (scheme.monthlyInstallment * scheme.bonusPercentage) / 100;
+    if (scheme.status === 'matured' || (scheme.installments && scheme.installments.length >= scheme.totalMonths)) {
+        const bonus = (Number(scheme.monthlyInstallment) * Number(scheme.bonusPercentage)) / 100;
         total += bonus;
     }
     

@@ -1,15 +1,27 @@
-const Category = require('./category.model');
+const prisma = require('../../config/prisma');
 const slugify = require('slugify');
-const { uploadImage, deleteImage } = require('../../config/cloudinary');
+const { uploadImage, deleteImage } = require('../../config/s3');
 const ApiError = require('../../utils/ApiError');
 const logger = require('../../utils/logger');
 
 const getAllCategories = async (query = {}) => {
-    return await Category.find(query).sort('order name');
+    const where = {};
+    if (query.isActive !== undefined) {
+        where.isActive = query.isActive;
+    }
+    return await prisma.category.findMany({
+        where,
+        orderBy: [
+            { order: 'asc' },
+            { name: 'asc' }
+        ]
+    });
 };
 
 const getCategoryById = async (id) => {
-    const category = await Category.findById(id);
+    const category = await prisma.category.findUnique({
+        where: { id }
+    });
     if (!category) throw ApiError.notFound('Category not found');
     return category;
 };
@@ -17,27 +29,30 @@ const getCategoryById = async (id) => {
 const createCategory = async (categoryData, file) => {
     const { name, description, order, isActive } = categoryData;
 
-    const existing = await Category.findOne({ name });
+    const existing = await prisma.category.findFirst({ where: { name } });
     if (existing) throw ApiError.conflict('Category already exists');
 
     const slug = slugify(name, { lower: true });
 
-    let image;
+    let imageUrl = null;
+    let imagePublicId = null;
+
     if (file) {
         const uploadResult = await uploadImage(file.path, 'categories');
-        image = {
-            url: uploadResult.url,
-            public_id: uploadResult.public_id
-        };
+        imageUrl = uploadResult.url;
+        imagePublicId = uploadResult.public_id;
     }
 
-    const category = await Category.create({
-        name,
-        slug,
-        description,
-        order: order || 0,
-        isActive: isActive !== undefined ? isActive : true,
-        image
+    const category = await prisma.category.create({
+        data: {
+            name,
+            slug,
+            description,
+            order: order !== undefined ? Number(order) : 0,
+            isActive: isActive !== undefined ? (isActive === 'true' || isActive === true) : true,
+            imageUrl,
+            imagePublicId
+        }
     });
 
     logger.info(`Category created: ${category.name}`);
@@ -45,51 +60,56 @@ const createCategory = async (categoryData, file) => {
 };
 
 const updateCategory = async (id, categoryData, file) => {
-    const category = await Category.findById(id);
+    const category = await prisma.category.findUnique({ where: { id } });
     if (!category) throw ApiError.notFound('Category not found');
 
+    const dataToUpdate = {};
+
     if (categoryData.name && categoryData.name !== category.name) {
-        const existing = await Category.findOne({ name: categoryData.name });
+        const existing = await prisma.category.findFirst({ where: { name: categoryData.name } });
         if (existing) throw ApiError.conflict('Category name already exists');
-        category.name = categoryData.name;
-        category.slug = slugify(categoryData.name, { lower: true });
+        dataToUpdate.name = categoryData.name;
+        dataToUpdate.slug = slugify(categoryData.name, { lower: true });
     }
 
-    if (categoryData.description !== undefined) category.description = categoryData.description;
-    if (categoryData.order !== undefined) category.order = categoryData.order;
-    if (categoryData.isActive !== undefined) category.isActive = categoryData.isActive;
+    if (categoryData.description !== undefined) dataToUpdate.description = categoryData.description;
+    if (categoryData.order !== undefined) dataToUpdate.order = Number(categoryData.order);
+    if (categoryData.isActive !== undefined) dataToUpdate.isActive = (categoryData.isActive === 'true' || categoryData.isActive === true);
 
     if (file) {
         // Delete old image if exists
-        if (category.image && category.image.public_id) {
-            await deleteImage(category.image.public_id);
+        if (category.imagePublicId) {
+            await deleteImage(category.imagePublicId);
         }
 
         const uploadResult = await uploadImage(file.path, 'categories');
-        category.image = {
-            url: uploadResult.url,
-            public_id: uploadResult.public_id
-        };
-    } else if (categoryData.removeImage === 'true' && category.image && category.image.public_id) {
-        await deleteImage(category.image.public_id);
-        category.image = undefined;
+        dataToUpdate.imageUrl = uploadResult.url;
+        dataToUpdate.imagePublicId = uploadResult.public_id;
+    } else if (categoryData.removeImage === 'true' && category.imagePublicId) {
+        await deleteImage(category.imagePublicId);
+        dataToUpdate.imageUrl = null;
+        dataToUpdate.imagePublicId = null;
     }
 
-    await category.save();
-    logger.info(`Category updated: ${category._id}`);
-    return category;
+    const updatedCategory = await prisma.category.update({
+        where: { id },
+        data: dataToUpdate
+    });
+
+    logger.info(`Category updated: ${id}`);
+    return updatedCategory;
 };
 
 const deleteCategory = async (id) => {
-    const category = await Category.findById(id);
+    const category = await prisma.category.findUnique({ where: { id } });
     if (!category) throw ApiError.notFound('Category not found');
 
     // Delete image from Cloudinary
-    if (category.image && category.image.public_id) {
-        await deleteImage(category.image.public_id);
+    if (category.imagePublicId) {
+        await deleteImage(category.imagePublicId);
     }
 
-    await category.deleteOne();
+    await prisma.category.delete({ where: { id } });
     logger.info(`Category deleted: ${id}`);
 };
 
@@ -100,3 +120,4 @@ module.exports = {
     updateCategory,
     deleteCategory
 };
+

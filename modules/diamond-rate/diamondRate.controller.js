@@ -1,4 +1,4 @@
-const DiamondRate = require('./diamondRate.model');
+const prisma = require('../../config/prisma');
 const ApiResponse = require('../../utils/ApiResponse');
 const ApiError = require('../../utils/ApiError');
 const { asyncHandler } = require('../../middlewares/error.middleware');
@@ -9,13 +9,20 @@ const { asyncHandler } = require('../../middlewares/error.middleware');
 const addRate = asyncHandler(async (req, res) => {
   const { cut, color, clarity, ratePerCarat, effectiveDate } = req.body;
 
-  const rate = await DiamondRate.create({
-    cut: cut || 'All',
-    color: color || 'All',
-    clarity: clarity || 'All',
-    ratePerCarat,
-    effectiveDate: effectiveDate || Date.now(),
-    updatedBy: req.user?._id
+  const rate = await prisma.diamondRate.create({
+    data: {
+      cut: cut || 'All',
+      color: color || 'All',
+      clarity: clarity || 'All',
+      ratePerCarat,
+      effectiveDate: effectiveDate || new Date(),
+      updatedById: req.user?.id
+    }
+  });
+
+  // Background recalculation 
+  recalculateDiamondProducts(rate).catch(err => {
+    console.error("Error recalculating diamond products after rate update:", err);
   });
 
   ApiResponse.created(rate, 'Diamond rate added successfully').send(res);
@@ -26,14 +33,19 @@ const addRate = asyncHandler(async (req, res) => {
 // @access  Public
 const getLatestRates = asyncHandler(async (req, res) => {
   const { cut, color, clarity } = req.query;
-  const query = {};
-  if (cut) query.cut = cut;
-  if (color) query.color = color;
-  if (clarity) query.clarity = clarity;
+  const where = {};
+  if (cut) where.cut = cut;
+  if (color) where.color = color;
+  if (clarity) where.clarity = clarity;
 
-  // We group by cut, color, clarity and get the latest for each if no specific query
-  // For simplicity, let's just return the latest rates.
-  const rates = await DiamondRate.find(query).sort({ effectiveDate: -1, createdAt: -1 }).limit(100);
+  const rates = await prisma.diamondRate.findMany({
+    where,
+    orderBy: [
+      { effectiveDate: 'desc' },
+      { createdAt: 'desc' }
+    ],
+    take: 100
+  });
 
   ApiResponse.success(rates, 'Latest diamond rates fetched successfully').send(res);
 });
@@ -46,13 +58,21 @@ const getRateHistory = asyncHandler(async (req, res) => {
   const limit = parseInt(req.query.limit, 10) || 20;
   const skip = (page - 1) * limit;
 
-  const rates = await DiamondRate.find()
-    .populate('updatedBy', 'name email')
-    .sort({ effectiveDate: -1, createdAt: -1 })
-    .skip(skip)
-    .limit(limit);
+  const rates = await prisma.diamondRate.findMany({
+    skip,
+    take: limit,
+    orderBy: [
+      { effectiveDate: 'desc' },
+      { createdAt: 'desc' }
+    ],
+    include: {
+      updatedBy: {
+        select: { name: true, email: true }
+      }
+    }
+  });
 
-  const total = await DiamondRate.countDocuments();
+  const total = await prisma.diamondRate.count();
 
   ApiResponse.success({ rates, total, page, pages: Math.ceil(total / limit) }, 'Diamond rate history fetched successfully').send(res);
 });
@@ -64,19 +84,28 @@ const updateRate = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { cut, color, clarity, ratePerCarat, effectiveDate } = req.body;
 
-  const rate = await DiamondRate.findById(id);
+  const rate = await prisma.diamondRate.findUnique({ where: { id } });
   if (!rate) {
     throw new ApiError(404, 'Diamond rate not found');
   }
 
-  rate.cut = cut || rate.cut;
-  rate.color = color || rate.color;
-  rate.clarity = clarity || rate.clarity;
-  if (ratePerCarat) rate.ratePerCarat = ratePerCarat;
-  if (effectiveDate) rate.effectiveDate = effectiveDate;
-  rate.updatedBy = req.user?._id;
+  const updatedRate = await prisma.diamondRate.update({
+    where: { id },
+    data: {
+      cut: cut || undefined,
+      color: color || undefined,
+      clarity: clarity || undefined,
+      ratePerCarat: ratePerCarat !== undefined ? ratePerCarat : undefined,
+      effectiveDate: effectiveDate || undefined,
+      updatedById: req.user?.id
+    }
+  });
 
-  const updatedRate = await rate.save();
+  // Background recalculation 
+  recalculateDiamondProducts(updatedRate).catch(err => {
+    console.error("Error recalculating diamond products after rate update:", err);
+  });
+
   ApiResponse.success(updatedRate, 'Diamond rate updated successfully').send(res);
 });
 
@@ -86,14 +115,27 @@ const updateRate = asyncHandler(async (req, res) => {
 const deleteRate = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
-  const rate = await DiamondRate.findById(id);
+  const rate = await prisma.diamondRate.findUnique({ where: { id } });
   if (!rate) {
     throw new ApiError(404, 'Diamond rate not found');
   }
 
-  await DiamondRate.findByIdAndDelete(id);
+  await prisma.diamondRate.delete({ where: { id } });
   ApiResponse.success({}, 'Diamond rate deleted successfully').send(res);
 });
+
+/**
+ * Recalculate prices for all diamond products
+ */
+const recalculateDiamondProducts = async (rate) => {
+  const productService = require('../product/product.service');
+  
+  if (productService.recalculatePricesForDiamond) {
+      await productService.recalculatePricesForDiamond(rate);
+  } else {
+      console.warn("productService.recalculatePricesForDiamond not implemented yet");
+  }
+};
 
 module.exports = {
   addRate,

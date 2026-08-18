@@ -1,237 +1,276 @@
-const Order = require('./order.model');
-const Product = require('../product/product.model');
-const User = require('../user/user.model');
+const prisma = require('../../config/prisma');
 const loyaltyService = require('../user/loyalty.service');
 const couponService = require('../coupon/coupon.service');
-const Coupon = require('../coupon/coupon.model');
+const inventoryService = require('../product/inventory.service');
 const ApiError = require('../../utils/ApiError');
 const logger = require('../../utils/logger');
-const inventoryService = require('../product/inventory.service');
 
 const createOrder = async (userId, orderData) => {
-  const session = await Order.startSession();
-  session.startTransaction();
+    return await prisma.$transaction(async (tx) => {
+        if (!orderData.items || orderData.items.length === 0) {
+            throw ApiError.badRequest('Order items are required');
+        }
 
-  try {
-    if (!orderData.items || orderData.items.length === 0) {
-      throw ApiError.badRequest('Order items are required');
-    }
+        let subtotal = 0;
+        let totalTax = 0;
+        const orderItemsData = [];
 
-    const items = [];
-    let subtotal = 0;
-    let totalTax = 0;
+        for (const cartItem of orderData.items) {
+            const product = await tx.product.findUnique({ where: { id: cartItem.product } });
 
-    for (const cartItem of orderData.items) {
-      const product = await Product.findById(cartItem.product).session(session);
+            if (!product) {
+                throw ApiError.badRequest('Product not found');
+            }
 
-      if (!product) {
-        throw ApiError.badRequest('Product not found');
-      }
+            if (product.stock < cartItem.quantity) {
+                throw ApiError.badRequest(`${product.name} is out of stock`);
+            }
 
-      if (product.stock < cartItem.quantity) {
-        throw ApiError.badRequest(`${product.name} is out of stock`);
-      }
+            const price = product.finalPrice ? Number(product.finalPrice) : Number(product.price);
+            const itemTotal = price * cartItem.quantity;
 
-      const price = product.finalPrice || product.price;
-      const itemTotal = price * cartItem.quantity;
+            // Using 3% as default GST for jewelry if not on product
+            const itemGstRate = product.gstRate || 3;
+            const itemTax = itemTotal * (itemGstRate / 100);
 
-      const itemGstRate = product.gstRate || 3;
-      const itemTax = itemTotal * (itemGstRate / 100);
+            subtotal += itemTotal;
+            totalTax += itemTax;
 
-      subtotal += itemTotal;
-      totalTax += itemTax;
+            orderItemsData.push({
+                productId: product.id,
+                name: product.name,
+                image: '', // Can pull from product images if available
+                quantity: cartItem.quantity,
+                price: price,
+                costPrice: product.purchasePrice ? Number(product.purchasePrice) : 0,
+                gstRate: itemGstRate,
+                taxAmount: itemTax
+            });
 
-      items.push({
-        product: product._id,
-        name: product.name,
-        image: product.images?.[0]?.url,
-        quantity: cartItem.quantity,
-        price,
-        costPrice: product.purchasePrice || 0,
-        gstRate: itemGstRate,
-        taxAmount: itemTax
-      });
+            await inventoryService.updateStock(product.id, -cartItem.quantity, {
+                type: 'sale',
+                action: 'ITEM_SOLD',
+                performedBy: userId,
+                tx,
+                notes: 'Online Store Sale'
+            });
+        }
 
-      await inventoryService.updateStock(product._id, -cartItem.quantity, {
-        type: 'sale',
-        action: 'ITEM_SOLD',
-        referenceId: null, // Will update after order save if needed, or use a temp ID
-        performedBy: userId,
-        session,
-        notes: 'Online Store Sale'
-      });
-    }
+        let discount = 0;
+        if (orderData.couponCode) {
+            // Validate and calculate discount
+            const coupon = await tx.coupon.findUnique({ where: { code: orderData.couponCode } });
+            if (!coupon) throw ApiError.badRequest('Invalid coupon code');
+            
+            // Simplified discount calculation for Prisma
+            if (coupon.discountType === 'percentage') {
+                discount = subtotal * (Number(coupon.discountValue) / 100);
+            } else {
+                discount = Number(coupon.discountValue);
+            }
+            if (coupon.maxDiscount && discount > Number(coupon.maxDiscount)) {
+                discount = Number(coupon.maxDiscount);
+            }
 
-    let discount = 0;
-    if (orderData.couponCode) {
-      const coupon = await couponService.validateCoupon(orderData.couponCode, userId, subtotal);
-      discount = couponService.calculateDiscount(coupon, subtotal);
-      coupon.usedCount += 1;
-      await coupon.save({ session });
-    }
+            await tx.coupon.update({
+                where: { id: coupon.id },
+                data: { usedCount: { increment: 1 } }
+            });
+        }
 
-    const shippingCost = orderData.shippingCost || 0;
-    const total = subtotal + totalTax + shippingCost - discount;
+        const shippingCost = orderData.shippingCost || 0;
+        const total = subtotal + totalTax + shippingCost - discount;
 
-    if (total >= 200000 && !orderData.customerPan) {
-      throw ApiError.badRequest('PAN number is required for orders above ₹2,00,000');
-    }
+        if (total >= 200000 && !orderData.customerPan) {
+            throw ApiError.badRequest('PAN number is required for orders above ₹2,00,000');
+        }
 
-    const order = new Order({
-      user: userId,
-      items,
-      shippingAddress: orderData.shippingAddress,
-      paymentMethod: orderData.paymentMethod,
-      subtotal,
-      tax: totalTax, // Fixed variable name from 'tax' to 'totalTax'
-      shippingCost,
-      discount,
-      total,
-      customerPan: orderData.customerPan,
-      statusHistory: [{ status: 'pending', timestamp: new Date() }]
+        // Generate Order Number
+        const count = await tx.order.count() + 1;
+        const orderNumber = `ORD-${new Date().getFullYear()}-${count.toString().padStart(5, '0')}`;
+
+        const order = await tx.order.create({
+            data: {
+                orderNumber,
+                userId: userId,
+                orderStatus: 'pending',
+                paymentStatus: 'pending',
+                paymentMethod: orderData.paymentMethod || 'COD',
+                subTotal: subtotal,
+                taxTotal: totalTax,
+                shippingCost: shippingCost,
+                discountTotal: discount,
+                grandTotal: total,
+                shippingAddressId: typeof orderData.shippingAddress === 'string' ? orderData.shippingAddress : orderData.shippingAddress?.id,
+                items: {
+                    create: orderItemsData.map(item => ({
+                        productId: item.productId,
+                        quantity: item.quantity,
+                        unitPrice: item.price,
+                        totalPrice: (item.price * item.quantity) + item.taxAmount
+                    }))
+                }
+            },
+            include: { items: true }
+        });
+
+        // Clear user cart (assuming cart logic is separate or user model has it, in Prisma it's Cart model usually)
+        await tx.cartItem.deleteMany({ where: { userId: userId } });
+
+        logger.info(`Order created: ${order.id}`);
+
+        return order;
     });
-
-    await order.save({ session });
-
-    await User.findByIdAndUpdate(userId, { cart: [] }, { session });
-
-    await session.commitTransaction();
-    logger.info(`Order created: ${order._id}`);
-
-    return order;
-  } catch (error) {
-    await session.abortTransaction();
-    logger.error(`Order creation failed: ${error.message}`);
-    throw error;
-  } finally {
-    session.endSession();
-  }
 };
 
 const getUserOrders = async (userId, options = {}) => {
-  const { page = 1, limit = 20 } = options;
-  const skip = (page - 1) * limit;
+    const page = parseInt(options.page, 10) || 1;
+    const limit = parseInt(options.limit, 10) || 20;
+    const skip = (page - 1) * limit;
 
-  const orders = await Order.find({ user: userId }).sort('-createdAt').skip(skip).limit(limit).populate('items.product');
-  const total = await Order.countDocuments({ user: userId });
+    const orders = await prisma.order.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+        include: { items: { include: { product: true } } }
+    });
 
-  return { orders, total, page, limit };
+    const total = await prisma.order.count({ where: { userId } });
+
+    return { orders, total, page, limit };
 };
 
 const getOrderById = async (orderId, userId) => {
-  const order = await Order.findOne({ _id: orderId, user: userId }).populate('items.product');
-  if (!order) throw ApiError.notFound('Order not found');
-  return order;
+    const order = await prisma.order.findFirst({
+        where: { id: orderId, userId },
+        include: { items: { include: { product: true } } }
+    });
+    if (!order) throw ApiError.notFound('Order not found');
+    return order;
 };
 
 const updateOrderStatus = async (orderId, status, note = '') => {
-  const order = await Order.findById(orderId);
-  if (!order) throw ApiError.notFound('Order not found');
+    const order = await prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw ApiError.notFound('Order not found');
 
-  order.status = status;
-  order.statusHistory.push({ status, timestamp: new Date(), note });
+    const updateData = { orderStatus: status };
+    if (status === 'DELIVERED' || status === 'delivered') updateData.deliveredAt = new Date();
 
-  if (status === 'delivered') order.deliveredAt = new Date();
+    const updatedOrder = await prisma.order.update({
+        where: { id: orderId },
+        data: updateData
+    });
 
-  await order.save();
-  logger.info(`Order ${orderId} status updated to ${status}`);
+    logger.info(`Order ${orderId} status updated to ${status}`);
 
-  return order;
+    return updatedOrder;
 };
 
 const cancelOrder = async (orderId, userId, reason) => {
-  const order = await Order.findOne({ _id: orderId, user: userId });
-  if (!order) throw ApiError.notFound('Order not found');
+    return await prisma.$transaction(async (tx) => {
+        const order = await tx.order.findFirst({
+            where: { id: orderId, userId },
+            include: { items: true }
+        });
 
-  if (['shipped', 'delivered'].includes(order.status)) {
-    throw ApiError.badRequest('Cannot cancel shipped or delivered orders');
-  }
+        if (!order) throw ApiError.notFound('Order not found');
 
-  order.status = 'cancelled';
-  order.cancelReason = reason;
-  order.statusHistory.push({ status: 'cancelled', timestamp: new Date(), note: reason });
+        if (['SHIPPED', 'shipped', 'DELIVERED', 'delivered'].includes(order.orderStatus)) {
+            throw ApiError.badRequest('Cannot cancel shipped or delivered orders');
+        }
 
-  // Restore stock on cancellation
-  for (const item of order.items) {
-    await inventoryService.updateStock(item.product, item.quantity, {
-      type: 'refund',
-      action: 'ORDER_CANCELLED',
-      referenceId: order._id,
-      performedBy: userId,
-      notes: `Order ${order._id} cancelled by user`
+        const updatedOrder = await tx.order.update({
+            where: { id: orderId },
+            data: {
+                orderStatus: 'cancelled',
+                cancelReason: reason
+            }
+        });
+
+        // Restore stock on cancellation
+        for (const item of order.items) {
+            await inventoryService.updateStock(item.productId, item.quantity, {
+                type: 'refund',
+                action: 'ORDER_CANCELLED',
+                referenceId: order.id,
+                performedBy: userId,
+                notes: `Order ${order.id} cancelled by user`,
+                tx
+            });
+        }
+
+        logger.info(`Order cancelled and stock restored: ${orderId}`);
+
+        // Deduct loyalty points on cancellation
+        if (loyaltyService.deductPointsPrisma) {
+            await loyaltyService.deductPointsPrisma(userId, order.grandTotal, tx);
+        }
+
+        return updatedOrder;
     });
-  }
-
-  await order.save();
-  logger.info(`Order cancelled and stock restored: ${orderId}`);
-
-  // Deduct loyalty points on cancellation
-  await loyaltyService.deductPoints(userId, order.total);
-
-  return order;
 };
-// order.service.js
+
 const deleteOrder = async (orderId, userId) => {
-  const order = await Order.findOne({ _id: orderId, user: userId });
+    return await prisma.$transaction(async (tx) => {
+        const order = await tx.order.findFirst({
+            where: { id: orderId, userId },
+            include: { items: true }
+        });
 
-  if (!order) {
-    throw ApiError.notFound('Order not found');
-  }
+        if (!order) {
+            throw ApiError.notFound('Order not found');
+        }
 
-  // Do NOT allow delete if payment succeeded
-  if (order.paymentStatus === 'paid') {
-    throw ApiError.badRequest('Paid order cannot be deleted');
-  }
+        if (order.paymentStatus === 'PAID' || order.paymentStatus === 'COMPLETED') {
+            throw ApiError.badRequest('Paid order cannot be deleted');
+        }
 
-  // Restore product stock
-  for (const item of order.items) {
-    await inventoryService.updateStock(item.product, item.quantity, {
-      type: 'adjustment',
-      action: 'PAYMENT_FAILURE_RESTORE',
-      referenceId: order._id,
-      performedBy: userId,
-      notes: 'Payment failed, restoring stock'
+        // Restore product stock
+        for (const item of order.items) {
+            await inventoryService.updateStock(item.productId, item.quantity, {
+                type: 'adjustment',
+                action: 'PAYMENT_FAILURE_RESTORE',
+                referenceId: order.id,
+                performedBy: userId,
+                notes: 'Payment failed, restoring stock',
+                tx
+            });
+        }
+
+        await tx.order.delete({ where: { id: orderId } });
+        logger.info(`Order deleted due to payment failure: ${orderId}`);
     });
-  }
-
-  await order.deleteOne();
-  logger.info(`Order deleted due to payment failure: ${orderId}`);
 };
 
-/**
- * Verify order total based on latest prices
- * @param {Array} items - List of items with product ID and quantity
- * @returns {Promise<Object>}
- */
 const verifyPrice = async (items) => {
-  let subtotal = 0;
-  let totalTax = 0;
+    let subtotal = 0;
+    let totalTax = 0;
 
-  for (const item of items) {
-    const product = await Product.findById(item.product);
-    if (!product) throw ApiError.notFound('Product not found');
+    for (const item of items) {
+        const product = await prisma.product.findUnique({ where: { id: item.product } });
+        if (!product) throw ApiError.notFound('Product not found');
 
-    const price = product.finalPrice || product.price;
-    const itemTotal = price * item.quantity;
-    const itemTax = itemTotal * ((product.gstRate || 3) / 100);
+        const price = product.finalPrice ? Number(product.finalPrice) : Number(product.price);
+        const itemTotal = price * item.quantity;
+        const itemTax = itemTotal * ((product.gstRate || 3) / 100);
 
-    subtotal += itemTotal;
-    totalTax += itemTax;
-  }
+        subtotal += itemTotal;
+        totalTax += itemTax;
+    }
 
-  // Simplified shipping logic for verification (should match createOrder)
-  const shippingCost = subtotal > 2999 ? 0 : 99;
-  const total = subtotal + totalTax + shippingCost;
+    const shippingCost = subtotal > 2999 ? 0 : 99;
+    const total = subtotal + totalTax + shippingCost;
 
-  return { subtotal, tax: totalTax, shippingCost, total };
+    return { subtotal, tax: totalTax, shippingCost, total };
 };
 
 module.exports = {
-  createOrder,
-  verifyPrice,
-  getUserOrders,
-  getOrderById,
-  updateOrderStatus,
-  cancelOrder,
-  deleteOrder,
+    createOrder,
+    verifyPrice,
+    getUserOrders,
+    getOrderById,
+    updateOrderStatus,
+    cancelOrder,
+    deleteOrder,
 };

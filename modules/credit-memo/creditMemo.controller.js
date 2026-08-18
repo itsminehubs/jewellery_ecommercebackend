@@ -1,46 +1,35 @@
-const CreditMemo = require('./creditMemo.model');
-const User = require('../user/user.model');
-const Product = require('../product/product.model');
-const { recordTransaction } = require('../accounting/customer-ledger.service');
+const prisma = require('../../config/prisma');
+const { recordTransactionPrisma } = require('../accounting/customer-ledger.service');
 const ApiResponse = require('../../utils/ApiResponse');
 const { asyncHandler } = require('../../middlewares/error.middleware');
-const mongoose = require('mongoose');
 
 // Get all Credit Memos (Admin)
 const getAllCreditMemos = asyncHandler(async (req, res) => {
     const page = parseInt(req.query.page, 10) || 1;
     const limit = parseInt(req.query.limit, 10) || 10;
-    const startIndex = (page - 1) * limit;
+    const skip = (page - 1) * limit;
 
-    const query = {};
-    if (req.query.status) query.status = req.query.status;
+    const where = {};
+    if (req.query.status) where.status = req.query.status;
     if (req.query.search) {
-        // First find users matching the search
-        const users = await User.find({
-            $or: [
-                { phone: { $regex: req.query.search, $options: 'i' } },
-                { name: { $regex: req.query.search, $options: 'i' } }
-            ]
-        }).select('_id');
-        const userIds = users.map(u => u._id);
-
-        query.$or = [
-            { memoId: { $regex: req.query.search, $options: 'i' } },
-            { customer: { $in: userIds } }
+        where.OR = [
+            { memoId: { contains: req.query.search, mode: 'insensitive' } },
+            { customer: { name: { contains: req.query.search, mode: 'insensitive' } } },
+            { customer: { phone: { contains: req.query.search, mode: 'insensitive' } } }
         ];
     }
 
-    const total = await CreditMemo.countDocuments(query);
-    const creditMemos = await CreditMemo.find(query)
-        .populate('customer', 'name phone email address gstNumber panNumber')
-        .populate({
-            path: 'linkedItems.product',
-            select: 'name basicDetails metalDetails stoneDetails price'
-        })
-        .populate('createdBy', 'name')
-        .sort({ createdAt: -1 })
-        .skip(startIndex)
-        .limit(limit);
+    const total = await prisma.creditMemo.count({ where });
+    const creditMemos = await prisma.creditMemo.findMany({
+        where,
+        include: {
+            customer: { select: { name: true, phone: true, email: true, addresses: true } },
+            createdBy: { select: { name: true } }
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit
+    });
 
     ApiResponse.paginated(creditMemos, page, limit, total).send(res);
 });
@@ -48,19 +37,20 @@ const getAllCreditMemos = asyncHandler(async (req, res) => {
 // Search active memos for POS
 const searchActiveMemos = asyncHandler(async (req, res) => {
     const { term } = req.params;
-    
-    // Find matching users first
-    const users = await User.find({ phone: term }).select('_id');
-    const userIds = users.map(u => u._id);
 
-    const memos = await CreditMemo.find({
-        $or: [
-            { memoId: term },
-            { customer: { $in: userIds } }
-        ],
-        status: { $in: ['active', 'partially_used'] },
-        balance: { $gt: 0 }
-    }).populate('customer', 'name phone email');
+    const memos = await prisma.creditMemo.findMany({
+        where: {
+            OR: [
+                { memoId: term },
+                { customer: { phone: term } }
+            ],
+            status: { in: ['ACTIVE', 'PARTIALLY_USED'] },
+            balance: { gt: 0 }
+        },
+        include: {
+            customer: { select: { name: true, phone: true, email: true } }
+        }
+    });
 
     ApiResponse.success(memos, 'Active Credit Memos found').send(res);
 });
@@ -73,26 +63,21 @@ const createCreditMemo = asyncHandler(async (req, res) => {
         return ApiResponse.error('Customer ID, originalAmount, and paymentMethod are required', 400).send(res);
     }
     
-    // Filter out invalid items where no product ID was provided
     const validLinkedItems = linkedItems ? linkedItems.filter(item => item.product) : [];
     
-    const session = await mongoose.startSession();
-    session.startTransaction();
-    
-    try {
-        // Generate CM-ID
+    // Create using transaction
+    await prisma.$transaction(async (tx) => {
         let metalCode = 'GEN';
         if (validLinkedItems && validLinkedItems.length > 0) {
-            const firstProduct = await Product.findById(validLinkedItems[0].product);
+            const firstProduct = await tx.product.findUnique({
+                where: { id: validLinkedItems[0].product },
+                include: { metalDetails: true }
+            });
             if (firstProduct) {
                 if (firstProduct.metalDetails && firstProduct.metalDetails.metalType) {
-                    metalCode = firstProduct.metalDetails.metalType.toUpperCase();
-                } else if (firstProduct.basicDetails && firstProduct.basicDetails.name) {
-                    metalCode = firstProduct.basicDetails.name.substring(0, 4).toUpperCase();
+                    metalCode = firstProduct.metalDetails.metalType.substring(0, 4).toUpperCase();
                 } else if (firstProduct.name) {
                     metalCode = firstProduct.name.substring(0, 4).toUpperCase();
-                } else if (firstProduct.category) {
-                    metalCode = firstProduct.category.substring(0, 4).toUpperCase();
                 }
             }
         }
@@ -102,49 +87,43 @@ const createCreditMemo = asyncHandler(async (req, res) => {
         while (!isUnique) {
             const randomNum = Math.floor(10000 + Math.random() * 90000);
             memoId = `CS-${metalCode}-${randomNum}`;
-            const exists = await CreditMemo.exists({ memoId });
+            const exists = await tx.creditMemo.findUnique({ where: { memoId } });
             if (!exists) {
                 isUnique = true;
             }
         }
 
-        const creditMemo = new CreditMemo({
-            memoId,
-            customer,
-            originalAmount,
-            balance: originalAmount,
-            paymentMethod,
-            notes,
-            totalProductPrice: totalProductPrice ? Number(totalProductPrice) : 0,
-            linkedItems: validLinkedItems,
-            shop_id: shop_id || 'MAIN',
-            createdBy: req.user._id
+        const creditMemo = await tx.creditMemo.create({
+            data: {
+                memoId,
+                customerId: customer,
+                originalAmount: Number(originalAmount),
+                balance: Number(originalAmount),
+                paymentMethod,
+                notes,
+                totalProductPrice: totalProductPrice ? Number(totalProductPrice) : 0,
+                linkedItems: validLinkedItems,
+                shopId: shop_id || 'MAIN',
+                createdById: req.user.id
+            }
         });
-
-        await creditMemo.save({ session });
         
-        // Log in Ledger (Credit to customer because they gave an advance)
-        await recordTransaction({
-            customerId: customer,
-            type: 'credit',
-            amount: originalAmount,
-            transactionType: 'advance_payment',
-            referenceId: creditMemo._id,
-            referenceModel: 'CreditMemo',
-            paymentMethod: paymentMethod,
-            notes: notes || 'Advance deposit for Credit Memo',
-            performedBy: req.user._id
-        }, session);
+        if (recordTransactionPrisma) {
+            await recordTransactionPrisma({
+                customerId: customer,
+                type: 'credit',
+                amount: Number(originalAmount),
+                transactionType: 'advance_payment',
+                referenceId: creditMemo.id,
+                referenceModel: 'CreditMemo',
+                paymentMethod: paymentMethod,
+                notes: notes || 'Advance deposit for Credit Memo',
+                performedBy: req.user.id
+            }, tx);
+        }
 
-        await session.commitTransaction();
-        session.endSession();
-        
         ApiResponse.created(creditMemo, 'Credit Memo created successfully').send(res);
-    } catch (error) {
-        await session.abortTransaction();
-        session.endSession();
-        throw error;
-    }
+    });
 });
 
 // Update Credit Memo (Limited to safe fields)
@@ -152,61 +131,56 @@ const updateCreditMemo = asyncHandler(async (req, res) => {
     const { id } = req.params;
     const { notes, paymentMethod, status } = req.body;
 
-    const creditMemo = await CreditMemo.findById(id);
+    const creditMemo = await prisma.creditMemo.findUnique({ where: { id } });
     if (!creditMemo) {
         return ApiResponse.error('Credit Memo not found', 404).send(res);
     }
 
-    if (notes) creditMemo.notes = notes;
-    if (paymentMethod) creditMemo.paymentMethod = paymentMethod;
-    if (status) creditMemo.status = status;
+    const dataToUpdate = {};
+    if (notes !== undefined) dataToUpdate.notes = notes;
+    if (paymentMethod !== undefined) dataToUpdate.paymentMethod = paymentMethod;
+    if (status !== undefined) dataToUpdate.status = status;
 
-    await creditMemo.save();
+    const updatedMemo = await prisma.creditMemo.update({
+        where: { id },
+        data: dataToUpdate
+    });
 
-    ApiResponse.success(creditMemo, 'Credit Memo updated successfully').send(res);
+    ApiResponse.success(updatedMemo, 'Credit Memo updated successfully').send(res);
 });
 
 // Delete Credit Memo (Strict Rules)
 const deleteCreditMemo = asyncHandler(async (req, res) => {
     const { id } = req.params;
 
-    const creditMemo = await CreditMemo.findById(id);
+    const creditMemo = await prisma.creditMemo.findUnique({ where: { id } });
     if (!creditMemo) {
         return ApiResponse.error('Credit Memo not found', 404).send(res);
     }
 
-    if (creditMemo.balance !== creditMemo.originalAmount) {
+    if (Number(creditMemo.balance) !== Number(creditMemo.originalAmount)) {
         return ApiResponse.error('Cannot delete: Credit Memo has already been partially or fully used.', 403).send(res);
     }
 
-    const session = await mongoose.startSession();
-    session.startTransaction();
+    await prisma.$transaction(async (tx) => {
+        if (recordTransactionPrisma) {
+            await recordTransactionPrisma({
+                customerId: creditMemo.customerId,
+                type: 'debit', // Reverse the initial credit
+                amount: Number(creditMemo.originalAmount),
+                transactionType: 'reversal',
+                referenceId: creditMemo.id,
+                referenceModel: 'CreditMemo',
+                paymentMethod: creditMemo.paymentMethod,
+                notes: 'Reversal: Deletion of Credit Memo',
+                performedBy: req.user.id
+            }, tx);
+        }
 
-    try {
-        // Reverse Ledger Transaction
-        await recordTransaction({
-            customerId: creditMemo.customer,
-            type: 'debit', // Reverse the initial credit
-            amount: creditMemo.originalAmount,
-            transactionType: 'reversal',
-            referenceId: creditMemo._id,
-            referenceModel: 'CreditMemo',
-            paymentMethod: creditMemo.paymentMethod,
-            notes: 'Reversal: Deletion of Credit Memo',
-            performedBy: req.user._id
-        }, session);
+        await tx.creditMemo.delete({ where: { id } });
+    });
 
-        await CreditMemo.findByIdAndDelete(id).session(session);
-
-        await session.commitTransaction();
-        session.endSession();
-
-        ApiResponse.success({}, 'Credit Memo deleted and ledger reversed successfully').send(res);
-    } catch (error) {
-        await session.abortTransaction();
-        session.endSession();
-        throw error;
-    }
+    ApiResponse.success({}, 'Credit Memo deleted and ledger reversed successfully').send(res);
 });
 
 module.exports = {

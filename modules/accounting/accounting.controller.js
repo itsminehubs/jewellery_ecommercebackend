@@ -24,7 +24,7 @@ const getCashbook = asyncHandler(async (req, res) => {
  */
 const closeDay = asyncHandler(async (req, res) => {
     const { shop_id, date } = req.body;
-    const result = await cashbookService.closeDay(shop_id, date, req.user._id);
+    const result = await cashbookService.closeDay(shop_id, date, req.user.id);
     ApiResponse.success(result, 'Day closed successfully').send(res);
 });
 
@@ -32,7 +32,7 @@ const closeDay = asyncHandler(async (req, res) => {
  * Create a new expense
  */
 const createExpense = asyncHandler(async (req, res) => {
-    const result = await expenseService.createExpense(req.body, req.user._id);
+    const result = await expenseService.createExpense(req.body, req.user.id);
     ApiResponse.created(result, 'Expense recorded successfully').send(res);
 });
 
@@ -69,7 +69,7 @@ const recordPayment = asyncHandler(async (req, res) => {
         ...req.body,
         type: 'credit',
         transactionType: 'payment',
-        performedBy: req.user._id
+        performedBy: req.user.id
     });
     ApiResponse.success(result, 'Payment recorded in ledger').send(res);
 });
@@ -83,3 +83,4 @@ module.exports = {
     getVendorStatement,
     recordPayment
 };
+

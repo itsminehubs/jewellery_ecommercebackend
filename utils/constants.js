@@ -309,7 +309,7 @@ const WISHLIST_STATUS = {
 
 // File Upload Limits
 const UPLOAD_LIMITS = {
-  MAX_FILE_SIZE: 5 * 1024 * 1024, // 5MB
+  MAX_FILE_SIZE: 7 * 1024 * 1024, // 7MB
   MAX_FILES: 10,
   ALLOWED_IMAGE_TYPES: ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
 };

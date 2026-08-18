@@ -27,7 +27,7 @@ const recordInstallment = asyncHandler(async (req, res) => {
         return ApiResponse.error('Amount and payment method are required', 400).send(res);
     }
 
-    const scheme = await schemeService.recordInstallment(schemeId, paymentData, req.user._id);
+    const scheme = await schemeService.recordInstallment(schemeId, paymentData, req.user.id);
     ApiResponse.success(scheme, 'Installment recorded successfully').send(res);
 });
 
@@ -45,3 +45,4 @@ module.exports = {
     recordInstallment,
     getStoreSchemes
 };
+
