@@ -93,16 +93,24 @@ const getProductById = async (productId) => {
 
 const createProduct = async (productData, imagePaths = [], userId = null) => {
   const images = imagePaths.length > 0 ? await uploadMultipleImages(imagePaths, 'products') : [];
-  const product = new Product({ ...productData, images });
+  
+  // Extract initial stock and set product stock to 0 so updateStock can handle the increment
+  const initialStock = productData.stock || 0;
+  const initialPurchasePrice = productData.purchasePrice || 0;
+  
+  const product = new Product({ ...productData, stock: 0, images });
   await product.save();
 
   // 📝 LOG AUDIT: Centralized Stock Arrival
-  await inventoryService.updateStock(product._id, product.stock, {
-    type: 'purchase',
-    action: 'INITIAL_STOCK',
-    performedBy: userId,
-    notes: 'Initial product stock entry'
-  });
+  if (initialStock > 0) {
+    await inventoryService.updateStock(product._id, initialStock, {
+      type: 'purchase',
+      action: 'INITIAL_STOCK',
+      performedBy: userId,
+      costImpact: initialPurchasePrice,
+      notes: 'Initial product stock entry'
+    });
+  }
 
   // Clear listing caches if exists
   await cacheHelper.delPattern(`${CACHE_KEYS.PRODUCT_DETAIL}:*`);

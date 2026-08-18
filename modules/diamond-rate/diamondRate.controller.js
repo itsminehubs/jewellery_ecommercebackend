@@ -3,6 +3,30 @@ const ApiResponse = require('../../utils/ApiResponse');
 const ApiError = require('../../utils/ApiError');
 const { asyncHandler } = require('../../middlewares/error.middleware');
 
+/**
+ * Background job to recalculate prices for all active products containing diamonds
+ */
+const recalculateDiamondProducts = async () => {
+    try {
+        const Product = require('../product/product.model');
+        
+        // Find all active products that contain at least one Diamond
+        const products = await Product.find({
+            'stoneDetails.stoneType': 'Diamond',
+            status: 'active'
+        });
+
+        for (const product of products) {
+            // Trigger pre-save hook which handles dynamic price calculation
+            product.markModified('stoneDetails'); 
+            await product.save();
+        }
+        console.log(`Successfully recalculated prices for ${products.length} diamond products.`);
+    } catch (error) {
+        console.error("Error recalculating diamond product prices:", error);
+    }
+};
+
 // @desc    Add a new diamond rate
 // @route   POST /api/v1/diamond-rates
 // @access  Private/Admin
@@ -16,6 +40,11 @@ const addRate = asyncHandler(async (req, res) => {
     ratePerCarat,
     effectiveDate: effectiveDate || Date.now(),
     updatedBy: req.user?._id
+  });
+
+  // Trigger background recalculation for diamond products
+  recalculateDiamondProducts().catch(err => {
+      console.error("Error triggering diamond recalculation:", err);
   });
 
   ApiResponse.created(rate, 'Diamond rate added successfully').send(res);
@@ -77,6 +106,12 @@ const updateRate = asyncHandler(async (req, res) => {
   rate.updatedBy = req.user?._id;
 
   const updatedRate = await rate.save();
+  
+  // Trigger background recalculation for diamond products
+  recalculateDiamondProducts().catch(err => {
+      console.error("Error triggering diamond recalculation:", err);
+  });
+
   ApiResponse.success(updatedRate, 'Diamond rate updated successfully').send(res);
 });
 
