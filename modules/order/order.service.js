@@ -61,7 +61,7 @@ const createOrder = async (userId, orderData) => {
             // Validate and calculate discount
             const coupon = await tx.coupon.findUnique({ where: { code: orderData.couponCode } });
             if (!coupon) throw ApiError.badRequest('Invalid coupon code');
-            
+
             // Simplified discount calculation for Prisma
             if (coupon.discountType === 'percentage') {
                 discount = subtotal * (Number(coupon.discountValue) / 100);

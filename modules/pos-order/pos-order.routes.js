@@ -6,6 +6,7 @@ const { authenticate } = require('../../middlewares/auth.middleware');
 router.use(authenticate); // All POS routes require authentication
 
 router.post('/', posOrderController.createOrder);
+router.get('/store', posOrderController.getStoreOrders);
 router.get('/', posOrderController.getStoreOrders);
 router.get('/analytics', posOrderController.getStoreAnalytics);
 router.get('/:id', posOrderController.getOrderById);

@@ -14,11 +14,16 @@ const MAX_RETRIES = 3;
 const createOrder = async (orderData) => {
     // We use Prisma interactive transactions
     return await prisma.$transaction(async (tx) => {
+        // Resolve store UUID from shop_id
+        const store = await tx.store.findUnique({ where: { shop_id: orderData.shop_id } });
+        if (!store) throw new Error(`Store not found for shop_id: ${orderData.shop_id}`);
+        const storeId = store.id;
+
         // 1. Generate Order Number
         const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
         const count = await tx.pOSOrder.count({
             where: {
-                storeId: orderData.shop_id,
+                storeId: storeId,
                 createdAt: { gte: new Date(new Date().setHours(0,0,0,0)) }
             }
         }) + 1;
@@ -87,7 +92,7 @@ const createOrder = async (orderData) => {
                         where: { id: memo.id },
                         data: {
                             balance: newBalance,
-                            status: newBalance <= 0 ? 'DEPLETED' : 'ACTIVE',
+                            status: newBalance <= 0 ? 'depleted' : 'active',
                             // For a robust system we'd track redemptions in a separate table, but updating balance is key
                         }
                     });
@@ -99,7 +104,7 @@ const createOrder = async (orderData) => {
         const order = await tx.pOSOrder.create({
             data: {
                 orderNumber,
-                storeId: orderData.shop_id,
+                storeId: storeId,
                 customerId: orderData.customerId || null,
                 staffId: orderData.billedBy,
                 subTotal: orderData.subTotal || 0,
@@ -110,7 +115,7 @@ const createOrder = async (orderData) => {
                 cardPaid: totalOnline, // Simplification
                 upiPaid: 0,
                 creditUsed: totalCredit,
-                status: 'COMPLETED',
+                status: 'completed',
                 notes: orderData.notes,
                 items: {
                     create: orderData.items.map(item => ({
@@ -158,10 +163,10 @@ const createOrder = async (orderData) => {
 
         // 6. Update Daily Cashbook
         if (totalCash > 0 && cashbookService.updateCashbookOnEventPrisma) {
-            await cashbookService.updateCashbookOnEventPrisma(orderData.shop_id, totalCash, 'cash', 'sale', tx);
+            await cashbookService.updateCashbookOnEventPrisma(storeId, totalCash, 'cash', 'sale', tx);
         }
         if (totalOnline > 0 && cashbookService.updateCashbookOnEventPrisma) {
-            await cashbookService.updateCashbookOnEventPrisma(orderData.shop_id, totalOnline, 'upi', 'sale', tx);
+            await cashbookService.updateCashbookOnEventPrisma(storeId, totalOnline, 'upi', 'sale', tx);
         }
         
         // 7. Handle Customer Credit (Udhar)
@@ -169,7 +174,7 @@ const createOrder = async (orderData) => {
             if (!orderData.customerId) throw new Error('Customer ID is required for credit (Udhar) sales');
             
             if (cashbookService.updateCashbookOnEventPrisma) {
-                await cashbookService.updateCashbookOnEventPrisma(orderData.shop_id, totalCredit, 'credit', 'sale', tx);
+                await cashbookService.updateCashbookOnEventPrisma(storeId, totalCredit, 'credit', 'sale', tx);
             }
             
             if (ledgerService.recordTransactionPrisma) {
@@ -218,10 +223,22 @@ const createOrder = async (orderData) => {
 };
 
 const getStoreOrders = async (shop_id, query = {}) => {
-    const { page = 1, limit = 20, search = '' } = query;
+    const { page = 1, limit = 20, search = '', startDate, endDate } = query;
     const skip = (Number(page) - 1) * Number(limit);
 
-    const where = { storeId: shop_id };
+    // Resolve store UUID
+    let storeId = shop_id;
+    const isUUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(shop_id);
+    if (!isUUID) {
+        const store = await prisma.store.findUnique({ where: { shop_id } });
+        if (store) storeId = store.id;
+    }
+
+    const where = { storeId: storeId };
+    
+    if (startDate && endDate) {
+        where.createdAt = { gte: new Date(startDate), lte: new Date(endDate) };
+    }
     
     if (search) {
         where.OR = [
@@ -233,7 +250,11 @@ const getStoreOrders = async (shop_id, query = {}) => {
 
     const items = await prisma.pOSOrder.findMany({
         where,
-        include: { staff: { select: { name: true } }, customer: { select: { name: true, phone: true } } },
+        include: { 
+            staff: { select: { name: true } }, 
+            customer: { select: { name: true, phone: true } }, 
+            items: { include: { product: { include: { metalDetails: true, stoneDetails: true } } } } 
+        },
         orderBy: { createdAt: 'desc' },
         skip,
         take: Number(limit)
@@ -254,16 +275,28 @@ const getStoreOrders = async (shop_id, query = {}) => {
 const getOrderById = async (id) => {
     return await prisma.pOSOrder.findUnique({
         where: { id },
-        include: { staff: { select: { name: true } }, customer: true, items: true }
+        include: { 
+            staff: { select: { name: true } }, 
+            customer: true, 
+            items: { include: { product: { include: { metalDetails: true, stoneDetails: true } } } } 
+        }
     });
 };
 
 const getStoreAnalytics = async (shop_id, startDate, endDate) => {
+    // Resolve store UUID
+    let storeId = shop_id;
+    const isUUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(shop_id);
+    if (!isUUID) {
+        const store = await prisma.store.findUnique({ where: { shop_id } });
+        if (store) storeId = store.id;
+    }
+
     const stats = await prisma.pOSOrder.aggregate({
         where: {
-            storeId: shop_id,
+            storeId: storeId,
             createdAt: { gte: new Date(startDate), lte: new Date(endDate) },
-            status: 'COMPLETED'
+            status: 'completed'
         },
         _sum: {
             grandTotal: true,

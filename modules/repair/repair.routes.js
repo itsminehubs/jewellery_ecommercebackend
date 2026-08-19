@@ -24,22 +24,22 @@ router.get('/my-repairs', repairController.getMyRepairs);
 router
     .route('/')
     .get(
-        restrictTo('admin', 'pos_user', 'super_admin'),
+        restrictTo('admin', 'super_admin', 'store_manager', 'sales_staff'),
         repairController.getAllRepairs
     )
     .post(
-        restrictTo('admin', 'pos_user', 'super_admin'),
+        restrictTo('admin', 'super_admin', 'store_manager', 'sales_staff'),
         repairController.createRepair
     );
 
 router
     .route('/:id')
     .get(
-        restrictTo('admin', 'pos_user', 'super_admin'),
+        restrictTo('admin', 'super_admin', 'store_manager', 'sales_staff'),
         repairController.getRepair
     )
     .put(
-        restrictTo('admin', 'pos_user', 'super_admin'),
+        restrictTo('admin', 'super_admin', 'store_manager', 'sales_staff'),
         repairController.updateRepair
     )
     .delete(

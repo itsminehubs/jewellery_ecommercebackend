@@ -32,7 +32,8 @@ const getDashboardStats = async (shopId = null) => {
 
   const topProducts = await prisma.product.findMany({
     orderBy: { sales: 'desc' },
-    take: 5
+    take: 5,
+    include: { images: true }
   });
 
   // Since POS vs Online split uses 'source' field, but Prisma Order doesn't have source? 
@@ -375,7 +376,7 @@ const getStockList = async (options = {}) => {
 
   const products = await prisma.product.findMany({
     where,
-    select: { id: true, name: true, sku: true, categoryId: true, metalDetails: true, stock: true, price: true, purchasePrice: true, finalPrice: true, status: true },
+    select: { id: true, name: true, sku: true, categoryId: true, metalDetails: true, stock: true, price: true, purchasePrice: true, finalPrice: true, status: true, images: true },
     orderBy: status === 'low_stock' ? { stock: 'asc' } : { updatedAt: 'desc' },
     skip,
     take: Number(limit)

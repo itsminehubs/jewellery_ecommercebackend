@@ -350,7 +350,7 @@
             <table class="total-table">
                 <tr>
                     <td>Subtotal:</td>
-                    <td style="text-align: right;">₹<%= po.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
+                    <td style="text-align: right;">₹<%= Number(po.totalAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
                 </tr>
                 <tr>
                     <td>Tax (GST 3%):</td>
@@ -358,7 +358,7 @@
                 </tr>
                 <tr class="grand-total-row">
                     <td>TOTAL:</td>
-                    <td style="text-align: right;">₹<%= po.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
+                    <td style="text-align: right;">₹<%= Number(po.totalAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
                 </tr>
             </table>
         </div>

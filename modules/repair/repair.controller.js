@@ -21,30 +21,65 @@ exports.createRepair = asyncHandler(async (req, res, next) => {
         req.body.storeId = req.headers['x-shop-id'];
     }
 
+    let finalStoreId = req.body.storeId || req.body.store;
+    if (finalStoreId && !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(finalStoreId)) {
+        const store = await prisma.store.findUnique({ where: { shop_id: finalStoreId } });
+        if (store) {
+            finalStoreId = store.id;
+        } else {
+            finalStoreId = null; // Prevent foreign key error if shop_id is invalid
+        }
+    }
+
+    const { items, repairBagNumber, deliveryDate, remarks } = req.body;
+    
+    const itemDescription = (items && items.length > 0) 
+        ? items.map(i => i.article).join(', ') 
+        : (req.body.itemDescription || 'Repair Intake');
+        
+    const repairDetails = JSON.stringify({
+        items: items || [],
+        repairBagNumber: repairBagNumber || '',
+        remarks: remarks || ''
+    });
+
     const newRepair = await prisma.repair.create({
         data: {
             receiptVoucher: req.body.receiptVoucher,
             customerId: req.body.customer || req.body.customerId,
-            storeId: req.body.storeId || req.body.store,
+            storeId: finalStoreId,
             billedById: req.body.billedById,
-            itemDescription: req.body.itemDescription,
-            repairDetails: req.body.repairDetails,
+            itemDescription: itemDescription,
+            repairDetails: repairDetails,
             estimatedCost: req.body.estimatedCost ? Number(req.body.estimatedCost) : 0,
             status: req.body.status || 'received',
-            dueDate: req.body.dueDate ? new Date(req.body.dueDate) : null
+            dueDate: deliveryDate ? new Date(deliveryDate) : (req.body.dueDate ? new Date(req.body.dueDate) : null),
+            notes: remarks || req.body.notes || ''
         }
     });
 
+    const formattedRepair = {
+        ...newRepair,
+        items: items || [],
+        repairBagNumber: repairBagNumber || '',
+        remarks: remarks || ''
+    };
+
     res.status(201).json({
         status: 'success',
-        data: newRepair
+        data: formattedRepair
     });
 });
 
 exports.getAllRepairs = asyncHandler(async (req, res, next) => {
     const filter = {};
     if (req.headers['x-shop-id'] && req.headers['x-shop-id'] !== 'MAIN') {
-        filter.storeId = req.headers['x-shop-id'];
+        let shopIdFilter = req.headers['x-shop-id'];
+        if (!/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(shopIdFilter)) {
+            const store = await prisma.store.findUnique({ where: { shop_id: shopIdFilter } });
+            if (store) shopIdFilter = store.id;
+        }
+        filter.storeId = shopIdFilter;
     }
     
     if (req.query.customer) {
@@ -61,10 +96,23 @@ exports.getAllRepairs = asyncHandler(async (req, res, next) => {
         orderBy: { createdAt: 'desc' }
     });
 
+    const formattedRepairs = repairs.map(r => {
+        let details = {};
+        if (r.repairDetails) {
+            try { details = JSON.parse(r.repairDetails); } catch(e){}
+        }
+        return {
+            ...r,
+            items: details.items || [],
+            repairBagNumber: details.repairBagNumber || '',
+            remarks: details.remarks || r.notes || ''
+        };
+    });
+
     res.status(200).json({
         status: 'success',
-        results: repairs.length,
-        data: repairs
+        results: formattedRepairs.length,
+        data: formattedRepairs
     });
 });
 
@@ -77,10 +125,23 @@ exports.getMyRepairs = asyncHandler(async (req, res, next) => {
         orderBy: { createdAt: 'desc' }
     });
 
+    const formattedRepairs = repairs.map(r => {
+        let details = {};
+        if (r.repairDetails) {
+            try { details = JSON.parse(r.repairDetails); } catch(e){}
+        }
+        return {
+            ...r,
+            items: details.items || [],
+            repairBagNumber: details.repairBagNumber || '',
+            remarks: details.remarks || r.notes || ''
+        };
+    });
+
     res.status(200).json({
         status: 'success',
-        results: repairs.length,
-        data: repairs
+        results: formattedRepairs.length,
+        data: formattedRepairs
     });
 });
 
@@ -98,9 +159,21 @@ exports.getRepair = asyncHandler(async (req, res, next) => {
         return next(ApiError.notFound('No repair found with that ID'));
     }
 
+    let details = {};
+    if (repair.repairDetails) {
+        try { details = JSON.parse(repair.repairDetails); } catch(e){}
+    }
+    
+    const formattedRepair = {
+        ...repair,
+        items: details.items || [],
+        repairBagNumber: details.repairBagNumber || '',
+        remarks: details.remarks || repair.notes || ''
+    };
+
     res.status(200).json({
         status: 'success',
-        data: repair
+        data: formattedRepair
     });
 });
 

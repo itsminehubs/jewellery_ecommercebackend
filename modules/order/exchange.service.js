@@ -38,8 +38,8 @@ const processOldGoldExchange = async (data, userId) => {
 
         // 2. Update Cashbook (Optional: Some shops track Exchange Receipts separately)
         // For now, we update totalCustomerPayments in the cashbook
-        if (cashbookService.updateCashbookOnEvent) {
-             await cashbookService.updateCashbookOnEvent(shop_id, finalValue, 'exchange', 'customer_payment', tx);
+        if (cashbookService.updateCashbookOnEventPrisma) {
+             await cashbookService.updateCashbookOnEventPrisma(shop_id, finalValue, 'exchange', 'customer_payment', tx);
         }
 
         // 3. (Future) Store this as 'Old Gold Stock' in the inventory

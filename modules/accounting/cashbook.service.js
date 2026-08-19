@@ -61,9 +61,18 @@ const updateCashbookOnEventPrisma = async (shop_id, amount, paymentMethod, sourc
         else throw new Error("No user found to record Cashbook entry.");
     }
 
+    let actualStoreId = shop_id;
+    // Basic UUID regex check
+    const isUUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(shop_id);
+    if (!isUUID) {
+        const store = await db.store.findUnique({ where: { shop_id: shop_id } });
+        if (store) actualStoreId = store.id;
+        else throw new Error(`Store not found for shop_id: ${shop_id}`);
+    }
+
     return await db.cashbook.create({
         data: {
-            storeId: shop_id,
+            storeId: actualStoreId,
             date: new Date(), // Today
             type,
             amount: Number(amount),

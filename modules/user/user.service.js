@@ -35,8 +35,10 @@ const getUser = async (userId) => {
 
 const getUserByPhone = async (phone) => {
   if (!phone) throw ApiError.badRequest('Phone number is required');
-  
-  const user = await prisma.user.findUnique({ where: { phone } });
+  const user = await prisma.user.findUnique({ 
+    where: { phone },
+    include: { addresses: true }
+  });
   if (!user) {
     throw ApiError.notFound('User not found');
   }
@@ -45,14 +47,27 @@ const getUserByPhone = async (phone) => {
   const recentOrders = await prisma.pOSOrder.findMany({
     where: { customerId: user.id },
     orderBy: { createdAt: 'desc' },
-    take: 50
+    take: 50,
+    include: {
+      items: {
+        include: { product: true }
+      }
+    }
   });
+
+  const mappedOrders = recentOrders.map(order => ({
+    ...order,
+    items: order.items.map(item => ({
+      ...item,
+      name: item.product?.name || 'Item'
+    }))
+  }));
 
   const userJson = { ...user };
   delete userJson.password;
   delete userJson.refreshToken;
 
-  return { ...userJson, recentOrders };
+  return { ...userJson, recentOrders: mappedOrders };
 };
 
 const createQuickCustomer = async (customerData) => {
