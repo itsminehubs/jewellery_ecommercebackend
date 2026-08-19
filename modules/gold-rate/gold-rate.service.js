@@ -1,13 +1,20 @@
-const GoldRate = require('./gold-rate.model');
+const prisma = require('../../config/prisma');
 
 /**
  * Update gold rate
  */
 const updateRate = async (rateData) => {
-    const rate = await GoldRate.create(rateData);
+    const rate = await prisma.goldRate.create({
+        data: {
+            metal: rateData.metal || 'gold',
+            purity: rateData.purity,
+            ratePerGram: rateData.ratePerGram,
+            effectiveDate: rateData.effectiveDate || new Date()
+        }
+    });
     
     // Trigger mass price recalculation in the background
-    recalculateProductPrices(rateData.metal, rateData.purity).catch(err => {
+    recalculateProductPrices(rate.metal, rate.purity).catch(err => {
         console.error("Error recalculating product prices after rate update:", err);
     });
 
@@ -18,64 +25,64 @@ const updateRate = async (rateData) => {
  * Recalculate prices for all active products matching the metal and purity
  */
 const recalculateProductPrices = async (metal, purity) => {
-    const Product = require('../product/product.model');
+    // In Prisma, we don't have pre-save hooks.
+    // We will call the productService to handle the explicit calculation.
+    const productService = require('../product/product.service');
     
-    // Find all products matching the metal and purity
-    // metal in rateData is 'gold', 'silver', etc. 
-    // In product it's stored in metalDetails.metalType (e.g., 'gold')
-    const products = await Product.find({
-        'metalDetails.metalType': new RegExp(`^${metal}$`, 'i'),
-        'metalDetails.purity': purity
-    });
-
-    for (const product of products) {
-        // Trigger pre-save hook which handles the dynamic price calculation
-        product.markModified('metalDetails'); 
-        await product.save();
+    // For now, we will just call a method on productService
+    // that handles finding the products and updating their finalPrice
+    if (productService.recalculatePricesForMetal) {
+        await productService.recalculatePricesForMetal(metal, purity);
+    } else {
+        console.warn("productService.recalculatePricesForMetal not implemented yet");
     }
-    console.log(`Recalculated prices for ${products.length} products with ${metal} ${purity}`);
 };
 
 /**
  * Get latest rate for a metal and purity
  */
 const getLatestRate = async (metal, purity) => {
-    return await GoldRate.findOne({ metal, purity })
-        .sort({ effectiveDate: -1, createdAt: -1 });
+    return await prisma.goldRate.findFirst({
+        where: { metal, purity },
+        orderBy: [
+            { effectiveDate: 'desc' },
+            { createdAt: 'desc' }
+        ]
+    });
 };
 
 /**
  * Get all current rates (latest for each metal/purity combo)
  */
 const getCurrentRates = async () => {
-    // Use aggregation to find the latest rate for each unique metal + purity combination
-    return await GoldRate.aggregate([
-        { $sort: { effectiveDate: -1, createdAt: -1 } },
-        {
-            $group: {
-                _id: { metal: "$metal", purity: "$purity" },
-                ratePerGram: { $first: "$ratePerGram" },
-                effectiveDate: { $first: "$effectiveDate" },
-                id: { $first: "$_id" }
-            }
-        },
-        {
-            $project: {
-                _id: "$id",
-                metal: "$_id.metal",
-                purity: "$_id.purity",
-                ratePerGram: 1,
-                effectiveDate: 1
-            }
-        }
-    ]);
+    // Prisma doesn't have a direct equivalent to Mongo's $group for complete records easily
+    // So we fetch distinct metal/purity pairs, then fetch the latest for each
+    const uniqueGroups = await prisma.goldRate.groupBy({
+        by: ['metal', 'purity'],
+    });
+
+    const currentRates = await Promise.all(
+        uniqueGroups.map(async (group) => {
+            return await prisma.goldRate.findFirst({
+                where: { metal: group.metal, purity: group.purity },
+                orderBy: [
+                    { effectiveDate: 'desc' },
+                    { createdAt: 'desc' }
+                ]
+            });
+        })
+    );
+
+    return currentRates.filter(r => r !== null);
 };
 
 /**
  * Delete all rates for a specific metal and purity
  */
 const deleteRate = async (metal, purity) => {
-    return await GoldRate.deleteMany({ metal, purity });
+    return await prisma.goldRate.deleteMany({
+        where: { metal, purity }
+    });
 };
 
 module.exports = {

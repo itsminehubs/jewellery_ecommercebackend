@@ -1,6 +1,7 @@
 const paymentService = require('./payment.service');
 const ApiResponse = require('../../utils/ApiResponse');
-const Order = require('../order/order.model');
+const ApiError = require('../../utils/ApiError');
+const prisma = require('../../config/prisma');
 const { asyncHandler } = require('../../middlewares/error.middleware');
 
 const createPaymentOrder = asyncHandler(async (req, res) => {
@@ -19,17 +20,27 @@ const refundPayment = asyncHandler(async (req, res) => {
   const result = await paymentService.handleRefund(orderId);
   ApiResponse.success(result, 'Refund processed successfully').send(res);
 });
+
 const markPaymentFailed = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
   const order = await paymentService.markPaymentFailed(orderId);
   ApiResponse.success(order, 'Payment marked as failed').send(res);
 });
+
 const getMyPayments = asyncHandler(async (req, res) => {
-  const payments = await Order.find({ user: req.user._id })
-    .select(
-      'items total paymentStatus paymentMethod razorpayPaymentId createdAt'
-    )
-    .sort({ createdAt: -1 });
+  const payments = await prisma.order.findMany({
+    where: { userId: req.user.id },
+    select: {
+      id: true,
+      items: true,
+      grandTotal: true,
+      paymentStatus: true,
+      paymentMethod: true,
+      razorpayPaymentId: true,
+      createdAt: true
+    },
+    orderBy: { createdAt: 'desc' }
+  });
 
   ApiResponse.success(payments, 'User payments fetched').send(res);
 });
@@ -37,23 +48,32 @@ const getMyPayments = asyncHandler(async (req, res) => {
 const getAllPayments = asyncHandler(async (req, res) => {
   const { status, userId } = req.query;
 
-  const filter = {};
-  if (status) filter.paymentStatus = status;
-  if (userId) filter.user = userId;
+  const where = {};
+  if (status) where.paymentStatus = status;
+  if (userId) where.userId = userId;
 
-  const payments = await Order.find(filter)
-    .populate('user', 'name email')
-    .populate('items.product', 'name price')
-    .sort({ createdAt: -1 });
+  const payments = await prisma.order.findMany({
+    where,
+    include: {
+        user: { select: { name: true, email: true } },
+        items: { include: { product: { select: { name: true, price: true } } } }
+    },
+    orderBy: { createdAt: 'desc' }
+  });
 
   ApiResponse.success(payments, 'All payments fetched').send(res);
 });
+
 const getPaymentByOrderId = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
 
-  const order = await Order.findById(orderId)
-    .populate('user', 'name email')
-    .populate('items.product', 'name');
+  const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+          user: { select: { name: true, email: true } },
+          items: { include: { product: { select: { name: true } } } }
+      }
+  });
 
   if (!order) throw ApiError.notFound('Order not found');
 

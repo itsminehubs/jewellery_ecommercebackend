@@ -3,7 +3,7 @@ const ApiResponse = require('../../utils/ApiResponse');
 const { asyncHandler } = require('../../middlewares/error.middleware');
 
 const createPO = asyncHandler(async (req, res) => {
-    const po = await poService.createPurchaseOrder(req.body, req.user._id);
+    const po = await poService.createPurchaseOrder(req.body, req.user.id);
     ApiResponse.created(po, 'Purchase Order created (Draft)').send(res);
 });
 
@@ -23,7 +23,7 @@ const updatePO = asyncHandler(async (req, res) => {
 });
 
 const receivePO = asyncHandler(async (req, res) => {
-    const po = await poService.receivePurchaseOrder(req.params.id, req.user._id);
+    const po = await poService.receivePurchaseOrder(req.params.id, req.user.id);
     ApiResponse.success(po, 'PO marked as Received. Inventory updated.').send(res);
 });
 
@@ -54,3 +54,4 @@ module.exports = {
     downloadPO,
     deletePO
 };
+

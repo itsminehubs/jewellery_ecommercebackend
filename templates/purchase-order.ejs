@@ -334,8 +334,8 @@
                             <span style="font-size: 9px; color: var(--text-muted);">SKU: <%= item.product ? item.product.sku : 'N/A' %> | Category: <%= item.product ? item.product.category : 'N/A' %></span>
                         </td>
                         <td class="col-qty"><%= item.quantity %></td>
-                        <td class="col-price">₹<%= item.purchasePrice.toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
-                        <td class="col-total">₹<%= item.totalPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
+                        <td class="col-price">₹<%= Number(item.unitPrice || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
+                        <td class="col-total">₹<%= Number(item.totalPrice || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
                     </tr>
                 <% }); %>
             </tbody>
@@ -350,7 +350,7 @@
             <table class="total-table">
                 <tr>
                     <td>Subtotal:</td>
-                    <td style="text-align: right;">₹<%= po.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
+                    <td style="text-align: right;">₹<%= Number(po.totalAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
                 </tr>
                 <tr>
                     <td>Tax (GST 3%):</td>
@@ -358,7 +358,7 @@
                 </tr>
                 <tr class="grand-total-row">
                     <td>TOTAL:</td>
-                    <td style="text-align: right;">₹<%= po.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
+                    <td style="text-align: right;">₹<%= Number(po.totalAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
                 </tr>
             </table>
         </div>
@@ -374,7 +374,7 @@
             </div>
             <div class="signatures">
                 <div class="sig-box">
-                    <%= po.employee.name %>
+                    <%= po.employee ? po.employee.name : 'Store Admin' %>
                 </div>
                 <div class="sig-label">Authorized Signatory</div>
             </div>

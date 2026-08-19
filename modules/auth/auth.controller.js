@@ -61,7 +61,7 @@ const refreshToken = asyncHandler(async (req, res) => {
  * @access Private
  */
 const logout = asyncHandler(async (req, res) => {
-  const userId = req.user._id;
+  const userId = req.user.id;
   const { refreshToken } = req.body;
 
   const result = await authService.logout(userId, refreshToken);
@@ -136,3 +136,4 @@ module.exports = {
   forgotPassword,
   resetPassword
 };
+

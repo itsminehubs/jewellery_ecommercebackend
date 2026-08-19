@@ -53,3 +53,4 @@ ecosystem.config.js
 .cache/
 .temp/
 .tmp/
+/generated/prisma

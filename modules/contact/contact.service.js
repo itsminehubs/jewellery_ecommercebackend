@@ -1,20 +1,28 @@
-const Contact = require('./contact.model');
+const prisma = require('../../config/prisma');
 
 /**
  * Submit a contact inquiry
  * @param {Object} contactData 
- * @returns {Promise<Contact>}
  */
 const submitInquiry = async (contactData) => {
-    return await Contact.create(contactData);
+    return await prisma.contact.create({
+        data: {
+            name: contactData.fullName || contactData.name || 'Unknown',
+            email: contactData.email,
+            phone: contactData.phone,
+            subject: contactData.purpose || contactData.subject || 'General Inquiry',
+            message: contactData.message
+        }
+    });
 };
 
 /**
  * Get all contact inquiries (for admin)
- * @returns {Promise<Array>}
  */
 const getAllInquiries = async () => {
-    return await Contact.find().sort({ createdAt: -1 });
+    return await prisma.contact.findMany({
+        orderBy: { createdAt: 'desc' }
+    });
 };
 
 module.exports = {

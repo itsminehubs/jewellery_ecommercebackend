@@ -1,11 +1,9 @@
-const VendorLedger = require('./vendor-ledger.model');
-const Vendor = require('../vendor-purchase/vendor.model');
-const mongoose = require('mongoose');
+const prisma = require('../../config/prisma');
 
 /**
  * Record a transaction in the vendor ledger and update vendor balance
  */
-const recordTransaction = async (data, session = null) => {
+const recordTransaction = async (data, tx = null) => {
     const { 
         vendorId, 
         type,           // 'debit' (we pay vendor), 'credit' (we receive stock)
@@ -17,35 +15,39 @@ const recordTransaction = async (data, session = null) => {
         performedBy 
     } = data;
 
+    const db = tx || prisma;
+
     // 1. Get current balance from Vendor
-    const vendor = await Vendor.findById(vendorId).session(session);
+    const vendor = await db.vendor.findUnique({ where: { id: vendorId } });
     if (!vendor) throw new Error('Vendor not found');
 
-    // We use a simple field for outstanding balance in Vendor as well
-    // Let's ensure we add this field to the Vendor model in next step if not present
-    const beforeBalance = vendor.outstandingBalance || 0;
+    const beforeBalance = vendor.outstandingBalance ? Number(vendor.outstandingBalance) : 0;
     
     // Debit decreases our debt, Credit increases our debt
-    const newBalance = type === 'credit' ? (beforeBalance + amount) : (beforeBalance - amount);
+    const newBalance = type === 'credit' ? (beforeBalance + Number(amount)) : (beforeBalance - Number(amount));
 
     // 2. Create Ledger Entry
-    const ledgerEntry = await VendorLedger.create([{
-        vendor: vendorId,
-        type,
-        amount,
-        runningBalance: newBalance,
-        transactionType,
-        referenceId,
-        paymentMethod,
-        notes,
-        performedBy
-    }], { session });
+    const ledgerEntry = await db.vendorLedger.create({
+        data: {
+            vendorId: vendorId,
+            type,
+            amount: Number(amount),
+            runningBalance: newBalance,
+            transactionType,
+            referenceId,
+            // paymentMethod and performedBy may not be present in Prisma VendorLedger.
+            // Let's store them in notes if they are not in schema. Schema has notes.
+            notes: (notes || '') + (paymentMethod ? ` | Paid via ${paymentMethod}` : '') + (performedBy ? ` | By ${performedBy}` : '')
+        }
+    });
 
     // 3. Update Vendor Balance
-    vendor.outstandingBalance = newBalance;
-    await vendor.save({ session });
+    await db.vendor.update({
+        where: { id: vendorId },
+        data: { outstandingBalance: newBalance }
+    });
 
-    return ledgerEntry[0];
+    return ledgerEntry;
 };
 
 /**
@@ -54,18 +56,19 @@ const recordTransaction = async (data, session = null) => {
 const getVendorStatement = async (vendorId, params = {}) => {
     const { startDate, endDate, limit = 50, skip = 0 } = params;
     
-    const query = { vendor: vendorId };
+    const where = { vendorId };
     if (startDate || endDate) {
-        query.createdAt = {};
-        if (startDate) query.createdAt.$gte = new Date(startDate);
-        if (endDate) query.createdAt.$lte = new Date(endDate);
+        where.createdAt = {};
+        if (startDate) where.createdAt.gte = new Date(startDate);
+        if (endDate) where.createdAt.lte = new Date(endDate);
     }
 
-    return await VendorLedger.find(query)
-        .sort({ createdAt: -1 })
-        .limit(limit)
-        .skip(skip)
-        .populate('performedBy', 'name');
+    return await prisma.vendorLedger.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        skip
+    });
 };
 
 module.exports = {

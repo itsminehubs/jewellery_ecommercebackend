@@ -1,69 +1,107 @@
-const PurchaseOrder = require('./purchase-order.model');
-const inventoryService = require('../product/inventory.service');
+const prisma = require('../../config/prisma');
 const ApiError = require('../../utils/ApiError');
-const mongoose = require('mongoose');
 const { generatePDF, amountToWords } = require('../../utils/pdfService');
-const Store = require('../store/store.model');
 
 const createPurchaseOrder = async (poData, userId) => {
     // Calculate totals for each item
     const items = poData.items.map(item => ({
         ...item,
-        totalPrice: item.quantity * item.purchasePrice
+        totalPrice: Number(item.quantity) * Number(item.purchasePrice)
     }));
 
     const totalAmount = items.reduce((sum, item) => sum + item.totalPrice, 0);
 
-    return await PurchaseOrder.create({
-        ...poData,
-        items,
-        totalAmount,
-        employee: userId
+    // Generate poNumber if missing
+    const finalPoNumber = poData.poNumber || `PO-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+    return await prisma.purchaseOrder.create({
+        data: {
+            poNumber: finalPoNumber,
+            vendorId: poData.vendorId || poData.vendor,
+            status: poData.status || 'pending',
+            totalAmount,
+            notes: poData.notes,
+            // Assuming employee/userId could be added if needed, schema only defines vendorId
+            items: {
+                create: items.map(item => ({
+                    productId: typeof item.product === 'object' ? item.product.id : (item.product || null),
+                    itemName: item.itemName || item.name || 'Unknown Item',
+                    quantity: Number(item.quantity),
+                    unitPrice: Number(item.purchasePrice),
+                    totalPrice: Number(item.totalPrice)
+                }))
+            }
+        },
+        include: { items: true }
     });
 };
 
 const getPurchaseOrders = async (filters = {}) => {
-    return await PurchaseOrder.find(filters)
-        .populate('vendor', 'name phone')
-        .populate('employee', 'name')
-        .populate('items.product', 'name sku category')
-        .sort('-createdAt');
+    const where = {};
+    if (filters.status) where.status = filters.status;
+    if (filters.vendor) where.vendorId = filters.vendor;
+
+    return await prisma.purchaseOrder.findMany({
+        where,
+        include: {
+            vendor: { select: { name: true, phone: true } },
+            items: { include: { product: { select: { name: true, sku: true, categoryId: true } } } }
+        },
+        orderBy: { createdAt: 'desc' }
+    });
 };
 
 const getPurchaseOrderById = async (id) => {
-    const po = await PurchaseOrder.findById(id)
-        .populate('vendor')
-        .populate('employee', 'name')
-        .populate('items.product', 'name sku category');
+    const po = await prisma.purchaseOrder.findUnique({
+        where: { id },
+        include: {
+            vendor: true,
+            items: { include: { product: true } }
+        }
+    });
     if (!po) throw ApiError.notFound('Purchase Order not found');
     return po;
 };
 
 const updatePurchaseOrder = async (id, updateData) => {
-    const po = await PurchaseOrder.findById(id);
+    const po = await prisma.purchaseOrder.findUnique({ where: { id }, include: { items: true } });
     if (!po) throw ApiError.notFound('Purchase Order not found');
 
     if (po.status === 'received' || po.status === 'cancelled') {
         throw ApiError.badRequest(`Cannot update a PO that is already ${po.status}`);
     }
 
-    Object.assign(po, updateData);
+    let totalAmount = Number(po.totalAmount);
 
-    // Recalculate totals if items changed
-    if (updateData.items) {
-        po.items = updateData.items.map(item => ({
-            ...item,
-            totalPrice: item.quantity * item.purchasePrice
-        }));
-        po.totalAmount = po.items.reduce((sum, item) => sum + item.totalPrice, 0);
-    }
+    return await prisma.$transaction(async (tx) => {
+        if (updateData.items) {
+            // Delete old items and recreate
+            await tx.purchaseOrderItem.deleteMany({ where: { purchaseOrderId: id } });
+            
+            const newItems = updateData.items.map(item => ({
+                purchaseOrderId: id,
+                productId: typeof item.product === 'object' ? item.product.id : (item.product || null),
+                itemName: item.itemName || item.name || 'Unknown Item',
+                quantity: Number(item.quantity),
+                unitPrice: Number(item.purchasePrice),
+                totalPrice: Number(item.quantity) * Number(item.purchasePrice)
+            }));
 
-    return await po.save();
+            await tx.purchaseOrderItem.createMany({ data: newItems });
+            totalAmount = newItems.reduce((sum, item) => sum + item.totalPrice, 0);
+        }
+
+        return await tx.purchaseOrder.update({
+            where: { id },
+            data: {
+                status: updateData.status || po.status,
+                notes: updateData.notes !== undefined ? updateData.notes : po.notes,
+                totalAmount
+            },
+            include: { items: true }
+        });
+    });
 };
-
-const vendorLedgerService = require('../accounting/vendor-ledger.service');
-const cashbookService = require('../accounting/cashbook.service');
-const Product = require('../product/product.model');
 
 /**
  * CORE LOGIC: Receive Purchase Order with ERP & Unique Item Integration
@@ -72,15 +110,16 @@ const Product = require('../product/product.model');
  * @param {string} userId - Employee ID
  */
 const receivePurchaseOrder = async (id, itemDetails, userId) => {
-    const session = await mongoose.startSession();
-    session.startTransaction();
-
-    try {
-        const po = await PurchaseOrder.findById(id).session(session).populate('vendor');
+    return await prisma.$transaction(async (tx) => {
+        const po = await tx.purchaseOrder.findUnique({
+            where: { id },
+            include: { vendor: true, items: true }
+        });
+        
         if (!po) throw ApiError.notFound('Purchase Order not found');
 
-        if (po.status !== 'ordered') {
-            throw ApiError.badRequest('Only orders in "ordered" status can be marked as received');
+        if (po.status !== 'pending' && po.status !== 'approved') {
+            throw ApiError.badRequest(`Only orders in pending or approved status can be marked as received. Current: ${po.status}`);
         }
 
         // 1. Process each item in the PO and Create Unique Products
@@ -92,70 +131,123 @@ const receivePurchaseOrder = async (id, itemDetails, userId) => {
                 throw ApiError.badRequest(`Unique HUID is required for item at index ${i}`);
             }
 
-            // Get base product template if any, or create from scratch
-            // In a unique-item ERP, we typically create a NEW product record for every piece
-            const baseProduct = await Product.findById(item.product).session(session);
+            let baseProduct = null;
+            if (item.productId) {
+                baseProduct = await tx.product.findUnique({
+                    where: { id: item.productId },
+                    include: { metalDetails: true, stoneDetails: true }
+                });
+            }
 
-            // Create a NEW unique product record
-            const uniqueProductData = {
-                ...baseProduct.toObject(),
-                _id: new mongoose.Types.ObjectId(),
-                huid: details.huid,
-                tagId: details.tagId || `TAG-${details.huid}`,
-                grossWeight: details.grossWeight || baseProduct.grossWeight,
-                netWeight: details.netWeight || baseProduct.netWeight,
-                stoneWeight: details.stoneWeight || 0,
-                purchasePrice: item.purchasePrice,
-                stock: 1, // Unique piece
-                status: 'active',
-                vendor: po.vendor._id,
-                shop_id: baseProduct.shop_id
-            };
-            delete uniqueProductData.sku; // Allow pre-save to gen new SKU or use HUID
+            if (!baseProduct) {
+                throw ApiError.badRequest(`Base product template required for item index ${i}`);
+            }
 
-            await Product.create([uniqueProductData], { session });
+            const tagId = details.tagId || `TAG-${details.huid}`;
+
+            // Create a NEW unique product record using the template
+            const uniqueProduct = await tx.product.create({
+                data: {
+                    sku: details.huid, // Using HUID as SKU for unique piece
+                    tagId: tagId,
+                    huid: details.huid,
+                    name: baseProduct.name,
+                    description: baseProduct.description,
+                    categoryId: baseProduct.categoryId,
+                    shopId: baseProduct.shopId,
+                    vendorId: po.vendorId,
+                    price: baseProduct.price,
+                    purchasePrice: item.unitPrice,
+                    makingCharges: baseProduct.makingCharges,
+                    makingChargeType: baseProduct.makingChargeType,
+                    stoneCharges: baseProduct.stoneCharges,
+                    wastage: baseProduct.wastage,
+                    discount: baseProduct.discount,
+                    finalPrice: baseProduct.finalPrice,
+                    stock: 1, // Unique piece
+                    status: 'active'
+                }
+            });
+
+            if (baseProduct.metalDetails) {
+                await tx.productMetal.create({
+                    data: {
+                        productId: uniqueProduct.id,
+                        metalType: baseProduct.metalDetails.metalType,
+                        purity: baseProduct.metalDetails.purity,
+                        grossWeight: details.grossWeight ? Number(details.grossWeight) : Number(baseProduct.metalDetails.grossWeight),
+                        netWeight: details.netWeight ? Number(details.netWeight) : Number(baseProduct.metalDetails.netWeight)
+                    }
+                });
+            }
+
+            if (baseProduct.stoneDetails && baseProduct.stoneDetails.length > 0) {
+                const stoneWeight = details.stoneWeight ? Number(details.stoneWeight) : 0;
+                // Simplified copying of stone details
+                for (const stone of baseProduct.stoneDetails) {
+                    await tx.productStone.create({
+                        data: {
+                            productId: uniqueProduct.id,
+                            stoneType: stone.stoneType,
+                            synthetic: stone.synthetic,
+                            shape: stone.shape,
+                            netWeight: stoneWeight || Number(stone.netWeight),
+                            color: stone.color,
+                            clarity: stone.clarity,
+                            carat: stone.carat,
+                            cut: stone.cut,
+                            certification: stone.certification,
+                            rate: stone.rate
+                        }
+                    });
+                }
+            }
         }
 
         // 2. Update Vendor Ledger (Udhar to Karigar)
-        await vendorLedgerService.recordTransaction({
-            vendorId: po.vendor._id,
-            type: 'credit', // We owe more money (received stock)
-            amount: po.totalAmount,
-            transactionType: 'purchase',
-            referenceId: po._id,
-            notes: `Received Stock via PO ${po.poNumber}`,
-            performedBy: userId
-        }, session);
+        // Ensure Ledger record is atomic in the transaction
+        const previousLedger = await tx.vendorLedger.findFirst({
+            where: { vendorId: po.vendorId },
+            orderBy: { createdAt: 'desc' }
+        });
+        const currentBalance = previousLedger ? Number(previousLedger.runningBalance) : 0;
+        const newBalance = currentBalance + Number(po.totalAmount);
+
+        await tx.vendorLedger.create({
+            data: {
+                vendorId: po.vendorId,
+                type: 'credit', // We owe more money (received stock)
+                amount: po.totalAmount,
+                runningBalance: newBalance,
+                transactionType: 'purchase',
+                referenceId: po.id,
+                notes: `Received Stock via PO ${po.poNumber}`
+            }
+        });
 
         // 3. Mark PO as received
-        po.status = 'received';
-        po.receivedDate = new Date();
-        await po.save({ session });
+        const updatedPo = await tx.purchaseOrder.update({
+            where: { id: po.id },
+            data: { status: 'received' }
+        });
 
-        await session.commitTransaction();
-        return po;
-    } catch (error) {
-        await session.abortTransaction();
-        throw error;
-    } finally {
-        session.endSession();
-    }
+        return updatedPo;
+    });
 };
 
 const deletePurchaseOrder = async (id) => {
-    const po = await PurchaseOrder.findById(id);
+    const po = await prisma.purchaseOrder.findUnique({ where: { id } });
     if (!po) throw ApiError.notFound('Purchase Order not found');
 
-    if (po.status !== 'draft' && po.status !== 'cancelled') {
+    if (po.status !== 'pending' && po.status !== 'cancelled') {
         throw ApiError.badRequest(`Cannot delete a Purchase Order that is already ${po.status}`);
     }
 
-    return await po.deleteOne();
+    return await prisma.purchaseOrder.delete({ where: { id } });
 };
 
 const generatePOPDF = async (po) => {
-    const stores = await Store.find({ status: 'active' });
-    const store = stores[0] || {
+    const store = await prisma.store.findFirst({ where: { status: 'active' } }) || {
         name: 'Jewellery Store',
         address: 'Main Market',
         city: 'City',
@@ -165,9 +257,9 @@ const generatePOPDF = async (po) => {
     };
 
     return await generatePDF('purchase-order', {
-        po: po.toObject(),
-        store: store.toObject ? store.toObject() : store,
-        amountInWords: amountToWords(po.totalAmount)
+        po,
+        store,
+        amountInWords: amountToWords(Number(po.totalAmount))
     });
 };
 

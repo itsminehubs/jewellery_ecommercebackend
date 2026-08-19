@@ -107,7 +107,7 @@ logger.logRequest = (req, res, duration = 0) => {
       duration: `${duration}ms`,
       ip: req?.ip,
       userAgent: req?.headers?.['user-agent'],
-      userId: req?.user?._id
+      userId: req?.user?.id
     });
   } catch (err) {
     console.error('Request logging failed:', err);
@@ -131,3 +131,4 @@ logger.createChild = (metadata = {}) => logger.child(metadata);
 /* -------------------------------------------------------------------------- */
 
 module.exports = logger;
+

@@ -1,68 +1,66 @@
-const Order = require('../order/order.model');
-const POSOrder = require('../pos-order/pos-order.model');
-const Product = require('../product/product.model');
-const AuditLog = require('../audit/audit.model');
+const prisma = require('../../config/prisma');
 
 /**
- * Calculate Gross Profit across a date range
+ * Calculate Gross Profit across a date range (Prisma Version)
  */
 const calculateGrossProfit = async (startDate, endDate) => {
-    const filter = {
-        createdAt: { $gte: new Date(startDate), $lte: new Date(endDate) },
-        paymentStatus: 'completed' // For online orders
-    };
-
-    const posFilter = {
-        createdAt: { $gte: new Date(startDate), $lte: new Date(endDate) },
-        status: 'completed' // For POS orders
-    };
-
     // 1. Profit from Online Orders
-    const onlineProfit = await Order.aggregate([
-        { $match: filter },
-        { $unwind: '$items' },
-        {
-            $group: {
-                _id: null,
-                totalRevenue: { $sum: '$items.price' },
-                totalCOGS: { $sum: '$items.costPrice' },
-                count: { $sum: 1 }
-            }
-        }
-    ]);
+    const onlineOrders = await prisma.order.findMany({
+        where: {
+            createdAt: { gte: new Date(startDate), lte: new Date(endDate) },
+            paymentStatus: 'COMPLETED'
+        },
+        include: { items: { include: { product: true } } }
+    });
+
+    let onlineRevenue = 0;
+    let onlineCOGS = 0;
+    let onlineCount = 0;
+
+    onlineOrders.forEach(order => {
+        order.items.forEach(item => {
+            onlineRevenue += Number(item.unitPrice) * item.quantity;
+            onlineCOGS += item.product?.purchasePrice ? Number(item.product.purchasePrice) * item.quantity : 0;
+            onlineCount += item.quantity;
+        });
+    });
 
     // 2. Profit from POS Orders
-    const posProfit = await POSOrder.aggregate([
-        { $match: posFilter },
-        { $unwind: '$items' },
-        {
-            $group: {
-                _id: null,
-                totalRevenue: { $sum: '$items.totalAmount' },
-                totalCOGS: { $sum: '$items.costPrice' },
-                count: { $sum: 1 }
-            }
-        }
-    ]);
+    const posOrders = await prisma.pOSOrder.findMany({
+        where: {
+            createdAt: { gte: new Date(startDate), lte: new Date(endDate) },
+            status: 'completed'
+        },
+        include: { items: { include: { product: true } } }
+    });
 
-    const onlineData = onlineProfit[0] || { totalRevenue: 0, totalCOGS: 0, count: 0 };
-    const posData = posProfit[0] || { totalRevenue: 0, totalCOGS: 0, count: 0 };
+    let posRevenue = 0;
+    let posCOGS = 0;
+    let posCount = 0;
+
+    posOrders.forEach(order => {
+        order.items.forEach(item => {
+            posRevenue += Number(item.totalPrice);
+            posCOGS += item.product?.purchasePrice ? Number(item.product.purchasePrice) * item.quantity : 0;
+            posCount += item.quantity;
+        });
+    });
 
     return {
         online: {
-            revenue: onlineData.totalRevenue,
-            cost: onlineData.totalCOGS,
-            profit: onlineData.totalRevenue - onlineData.totalCOGS
+            revenue: onlineRevenue,
+            cost: onlineCOGS,
+            profit: onlineRevenue - onlineCOGS
         },
         pos: {
-            revenue: posData.totalRevenue,
-            cost: posData.totalCOGS,
-            profit: posData.totalRevenue - posData.totalCOGS
+            revenue: posRevenue,
+            cost: posCOGS,
+            profit: posRevenue - posCOGS
         },
         unified: {
-            totalRevenue: onlineData.totalRevenue + posData.totalRevenue,
-            totalCost: onlineData.totalCOGS + posData.totalCOGS,
-            totalProfit: (onlineData.totalRevenue - onlineData.totalCOGS) + (posData.totalRevenue - posData.totalCOGS)
+            totalRevenue: onlineRevenue + posRevenue,
+            totalCost: onlineCOGS + posCOGS,
+            totalProfit: (onlineRevenue - onlineCOGS) + (posRevenue - posCOGS)
         }
     };
 };
@@ -71,19 +69,21 @@ const calculateGrossProfit = async (startDate, endDate) => {
  * Calculate current Inventory Value
  */
 const calculateInventoryValue = async () => {
-    const stats = await Product.aggregate([
-        {
-            $group: {
-                _id: null,
-                totalStock: { $sum: '$stock' },
-                inventoryValue: { $sum: { $multiply: ['$stock', '$purchasePrice'] } }
-            }
-        }
-    ]);
+    const products = await prisma.product.findMany({
+        select: { stock: true, purchasePrice: true }
+    });
+
+    let totalItems = 0;
+    let totalValue = 0;
+
+    products.forEach(p => {
+        totalItems += p.stock;
+        totalValue += p.stock * (p.purchasePrice ? Number(p.purchasePrice) : 0);
+    });
 
     return {
-        totalItems: stats[0]?.totalStock || 0,
-        totalValue: stats[0]?.inventoryValue || 0
+        totalItems,
+        totalValue
     };
 };
 

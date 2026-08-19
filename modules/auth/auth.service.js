@@ -1,22 +1,14 @@
-const twilio = require('twilio');
-const User = require('../user/user.model');
+const prisma = require('../../config/prisma');
 const ApiError = require('../../utils/ApiError');
 const { generateTokens, verifyRefreshToken } = require('../../utils/jwt');
 const { cacheHelper } = require('../../config');
 const { CACHE_KEYS, CACHE_TTL, SUCCESS_MESSAGES, ERROR_MESSAGES } = require('../../utils/constants');
 const logger = require('../../utils/logger');
 const otpService = require('../../utils/otpService');
-
-// Initialize Twilio client
-// const twilioClient = twilio(
-//   process.env.TWILIO_ACCOUNT_SID,
-//   process.env.TWILIO_AUTH_TOKEN
-// );
+const { comparePassword } = require('../../utils/hash');
 
 /**
  * Send OTP to phone number
- * @param {string} phone - Phone number
- * @returns {Promise<Object>}
  */
 const sendOTP = async (phone) => {
   try {
@@ -36,71 +28,74 @@ const sendOTP = async (phone) => {
 
 /**
  * Verify OTP and login/register user
- * @param {string} phone - Phone number
- * @param {string} otp - OTP to verify
- * @param {string} name - User name (optional, for new users)
- * @param {string} email - User email (optional)
- * @returns {Promise<Object>}
  */
 const verifyOTP = async (phone, otp, name = null, email = null) => {
   try {
     await otpService.verifyOTP(phone, otp);
 
-    let user = await User.findByPhone(phone);
+    let user = await prisma.user.findUnique({ where: { phone } });
     let isNewUser = false;
     const now = new Date();
 
     if (!user) {
-      user = new User({
-        phone,
-        name: name || `User${phone.slice(-4)}`,
-        email: email || null,
-        isPhoneVerified: true,
-        lastLogin: now
+      user = await prisma.user.create({
+        data: {
+          phone,
+          name: name || `User${phone.slice(-4)}`,
+          email: email || null,
+          isPhoneVerified: true,
+          lastLogin: now
+        }
       });
       isNewUser = true;
     } else {
-      if (user.isLocked) throw ApiError.forbidden('Account is temporarily locked');
+      if (user.lockUntil && user.lockUntil > now) throw ApiError.forbidden('Account is temporarily locked');
       if (!user.isActive) throw ApiError.forbidden('Account is deactivated');
 
-      user.isPhoneVerified = true;
-      user.lastLogin = now;
-
-      if (name && !user.name) user.name = name;
-      if (email && !user.email) user.email = email;
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          isPhoneVerified: true,
+          lastLogin: now,
+          name: (name && !user.name) ? name : undefined,
+          email: (email && !user.email) ? email : undefined
+        }
+      });
     }
 
     // Generate tokens
-    const tokens = generateTokens(user._id.toString(), user.role);
+    const tokens = generateTokens(user.id, user.role);
 
-    user.refreshToken = tokens.refreshToken;
-    await user.save();
+    user = await prisma.user.update({
+      where: { id: user.id },
+      data: { refreshToken: tokens.refreshToken }
+    });
 
-    // ✅ CACHE CLEAN JSON
+    // CACHE CLEAN JSON
+    const userJson = { ...user };
+    delete userJson.password;
+    delete userJson.refreshToken;
+
     await cacheHelper.set(
-      `${CACHE_KEYS.USER}${user._id}`,
-      JSON.stringify(user.toJSON()),
+      `${CACHE_KEYS.USER}${user.id}`,
+      JSON.stringify(userJson),
       CACHE_TTL.MEDIUM
     );
 
     await cacheHelper.set(
-      `${CACHE_KEYS.REFRESH_TOKEN}${user._id}`,
+      `${CACHE_KEYS.REFRESH_TOKEN}${user.id}`,
       tokens.refreshToken,
       7 * 24 * 60 * 60
     );
 
-    const userResponse = user.toJSON();
-    delete userResponse.refreshToken;
-
     return {
       message: SUCCESS_MESSAGES.LOGIN_SUCCESS,
-      user: userResponse,
+      user: userJson,
       tokens,
       isNewUser
     };
   } catch (error) {
     if (error instanceof ApiError) throw error;
-
     logger.error(`Error verifying OTP: ${error.message}`);
     throw ApiError.internal('Failed to verify OTP');
   }
@@ -108,19 +103,18 @@ const verifyOTP = async (phone, otp, name = null, email = null) => {
 
 /**
  * Login user with phone/email and password
- * @param {string} phoneOrEmail - Phone or Email
- * @param {string} password - Password
- * @returns {Promise<Object>}
  */
 const login = async (phoneOrEmail, password) => {
   try {
     // Find user by phone or email
-    let user = await User.findOne({
-      $or: [
-        { phone: phoneOrEmail },
-        { email: phoneOrEmail.toLowerCase() }
-      ]
-    }).select('+password');
+    let user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { phone: phoneOrEmail },
+          { email: phoneOrEmail.toLowerCase() }
+        ]
+      }
+    });
 
     if (!user) {
       throw ApiError.unauthorized('Invalid credentials');
@@ -130,52 +124,70 @@ const login = async (phoneOrEmail, password) => {
       throw ApiError.forbidden('Account is deactivated');
     }
 
-    if (user.isLocked) {
+    const now = new Date();
+    if (user.lockUntil && user.lockUntil > now) {
       throw ApiError.forbidden('Account is temporarily locked');
     }
 
-    // Check password
     if (!user.password) {
-      // If user exists but has no password (e.g. OTP only), they must set one or use OTP
       throw ApiError.badRequest('Please use OTP login or set a password first');
     }
 
-    const isMatch = await user.isPasswordMatch(password);
+    const isMatch = await comparePassword(password, user.password);
     if (!isMatch) {
-      await user.incLoginAttempts();
+      // Handle login attempts logic
+      if (user.lockUntil && user.lockUntil < now) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { loginAttempts: 1, lockUntil: null }
+        });
+      } else {
+        const attempts = user.loginAttempts + 1;
+        const lockData = { loginAttempts: attempts };
+        if (attempts >= 5) {
+          lockData.lockUntil = new Date(Date.now() + 2 * 60 * 60 * 1000); // 2 hours
+        }
+        await prisma.user.update({
+          where: { id: user.id },
+          data: lockData
+        });
+      }
       throw ApiError.unauthorized('Invalid credentials');
     }
 
-    // Reset attempts on success
-    await user.resetLoginAttempts();
-
-    // Update last login
-    user.lastLogin = new Date();
-    
     // Generate tokens
-    const tokens = generateTokens(user._id.toString(), user.role);
-    user.refreshToken = tokens.refreshToken;
-    await user.save();
+    const tokens = generateTokens(user.id, user.role);
 
-    // Cache user data
+    // Reset attempts and update last login
+    user = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        loginAttempts: 0,
+        lockUntil: null,
+        lastLogin: now,
+        refreshToken: tokens.refreshToken
+      }
+    });
+
+    const userJson = { ...user };
+    delete userJson.password;
+    delete userJson.refreshToken;
+
     await cacheHelper.set(
-      `${CACHE_KEYS.USER}${user._id}`,
-      JSON.stringify(user.toJSON()),
+      `${CACHE_KEYS.USER}${user.id}`,
+      JSON.stringify(userJson),
       CACHE_TTL.MEDIUM
     );
 
     await cacheHelper.set(
-      `${CACHE_KEYS.REFRESH_TOKEN}${user._id}`,
+      `${CACHE_KEYS.REFRESH_TOKEN}${user.id}`,
       tokens.refreshToken,
       7 * 24 * 60 * 60
     );
 
-    const userResponse = user.toJSON();
-    delete userResponse.refreshToken;
-
     return {
       message: SUCCESS_MESSAGES.LOGIN_SUCCESS,
-      user: userResponse,
+      user: userJson,
       tokens
     };
   } catch (error) {
@@ -185,11 +197,8 @@ const login = async (phoneOrEmail, password) => {
   }
 };
 
-
 /**
  * Refresh access token
- * @param {string} refreshToken - Refresh token
- * @returns {Promise<Object>}
  */
 const refreshAccessToken = async (refreshToken) => {
   try {
@@ -197,10 +206,8 @@ const refreshAccessToken = async (refreshToken) => {
       throw ApiError.unauthorized('Refresh token required');
     }
 
-    // Verify refresh token
     const decoded = verifyRefreshToken(refreshToken);
 
-    // Check if token exists in Redis
     const cachedToken = await cacheHelper.get(
       `${CACHE_KEYS.REFRESH_TOKEN}${decoded.id}`
     );
@@ -209,8 +216,7 @@ const refreshAccessToken = async (refreshToken) => {
       throw ApiError.unauthorized('Invalid refresh token');
     }
 
-    // Find user
-    const user = await User.findById(decoded.id);
+    const user = await prisma.user.findUnique({ where: { id: decoded.id } });
 
     if (!user) {
       throw ApiError.unauthorized('User not found');
@@ -220,35 +226,31 @@ const refreshAccessToken = async (refreshToken) => {
       throw ApiError.forbidden('Account is deactivated');
     }
 
-    // Verify token matches the one stored in database
     if (user.refreshToken !== refreshToken) {
       throw ApiError.unauthorized('Invalid refresh token');
     }
 
-    // Generate new tokens
-    const tokens = generateTokens(user._id.toString(), user.role);
+    const tokens = generateTokens(user.id, user.role);
 
-    // Update refresh token in database and cache
-    user.refreshToken = tokens.refreshToken;
-    await user.save();
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { refreshToken: tokens.refreshToken }
+    });
 
     await cacheHelper.set(
-      `${CACHE_KEYS.REFRESH_TOKEN}${user._id}`,
+      `${CACHE_KEYS.REFRESH_TOKEN}${user.id}`,
       tokens.refreshToken,
-      7 * 24 * 60 * 60 // 7 days
+      7 * 24 * 60 * 60
     );
 
-    logger.info(`Access token refreshed for user: ${user._id}`);
+    logger.info(`Access token refreshed for user: ${user.id}`);
 
     return {
       message: 'Token refreshed successfully',
       tokens
     };
   } catch (error) {
-    if (error instanceof ApiError) {
-      throw error;
-    }
-
+    if (error instanceof ApiError) throw error;
     logger.error(`Error refreshing token: ${error.message}`);
     throw ApiError.unauthorized('Invalid refresh token');
   }
@@ -256,27 +258,21 @@ const refreshAccessToken = async (refreshToken) => {
 
 /**
  * Logout user
- * @param {string} userId - User ID
- * @param {string} refreshToken - Refresh token (optional)
- * @returns {Promise<Object>}
  */
 const logout = async (userId, refreshToken = null) => {
   try {
-    // Clear refresh token from database
-    await User.findByIdAndUpdate(userId, {
-      $unset: { refreshToken: 1 }
+    await prisma.user.update({
+      where: { id: userId },
+      data: { refreshToken: null }
     });
 
-    // Clear tokens and user data from cache
     await cacheHelper.del(`${CACHE_KEYS.USER}${userId}`);
     await cacheHelper.del(`${CACHE_KEYS.REFRESH_TOKEN}${userId}`);
     await cacheHelper.del(`${CACHE_KEYS.CART}${userId}`);
 
     logger.info(`User logged out: ${userId}`);
 
-    return {
-      message: SUCCESS_MESSAGES.LOGOUT_SUCCESS
-    };
+    return { message: SUCCESS_MESSAGES.LOGOUT_SUCCESS };
   } catch (error) {
     logger.error(`Error during logout: ${error.message}`);
     throw ApiError.internal('Logout failed');
@@ -285,11 +281,9 @@ const logout = async (userId, refreshToken = null) => {
 
 /**
  * Verify if phone number exists
- * @param {string} phone - Phone number
- * @returns {Promise<Object>}
  */
 const checkPhoneExists = async (phone) => {
-  const user = await User.findByPhone(phone);
+  const user = await prisma.user.findUnique({ where: { phone } });
 
   return {
     exists: !!user,
@@ -299,12 +293,8 @@ const checkPhoneExists = async (phone) => {
 
 /**
  * Verify credentials for POS Override (Managers/Admins)
- * @param {string} phoneOrEmail - Phone or Email
- * @param {string} password - Password
- * @returns {Promise<Object>}
  */
 const verifyPOSOverride = async (phoneOrEmail, password) => {
-  // Reuse existing login logic for credential & status checks
   const result = await login(phoneOrEmail, password);
   const user = result.user;
   
@@ -319,7 +309,7 @@ const verifyPOSOverride = async (phoneOrEmail, password) => {
     success: true,
     message: 'Override authorized',
     manager: {
-      id: user._id,
+      id: user.id,
       name: user.name,
       role: user.role
     }
@@ -328,15 +318,15 @@ const verifyPOSOverride = async (phoneOrEmail, password) => {
 
 /**
  * Initiate forgot password (send OTP)
- * @param {string} phoneOrEmail - Phone or Email
- * @returns {Promise<Object>}
  */
 const forgotPassword = async (phoneOrEmail) => {
-  const user = await User.findOne({
-    $or: [
-      { phone: phoneOrEmail },
-      { email: phoneOrEmail.toLowerCase() }
-    ]
+  const user = await prisma.user.findFirst({
+    where: {
+      OR: [
+        { phone: phoneOrEmail },
+        { email: phoneOrEmail.toLowerCase() }
+      ]
+    }
   });
 
   if (!user) {
@@ -352,25 +342,24 @@ const forgotPassword = async (phoneOrEmail) => {
 
 /**
  * Reset password using OTP
- * @param {string} phone - Phone number
- * @param {string} otp - OTP code
- * @param {string} newPassword - New password
- * @returns {Promise<Object>}
  */
 const resetPassword = async (phone, otp, newPassword) => {
   await otpService.verifyOTP(phone, otp);
 
-  const user = await User.findByPhone(phone);
+  const user = await prisma.user.findUnique({ where: { phone } });
   if (!user) {
     throw ApiError.notFound('User not found');
   }
 
-  user.password = newPassword;
-  await user.save();
+  const { hashPassword } = require('../../utils/hash');
+  const hashedPassword = await hashPassword(newPassword);
 
-  return {
-    message: 'Password reset successfully'
-  };
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { password: hashedPassword }
+  });
+
+  return { message: 'Password reset successfully' };
 };
 
 module.exports = {
@@ -384,4 +373,3 @@ module.exports = {
   forgotPassword,
   resetPassword
 };
-

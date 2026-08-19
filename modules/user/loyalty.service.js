@@ -1,4 +1,4 @@
-const User = require('./user.model');
+const prisma = require('../../config/prisma');
 const logger = require('../../utils/logger');
 
 /**
@@ -7,25 +7,27 @@ const logger = require('../../utils/logger');
  * @param {number} amountPaid - Final amount spent
  * @returns {Promise<User>}
  */
-const awardPoints = async (userId, amountPaid, session = null) => {
+const awardPointsPrisma = async (userId, amountPaid, tx = null) => {
     const pointsToAward = Math.floor(amountPaid / 1000);
     if (pointsToAward <= 0) return;
 
-    const user = await User.findById(userId).session(session);
+    const db = tx || prisma;
+    const user = await db.user.findUnique({ where: { id: userId } });
     if (!user) return;
 
     // Reset daily points if it's a new day
     const today = new Date().setHours(0, 0, 0, 0);
-    const lastUpdate = new Date(user.lastPointsUpdateDate).setHours(0, 0, 0, 0);
+    const lastUpdate = user.lastPointsUpdateDate ? new Date(user.lastPointsUpdateDate).setHours(0, 0, 0, 0) : 0;
 
+    let dailyPointsEarned = user.dailyPointsEarned || 0;
+    
     if (today > lastUpdate) {
-        user.dailyPointsEarned = 0;
-        user.lastPointsUpdateDate = new Date();
+        dailyPointsEarned = 0;
     }
 
     // Enforce daily cap (e.g., 500 points per day to prevent abuse)
     const DAILY_CAP = 500;
-    const remainingCap = Math.max(0, DAILY_CAP - user.dailyPointsEarned);
+    const remainingCap = Math.max(0, DAILY_CAP - dailyPointsEarned);
     const actualPointsToAward = Math.min(pointsToAward, remainingCap);
 
     if (actualPointsToAward <= 0) {
@@ -33,78 +35,84 @@ const awardPoints = async (userId, amountPaid, session = null) => {
         return user;
     }
 
-    user.loyaltyPoints += actualPointsToAward;
-    user.dailyPointsEarned += actualPointsToAward;
+    const newPoints = (user.loyaltyPoints || 0) + actualPointsToAward;
+    const newDailyPoints = dailyPointsEarned + actualPointsToAward;
 
-    // Update tier
-    if (user.loyaltyPoints >= 500) {
-        user.loyaltyTier = 'Platinum';
-    } else if (user.loyaltyPoints >= 100) {
-        user.loyaltyTier = 'Gold';
-    } else {
-        user.loyaltyTier = 'Silver';
-    }
+    let loyaltyTier = 'Silver';
+    if (newPoints >= 500) loyaltyTier = 'Platinum';
+    else if (newPoints >= 100) loyaltyTier = 'Gold';
 
-    await user.save({ session });
-    logger.info(`Awarded ${actualPointsToAward} points to user ${userId}. New balance: ${user.loyaltyPoints}`);
-    return user;
+    const updatedUser = await db.user.update({
+        where: { id: userId },
+        data: {
+            loyaltyPoints: newPoints,
+            dailyPointsEarned: newDailyPoints,
+            loyaltyTier,
+            lastPointsUpdateDate: new Date()
+        }
+    });
+
+    logger.info(`Awarded ${actualPointsToAward} points to user ${userId}. New balance: ${updatedUser.loyaltyPoints}`);
+    return updatedUser;
 };
+
+// Aliased for backward compatibility if other places call it `awardPoints`
+const awardPoints = awardPointsPrisma;
 
 /**
  * Deduct user loyalty points
- * @param {string} userId
- * @param {number} amountRefunded - Amount to deduct points for
- * @returns {Promise<User>}
  */
-const deductPoints = async (userId, amountRefunded) => {
+const deductPoints = async (userId, amountRefunded, tx = null) => {
     const pointsToDeduct = Math.floor(amountRefunded / 1000);
     if (pointsToDeduct <= 0) return;
 
-    const user = await User.findById(userId);
+    const db = tx || prisma;
+    const user = await db.user.findUnique({ where: { id: userId } });
     if (!user) return;
 
-    user.loyaltyPoints = Math.max(0, user.loyaltyPoints - pointsToDeduct);
+    const newPoints = Math.max(0, (user.loyaltyPoints || 0) - pointsToDeduct);
 
-    // Downgrade tier if necessary
-    if (user.loyaltyPoints < 100) {
-        user.loyaltyTier = 'Silver';
-    } else if (user.loyaltyPoints < 500) {
-        user.loyaltyTier = 'Gold';
-    }
+    let loyaltyTier = user.loyaltyTier;
+    if (newPoints < 100) loyaltyTier = 'Silver';
+    else if (newPoints < 500) loyaltyTier = 'Gold';
 
-    await user.save();
-    logger.info(`Deducted ${pointsToDeduct} points from user ${userId}. New balance: ${user.loyaltyPoints}`);
-    return user;
+    const updatedUser = await db.user.update({
+        where: { id: userId },
+        data: { loyaltyPoints: newPoints, loyaltyTier }
+    });
+
+    logger.info(`Deducted ${pointsToDeduct} points from user ${userId}. New balance: ${updatedUser.loyaltyPoints}`);
+    return updatedUser;
 };
 
 /**
  * Redeem loyalty points
- * @param {string} userId
- * @param {number} pointsToRedeem
- * @returns {number} Discount amount (1 point = ₹10)
  */
-const redeemPoints = async (userId, pointsToRedeem) => {
-    const user = await User.findById(userId);
-    if (!user || user.loyaltyPoints < pointsToRedeem) {
+const redeemPoints = async (userId, pointsToRedeem, tx = null) => {
+    const db = tx || prisma;
+    const user = await db.user.findUnique({ where: { id: userId } });
+    if (!user || (user.loyaltyPoints || 0) < pointsToRedeem) {
         throw new Error('Insufficient points');
     }
 
     const discountAmount = pointsToRedeem * 10;
-    user.loyaltyPoints -= pointsToRedeem;
+    const newPoints = user.loyaltyPoints - pointsToRedeem;
 
-    // Update tier after redemption
-    if (user.loyaltyPoints < 100) {
-        user.loyaltyTier = 'Silver';
-    } else if (user.loyaltyPoints < 500) {
-        user.loyaltyTier = 'Gold';
-    }
+    let loyaltyTier = user.loyaltyTier;
+    if (newPoints < 100) loyaltyTier = 'Silver';
+    else if (newPoints < 500) loyaltyTier = 'Gold';
 
-    await user.save();
+    await db.user.update({
+        where: { id: userId },
+        data: { loyaltyPoints: newPoints, loyaltyTier }
+    });
+
     logger.info(`User ${userId} redeemed ${pointsToRedeem} points for ₹${discountAmount} discount`);
     return discountAmount;
 };
 
 module.exports = {
+    awardPointsPrisma,
     awardPoints,
     deductPoints,
     redeemPoints

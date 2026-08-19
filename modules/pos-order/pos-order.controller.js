@@ -5,7 +5,7 @@ const { asyncHandler } = require('../../middlewares/error.middleware');
 const createOrder = asyncHandler(async (req, res) => {
     const orderData = {
         ...req.body,
-        billedBy: req.user._id,
+        billedBy: req.user.id,
         shop_id: req.headers['x-shop-id'] || req.body.shop_id
     };
 
@@ -52,7 +52,7 @@ const processReturn = asyncHandler(async (req, res) => {
         return ApiResponse.error('No items provided for return', 400).send(res);
     }
 
-    const order = await posOrderService.processReturn(orderId, returnData, req.user._id);
+    const order = await posOrderService.processReturn(orderId, returnData, req.user.id);
     ApiResponse.success(order, 'Return processed successfully').send(res);
 });
 
@@ -63,3 +63,4 @@ module.exports = {
     getStoreAnalytics,
     processReturn
 };
+

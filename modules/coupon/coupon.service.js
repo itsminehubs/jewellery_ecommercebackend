@@ -1,4 +1,4 @@
-const Coupon = require('./coupon.model');
+const prisma = require('../../config/prisma');
 const ApiError = require('../../utils/ApiError');
 
 /**
@@ -6,48 +6,46 @@ const ApiError = require('../../utils/ApiError');
  * @param {string} code 
  * @param {string} userId 
  * @param {number} cartTotal 
- * @returns {Promise<Coupon>}
  */
 const validateCoupon = async (code, userId, cartTotal) => {
-    const coupon = await Coupon.findOne({ code, isActive: true });
+    const coupon = await prisma.coupon.findUnique({ where: { code } });
 
-    if (!coupon) {
+    if (!coupon || !coupon.isActive) {
         throw ApiError.notFound('Invalid or inactive coupon code');
     }
 
-    if (coupon.expiryDate < new Date()) {
+    if (coupon.endDate < new Date()) {
         throw ApiError.badRequest('Coupon has expired');
     }
 
-    if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) {
+    if (coupon.usageLimit && coupon.usageCount >= coupon.usageLimit) {
         throw ApiError.badRequest('Coupon usage limit reached');
     }
 
-    if (cartTotal < coupon.minPurchase) {
-        throw ApiError.badRequest(`Minimum purchase of ₹${coupon.minPurchase} required for this coupon`);
+    if (cartTotal < Number(coupon.minOrderAmount)) {
+        throw ApiError.badRequest(`Minimum purchase of ₹${coupon.minOrderAmount} required for this coupon`);
     }
-
-    // Check per user limit (this would normally require an Order check)
-    // For now we'll assume a separate helper or check usage here if we track it per user
 
     return coupon;
 };
 
 /**
  * Calculate discount
- * @param {Coupon} coupon 
+ * @param {Object} coupon 
  * @param {number} cartTotal 
  * @returns {number}
  */
 const calculateDiscount = (coupon, cartTotal) => {
     let discount = 0;
+    const discountValue = Number(coupon.discountValue);
+    
     if (coupon.discountType === 'percentage') {
-        discount = (cartTotal * coupon.discountValue) / 100;
-        if (coupon.maxDiscount && discount > coupon.maxDiscount) {
-            discount = coupon.maxDiscount;
+        discount = (cartTotal * discountValue) / 100;
+        if (coupon.maxDiscount && discount > Number(coupon.maxDiscount)) {
+            discount = Number(coupon.maxDiscount);
         }
     } else {
-        discount = coupon.discountValue;
+        discount = discountValue;
     }
     return Math.min(discount, cartTotal);
 };

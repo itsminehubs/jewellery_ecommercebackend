@@ -1,7 +1,7 @@
-const CustomOrder = require('./customOrder.model');
+const prisma = require('../../config/prisma');
 const ApiError = require('../../utils/ApiError');
 const { asyncHandler } = require('../../middlewares/error.middleware');
-const { uploadImage } = require('../../config/cloudinary');
+const { uploadImage } = require('../../config/s3');
 
 /**
  * @desc    Create a new Custom Jewelry Draft/Order
@@ -18,44 +18,48 @@ exports.createCustomOrder = asyncHandler(async (req, res) => {
         }
     }
 
-    // Basic validation
     if (!payload.jewelryType) {
         throw new ApiError(400, 'Jewelry type is required');
     }
 
-    // Assign user from auth token
     const customOrderData = {
-        ...payload,
-        user: req.user._id,
-        status: payload.status || 'Draft'
+        jewelryType: payload.jewelryType,
+        customerId: payload.customerId || req.user.id,
+        status: payload.status || 'Draft',
+        metalPreferences: payload.metalPreferences || {},
+        stonePreferences: payload.stonePreferences || {},
+        personalization: payload.personalization || {},
+        designPreviewImages: payload.designPreviewImages || [],
+        pricingBreakdown: payload.pricingBreakdown || {},
+        adminNotes: payload.adminNotes || ''
     };
 
-    // Handle image upload if present
     if (req.file) {
         const imageResult = await uploadImage(req.file.path, 'custom-orders');
         customOrderData.personalization = {
             ...customOrderData.personalization,
             referenceImage: imageResult.url
         };
-
-        // Ensure designPreviewImages has it too
         customOrderData.designPreviewImages = [
             { url: imageResult.url, public_id: imageResult.public_id }
         ];
     }
 
-    // Recalculate or verify the pricing on the backend 
-    // (A full robust app would verify metal rates from DB here, but for now we trust the frontend payload or just store what they send)
-
-    if (!customOrderData.pricingBreakdown) {
-        customOrderData.pricingBreakdown = {};
-    }
-    
     const { totalMetalCost, totalStoneCost, makingCharges, taxAmount } = customOrderData.pricingBreakdown;
-    const calculatedTotal = (totalMetalCost || 0) + (totalStoneCost || 0) + (makingCharges || 0) + (taxAmount || 0);
+    const calculatedTotal = (Number(totalMetalCost) || 0) + (Number(totalStoneCost) || 0) + (Number(makingCharges) || 0) + (Number(taxAmount) || 0);
     customOrderData.pricingBreakdown.finalTotal = customOrderData.pricingBreakdown.finalTotal || calculatedTotal;
 
-    const customOrder = await CustomOrder.create(customOrderData);
+    const count = await prisma.customOrder.count() + 1;
+    const orderNumber = `CS-${new Date().getFullYear()}-${count.toString().padStart(5, '0')}`;
+
+    const customOrder = await prisma.customOrder.create({
+        data: {
+            ...customOrderData,
+            orderNumber,
+            description: payload.description || `Custom ${payload.jewelryType || 'Jewelry'} Order`,
+            estimatedPrice: calculatedTotal || 0
+        }
+    });
 
     res.status(201).json({
         success: true,
@@ -70,8 +74,10 @@ exports.createCustomOrder = asyncHandler(async (req, res) => {
  * @access  Private
  */
 exports.getMyCustomOrders = asyncHandler(async (req, res) => {
-    const customOrders = await CustomOrder.find({ user: req.user._id })
-        .sort({ createdAt: -1 });
+    const customOrders = await prisma.customOrder.findMany({
+        where: { customerId: req.user.id },
+        orderBy: { createdAt: 'desc' }
+    });
 
     res.status(200).json({
         success: true,
@@ -86,14 +92,13 @@ exports.getMyCustomOrders = asyncHandler(async (req, res) => {
  * @access  Private
  */
 exports.updateCustomOrder = asyncHandler(async (req, res) => {
-    const customOrder = await CustomOrder.findById(req.params.id);
+    const customOrder = await prisma.customOrder.findUnique({ where: { id: req.params.id } });
 
     if (!customOrder) {
         throw new ApiError(404, 'Custom order not found');
     }
 
-    // Verify ownership
-    if (customOrder.user.toString() !== req.user._id.toString() && !['admin', 'super_admin', 'store_manager'].includes(req.user.role)) {
+    if (customOrder.customerId !== req.user.id && !['admin', 'super_admin', 'store_manager'].includes(req.user.role)) {
         throw new ApiError(403, 'Not authorized to update this custom order');
     }
 
@@ -106,9 +111,8 @@ exports.updateCustomOrder = asyncHandler(async (req, res) => {
         }
     }
 
-    // Allow user to request a quote if it is currently a draft, and allow admins to change status
     if (
-        ['admin', 'super_admin', 'store_manager'].includes(req.user.role) || 
+        ['admin', 'super_admin', 'store_manager'].includes(req.user.role) ||
         (payload.status === 'Quote_Requested' && customOrder.status === 'Draft')
     ) {
         // keep payload.status
@@ -117,34 +121,57 @@ exports.updateCustomOrder = asyncHandler(async (req, res) => {
     }
     delete payload.user;
 
-    const customOrderData = { ...payload };
+    const updateData = { ...payload };
 
-    // Handle image upload if present
+    // Map legacy fields to new Prisma schema fields
+    if (updateData.metalDetails) {
+        updateData.metalPreferences = updateData.metalDetails;
+        delete updateData.metalDetails;
+    }
+    if (updateData.stoneDetails) {
+        updateData.stonePreferences = updateData.stoneDetails;
+        delete updateData.stoneDetails;
+    }
+    if (updateData.sizeDetails) {
+        updateData.personalization = { ...(updateData.personalization || {}), sizeDetails: updateData.sizeDetails };
+        delete updateData.sizeDetails;
+    }
+    
+    // Remove MongoDB specific or irrelevant fields
+    delete updateData._id;
+    delete updateData.__v;
+    delete updateData.customerId;
+    delete updateData.createdAt;
+    delete updateData.updatedAt;
+
     if (req.file) {
         const imageResult = await uploadImage(req.file.path, 'custom-orders');
-        customOrderData.personalization = {
-            ...customOrderData.personalization,
+        updateData.personalization = {
+            ...(customOrder.personalization || {}),
+            ...(updateData.personalization || {}),
             referenceImage: imageResult.url
         };
-
-        customOrderData.designPreviewImages = [
+        updateData.designPreviewImages = [
             { url: imageResult.url, public_id: imageResult.public_id }
         ];
     }
 
-    if (!customOrderData.pricingBreakdown) {
-        customOrderData.pricingBreakdown = {};
+    if (updateData.pricingBreakdown) {
+        const pb = updateData.pricingBreakdown;
+        const totalMetalCost = Number(pb.totalMetalCost) || 0;
+        const totalStoneCost = Number(pb.totalStoneCost) || 0;
+        const makingCharges = Number(pb.makingCharges) || 0;
+        const taxAmount = Number(pb.taxAmount) || 0;
+        pb.finalTotal = pb.finalTotal || (totalMetalCost + totalStoneCost + makingCharges + taxAmount);
+        
+        // Ensure estimatedPrice is updated as well
+        updateData.estimatedPrice = pb.finalTotal;
     }
 
-    const { totalMetalCost, totalStoneCost, makingCharges, taxAmount } = customOrderData.pricingBreakdown;
-    const calculatedTotal = (totalMetalCost || 0) + (totalStoneCost || 0) + (makingCharges || 0) + (taxAmount || 0);
-    customOrderData.pricingBreakdown.finalTotal = customOrderData.pricingBreakdown.finalTotal || calculatedTotal;
-
-    const updatedCustomOrder = await CustomOrder.findByIdAndUpdate(
-        req.params.id,
-        customOrderData,
-        { new: true, runValidators: true }
-    );
+    const updatedCustomOrder = await prisma.customOrder.update({
+        where: { id: req.params.id },
+        data: updateData
+    });
 
     res.status(200).json({
         success: true,
@@ -159,23 +186,24 @@ exports.updateCustomOrder = asyncHandler(async (req, res) => {
  * @access  Private/Admin
  */
 exports.getAllCustomOrders = asyncHandler(async (req, res) => {
-    // Pagination & Filtering
     const page = parseInt(req.query.page, 10) || 1;
     const limit = parseInt(req.query.limit, 10) || 10;
-    const startIndex = (page - 1) * limit;
+    const skip = (page - 1) * limit;
 
-    const query = {};
+    const where = {};
     if (req.query.status) {
-        query.status = req.query.status;
+        where.status = req.query.status;
     }
 
-    const total = await CustomOrder.countDocuments(query);
+    const total = await prisma.customOrder.count({ where });
 
-    const customOrders = await CustomOrder.find(query)
-        .populate('user', 'name email phone')
-        .sort({ createdAt: -1 })
-        .skip(startIndex)
-        .limit(limit);
+    const customOrders = await prisma.customOrder.findMany({
+        where,
+        include: { customer: { select: { name: true, email: true, phone: true } } },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit
+    });
 
     res.status(200).json({
         success: true,
@@ -196,16 +224,16 @@ exports.getAllCustomOrders = asyncHandler(async (req, res) => {
  * @access  Private (User or Admin)
  */
 exports.getCustomOrderById = asyncHandler(async (req, res) => {
-    const customOrder = await CustomOrder.findById(req.params.id)
-        .populate('user', 'name email phone')
-        .populate('category', 'name');
+    const customOrder = await prisma.customOrder.findUnique({
+        where: { id: req.params.id },
+        include: { customer: { select: { id: true, name: true, email: true, phone: true } } }
+    });
 
     if (!customOrder) {
         throw new ApiError(404, 'Custom order not found');
     }
 
-    // Verify ownership or admin
-    if (customOrder.user._id.toString() !== req.user._id.toString() && !['admin', 'super_admin', 'store_manager'].includes(req.user.role)) {
+    if (customOrder.customerId !== req.user.id && !['admin', 'super_admin', 'store_manager'].includes(req.user.role)) {
         throw new ApiError(403, 'Not authorized to access this custom order');
     }
 
@@ -223,21 +251,25 @@ exports.getCustomOrderById = asyncHandler(async (req, res) => {
 exports.updateCustomOrderStatus = asyncHandler(async (req, res) => {
     const { status, adminNotes } = req.body;
 
-    const customOrder = await CustomOrder.findById(req.params.id);
+    const customOrder = await prisma.customOrder.findUnique({ where: { id: req.params.id } });
 
     if (!customOrder) {
         throw new ApiError(404, 'Custom order not found');
     }
 
-    if (status) customOrder.status = status;
-    if (adminNotes) customOrder.adminNotes = adminNotes;
+    const updateData = {};
+    if (status) updateData.status = status;
+    if (adminNotes) updateData.adminNotes = adminNotes;
 
-    await customOrder.save();
+    const updatedCustomOrder = await prisma.customOrder.update({
+        where: { id: req.params.id },
+        data: updateData
+    });
 
     res.status(200).json({
         success: true,
         message: 'Custom order status updated',
-        data: customOrder
+        data: updatedCustomOrder
     });
 });
 
@@ -247,21 +279,21 @@ exports.updateCustomOrderStatus = asyncHandler(async (req, res) => {
  * @access  Private (User who created it or Admin)
  */
 exports.deleteCustomOrder = asyncHandler(async (req, res) => {
-    const customOrder = await CustomOrder.findById(req.params.id);
+    const customOrder = await prisma.customOrder.findUnique({ where: { id: req.params.id } });
 
     if (!customOrder) {
         throw new ApiError(404, 'Custom order not found');
     }
 
-    // Verify ownership or admin
-    if (customOrder.user.toString() !== req.user._id.toString() && !['admin', 'super_admin', 'store_manager'].includes(req.user.role)) {
+    if (customOrder.customerId !== req.user.id && !['admin', 'super_admin'].includes(req.user.role)) {
         throw new ApiError(403, 'Not authorized to delete this custom order');
     }
 
-    await customOrder.deleteOne();
+    await prisma.customOrder.delete({ where: { id: req.params.id } });
 
     res.status(200).json({
         success: true,
         message: 'Custom order deleted successfully'
     });
 });
+

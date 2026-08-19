@@ -17,6 +17,8 @@ router.get('/dashboard', adminController.getDashboard);
 // Order Management
 router.get('/orders', checkAnyPermission([PERMISSIONS.ORDER_VIEW_ALL, PERMISSIONS.ORDER_VIEW_STORE]), adminController.getAllOrders);
 router.patch('/orders/:id/status', checkPermission(PERMISSIONS.ORDER_STATUS_UPDATE), adminController.updateOrderStatus);
+router.patch('/orders/:id/details', checkPermission(PERMISSIONS.ORDER_MODIFY), adminController.updateOrderDetails);
+router.delete('/orders/:id', checkPermission(PERMISSIONS.ORDER_CANCEL), adminController.deleteOrder);
 
 // User/Employee Management
 router.get('/users', checkAnyPermission([PERMISSIONS.CUSTOMER_VIEW, PERMISSIONS.MANAGE_EMPLOYEES]), adminController.getAllUsers);

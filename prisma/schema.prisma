@@ -1,0 +1,759 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------
+// CRM & USERS
+// ---------------------------------------------------------
+
+model User {
+  id                   String    @id @default(uuid())
+  phone                String    @unique
+  email                String?   @unique
+  name                 String?
+  role                 String    @default("user") // super_admin, admin, store_manager, sales_staff, user
+  password             String?
+  profileImageUrl      String?
+  profileImagePublicId String?
+  isActive             Boolean   @default(true)
+  isEmailVerified      Boolean   @default(false)
+  isPhoneVerified      Boolean   @default(false)
+  lastLogin            DateTime?
+  loginAttempts        Int       @default(0)
+  lockUntil            DateTime?
+  fcmToken             String?
+  refreshToken         String?
+
+  // Loyalty
+  loyaltyPoints        Int      @default(0)
+  loyaltyTier          String   @default("Silver") // Silver, Gold, Platinum
+  dailyPointsEarned    Int      @default(0)
+  lastPointsUpdateDate DateTime @default(now())
+
+  // Financial (Udhar System)
+  outstandingBalance Decimal   @default(0) @db.Decimal(20, 2)
+  creditLimit        Decimal   @default(50000) @db.Decimal(20, 2)
+  lastPaymentDate    DateTime?
+
+  // Auditing
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // Relations
+  addresses             Address[]
+  cartItems             CartItem[]
+  wishlist              WishlistItem[]
+  managedStores         Store[]             @relation("ManagedStores")
+  updatedDiamondRates   DiamondRate[]
+  schemes               Scheme[]
+  installmentsCollected SchemeInstallment[]
+  createdCreditMemos    CreditMemo[]        @relation("CreditMemoCreator")
+
+  posOrders        POSOrder[]       @relation("POSCustomer")
+  posOrdersBilled  POSOrder[]       @relation("POSStaff")
+  customerLedgers  CustomerLedger[] @relation("LedgerCustomer")
+  ledgersPerformed CustomerLedger[] @relation("LedgerStaff")
+  creditMemos      CreditMemo[]
+  cashbookEntries  Cashbook[]       @relation("CashbookStaff")
+
+  orders       Order[]
+  customOrders CustomOrder[]
+  reviews      Review[]
+
+  repairs           Repair[]
+  billedRepairs     Repair[]  @relation("BilledRepairs")
+  auditsPerformed   Audit[]   @relation("Auditor")
+  expensesPerformed Expense[]
+}
+
+model Address {
+  id           String  @id @default(uuid())
+  userId       String
+  type         String  @default("home") // home, office, other
+  name         String
+  phone        String
+  addressLine1 String
+  addressLine2 String?
+  city         String
+  state        String
+  country      String  @default("India")
+  pincode      String
+  landmark     String?
+  isDefault    Boolean @default(false)
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders Order[]
+}
+
+model CartItem {
+  id        String   @id @default(uuid())
+  userId    String
+  productId String
+  quantity  Int      @default(1)
+  addedAt   DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+}
+
+model WishlistItem {
+  id        String   @id @default(uuid())
+  userId    String
+  productId String
+  addedAt   DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+}
+
+// ---------------------------------------------------------
+// CATALOG & INVENTORY
+// ---------------------------------------------------------
+
+model Product {
+  id          String  @id @default(uuid())
+  sku         String  @unique
+  tagId       String  @unique
+  name        String
+  description String
+  categoryId  String
+  shopId      String?
+  vendorId    String?
+  huid        String? @unique
+
+  basicDetails       Json?
+  categoryAttributes Json?
+
+  // Financial
+  price            Decimal @db.Decimal(20, 2)
+  purchasePrice    Decimal @default(0) @db.Decimal(20, 2)
+  makingCharges    Decimal @default(0) @db.Decimal(20, 2)
+  makingChargeType String  @default("per_gram") // fixed, per_gram
+  stoneCharges     Decimal @default(0) @db.Decimal(20, 2)
+  wastage          Decimal @default(0) @db.Decimal(5, 2)
+  discount         Decimal @default(0) @db.Decimal(5, 2)
+  finalPrice       Decimal @db.Decimal(20, 2)
+
+  // Tax
+  hsnCode String  @default("7113")
+  gstRate Decimal @default(3) @db.Decimal(5, 2)
+
+  // Inventory & Status
+  stock  Int    @default(0)
+  status String @default("active") // active, out_of_stock, archived
+
+  // Analytics
+  rating           Decimal @default(0) @db.Decimal(3, 2)
+  numReviews       Int     @default(0)
+  views            Int     @default(0)
+  sales            Int     @default(0)
+  featured         Boolean @default(false)
+  trending         Boolean @default(false)
+  forHer           Boolean @default(false)
+  carbonsmithworld Boolean @default(false)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // Relations
+  category           Category            @relation(fields: [categoryId], references: [id])
+  vendor             Vendor?             @relation(fields: [vendorId], references: [id])
+  metalDetails       ProductMetal?
+  stoneDetails       ProductStone[]
+  images             ProductImage[]
+  inventoryBalances  InventoryBalance[]
+  cartItems          CartItem[]
+  wishlistItems      WishlistItem[]
+  posOrderItems      POSOrderItem[]
+  orderItems         OrderItem[]
+  purchaseOrderItems PurchaseOrderItem[]
+  reviews            Review[]
+
+  @@index([sku])
+  @@index([categoryId, status])
+}
+
+model ProductMetal {
+  id          String  @id @default(uuid())
+  productId   String  @unique
+  metalType   String // Gold, Silver, Platinum
+  metalColor  String? // Yellow, White, Rose
+  purity      String? // 18K, 22K
+  grossWeight Decimal @db.Decimal(10, 3)
+  netWeight   Decimal @db.Decimal(10, 3)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model ProductStone {
+  id            String  @id @default(uuid())
+  productId     String
+  stoneType     String // Diamond, Ruby, None
+  synthetic     Boolean @default(false)
+  shape         String?
+  netWeight     Decimal @db.Decimal(10, 3)
+  color         String?
+  clarity       String?
+  carat         String?
+  cut           String?
+  certification String?
+  rate          Decimal @default(0) @db.Decimal(20, 2)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model ProductImage {
+  id        String @id @default(uuid())
+  productId String
+  url       String
+  publicId  String
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model Category {
+  id            String   @id @default(uuid())
+  name          String
+  description   String?
+  slug          String   @unique
+  parentId      String?
+  order         Int      @default(0)
+  imageUrl      String?
+  imagePublicId String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  products Product[]
+  parent   Category?  @relation("SubCategories", fields: [parentId], references: [id])
+  children Category[] @relation("SubCategories")
+}
+
+model Store {
+  id        String   @id @default(uuid())
+  name      String
+  shop_id   String   @unique
+  address   String
+  city      String
+  state     String
+  pincode   String
+  phone     String
+  email     String?
+  managerId String?  @unique
+  status    String   @default("active") // active, inactive
+  isActive  Boolean  @default(true)
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  manager   User?              @relation("ManagedStores", fields: [managerId], references: [id])
+  inventory InventoryBalance[]
+  posOrders POSOrder[]
+  cashbooks Cashbook[]
+  expenses  Expense[]
+  repairs   Repair[]
+}
+
+// ---------------------------------------------------------
+// INVENTORY CONCURRENCY LAYER
+// ---------------------------------------------------------
+
+model InventoryBalance {
+  id               String   @id @default(uuid())
+  productId        String
+  storeId          String
+  quantity         Int      @default(0)
+  reservedQuantity Int      @default(0)
+  updatedAt        DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id])
+  store   Store   @relation(fields: [storeId], references: [id])
+
+  @@unique([productId, storeId])
+}
+
+// ---------------------------------------------------------
+// POS & SALES
+// ---------------------------------------------------------
+
+model POSOrder {
+  id          String  @id @default(uuid())
+  orderNumber String  @unique
+  storeId     String
+  customerId  String?
+  staffId     String
+
+  // Financial
+  subTotal      Decimal @db.Decimal(20, 2)
+  taxTotal      Decimal @db.Decimal(20, 2)
+  discountTotal Decimal @db.Decimal(20, 2)
+  grandTotal    Decimal @db.Decimal(20, 2)
+
+  // Payment Types
+  cashPaid   Decimal @default(0) @db.Decimal(20, 2)
+  cardPaid   Decimal @default(0) @db.Decimal(20, 2)
+  upiPaid    Decimal @default(0) @db.Decimal(20, 2)
+  creditUsed Decimal @default(0) @db.Decimal(20, 2)
+
+  status String  @default("completed") // completed, refunded, cancelled
+  notes  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  store             Store          @relation(fields: [storeId], references: [id])
+  customer          User?          @relation("POSCustomer", fields: [customerId], references: [id])
+  staff             User           @relation("POSStaff", fields: [staffId], references: [id])
+  items             POSOrderItem[]
+  invoice           Invoice?
+  schemeRedemptions Scheme[]
+}
+
+model POSOrderItem {
+  id         String  @id @default(uuid())
+  posOrderId String
+  productId  String
+  quantity   Int
+  unitPrice  Decimal @db.Decimal(20, 2)
+  discount   Decimal @default(0) @db.Decimal(20, 2)
+  taxAmount  Decimal @default(0) @db.Decimal(20, 2)
+  totalPrice Decimal @db.Decimal(20, 2)
+
+  posOrder POSOrder @relation(fields: [posOrderId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id])
+}
+
+// ---------------------------------------------------------
+// FINANCIALS & ACCOUNTING
+// ---------------------------------------------------------
+
+model CustomerLedger {
+  id              String   @id @default(uuid())
+  customerId      String
+  type            String // debit, credit
+  amount          Decimal  @db.Decimal(20, 2)
+  runningBalance  Decimal  @db.Decimal(20, 2)
+  transactionType String // sale, payment, return, initial_balance, advance_payment
+  referenceId     String?
+  referenceModel  String? // POSOrder, CreditMemo
+  paymentMethod   String?
+  notes           String?
+  performedById   String?
+  createdAt       DateTime @default(now())
+
+  customer    User  @relation("LedgerCustomer", fields: [customerId], references: [id])
+  performedBy User? @relation("LedgerStaff", fields: [performedById], references: [id])
+
+  @@index([customerId, createdAt])
+}
+
+model CreditMemo {
+  id                String   @id @default(uuid())
+  memoId            String   @unique
+  customerId        String
+  shopId            String?
+  originalAmount    Decimal  @db.Decimal(20, 2)
+  balance           Decimal  @db.Decimal(20, 2)
+  status            String   @default("active") // active, depleted, cancelled
+  paymentMethod     String?
+  notes             String?
+  totalProductPrice Decimal? @db.Decimal(20, 2)
+  linkedItems       Json?
+  createdById       String?
+
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  customer  User  @relation(fields: [customerId], references: [id])
+  createdBy User? @relation("CreditMemoCreator", fields: [createdById], references: [id])
+}
+
+model Cashbook {
+  id            String   @id @default(uuid())
+  storeId       String
+  date          DateTime @db.Date
+  type          String // cash_in, cash_out
+  amount        Decimal  @db.Decimal(20, 2)
+  source        String // pos_sale, expense, advance
+  referenceId   String?
+  notes         String?
+  performedById String
+  createdAt     DateTime @default(now())
+
+  store       Store @relation(fields: [storeId], references: [id])
+  performedBy User  @relation("CashbookStaff", fields: [performedById], references: [id])
+
+  @@index([storeId, date])
+}
+
+// ---------------------------------------------------------
+// ONLINE E-COMMERCE ORDERS
+// ---------------------------------------------------------
+
+model Order {
+  id          String @id @default(uuid())
+  orderNumber String @unique
+  userId      String
+
+  // Financial
+  subTotal      Decimal @db.Decimal(20, 2)
+  taxTotal      Decimal @db.Decimal(20, 2)
+  discountTotal Decimal @db.Decimal(20, 2)
+  shippingCost  Decimal @default(0) @db.Decimal(20, 2)
+  grandTotal    Decimal @db.Decimal(20, 2)
+
+  // Payment
+  paymentStatus     String  @default("pending") // pending, completed, failed, refunded
+  paymentMethod     String // RAZORPAY, COD
+  razorpayOrderId   String? @unique
+  razorpayPaymentId String? @unique
+
+  // Shipping
+  shippingAddressId String
+  orderStatus       String  @default("pending") // pending, processing, shipped, delivered, cancelled
+  trackingNumber    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user            User        @relation(fields: [userId], references: [id])
+  shippingAddress Address     @relation(fields: [shippingAddressId], references: [id])
+  items           OrderItem[]
+  invoice         Invoice?
+}
+
+model OrderItem {
+  id         String  @id @default(uuid())
+  orderId    String
+  productId  String
+  quantity   Int
+  unitPrice  Decimal @db.Decimal(20, 2)
+  totalPrice Decimal @db.Decimal(20, 2)
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+}
+
+model CustomOrder {
+  id             String    @id @default(uuid())
+  orderNumber    String    @unique
+  customerId     String
+  description    String
+  estimatedPrice Decimal   @db.Decimal(20, 2)
+  advancePaid    Decimal   @default(0) @db.Decimal(20, 2)
+  status         String    @default("pending") // pending, approved, in_production, ready, delivered
+  dueDate        DateTime?
+  images         String[]
+
+  jewelryType         String?
+  metalPreferences    Json?
+  stonePreferences    Json?
+  personalization     Json?
+  designPreviewImages Json?
+  pricingBreakdown    Json?
+  adminNotes          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  customer User @relation(fields: [customerId], references: [id])
+}
+
+model Invoice {
+  id            String    @id @default(uuid())
+  invoiceNumber String    @unique
+  orderId       String?   @unique
+  posOrderId    String?   @unique
+  date          DateTime  @default(now())
+  dueDate       DateTime?
+  pdfUrl        String?
+
+  createdAt DateTime @default(now())
+
+  order    Order?    @relation(fields: [orderId], references: [id])
+  posOrder POSOrder? @relation(fields: [posOrderId], references: [id])
+}
+
+// ---------------------------------------------------------
+// SUPPLY CHAIN & VENDORS
+// ---------------------------------------------------------
+
+model Vendor {
+  id                 String  @id @default(uuid())
+  vendorId           String? @unique
+  name               String
+  companyName        String?
+  contactPerson      String?
+  email              String? @unique
+  phone              String  @unique
+  gstNumber          String?
+  panNumber          String?
+  category           String?
+  address            Json?
+  isActive           Boolean @default(true)
+  outstandingBalance Decimal @default(0) @db.Decimal(20, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products       Product[]
+  purchaseOrders PurchaseOrder[]
+  vendorLedgers  VendorLedger[]
+}
+
+model PurchaseOrder {
+  id          String  @id @default(uuid())
+  poNumber    String  @unique
+  vendorId    String
+  status      String  @default("pending") // pending, approved, received, cancelled
+  totalAmount Decimal @db.Decimal(20, 2)
+  notes       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  vendor Vendor              @relation(fields: [vendorId], references: [id])
+  items  PurchaseOrderItem[]
+}
+
+model PurchaseOrderItem {
+  id              String  @id @default(uuid())
+  purchaseOrderId String
+  productId       String?
+  itemName        String
+  quantity        Int
+  unitPrice       Decimal @db.Decimal(20, 2)
+  totalPrice      Decimal @db.Decimal(20, 2)
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  product       Product?      @relation(fields: [productId], references: [id])
+}
+
+model VendorLedger {
+  id              String  @id @default(uuid())
+  vendorId        String
+  type            String // debit (we pay), credit (we owe)
+  amount          Decimal @db.Decimal(20, 2)
+  runningBalance  Decimal @db.Decimal(20, 2)
+  transactionType String // purchase, payment, return
+  referenceId     String?
+  notes           String?
+
+  createdAt DateTime @default(now())
+
+  vendor Vendor @relation(fields: [vendorId], references: [id])
+}
+
+model Expense {
+  id            String   @id @default(uuid())
+  storeId       String
+  category      String // salary, rent, utility, misc
+  amount        Decimal  @db.Decimal(20, 2)
+  date          DateTime @db.Date
+  notes         String?
+  performedById String
+
+  createdAt DateTime @default(now())
+
+  store       Store @relation(fields: [storeId], references: [id])
+  performedBy User  @relation(fields: [performedById], references: [id])
+}
+
+// ---------------------------------------------------------
+// RATINGS, REVIEWS & MARKETING
+// ---------------------------------------------------------
+
+model Review {
+  id                 String  @id @default(uuid())
+  userId             String?
+  guestName          String?
+  guestEmail         String?
+  productId          String
+  rating             Int     @db.SmallInt
+  title              String?
+  comment            String?
+  images             Json?
+  isVerifiedPurchase Boolean @default(false)
+  status             String  @default("pending") // pending, approved, rejected
+  helpfulCount       Int     @default(0)
+  notHelpfulCount    Int     @default(0)
+  reported           Boolean @default(false)
+  reportReasons      Json?
+  reply              Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user    User?   @relation(fields: [userId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+}
+
+model Banner {
+  id            String    @id @default(uuid())
+  title         String
+  imageUrl      String
+  imagePublicId String?
+  link          String?
+  type          String    @default("home_main")
+  order         Int       @default(0)
+  status        String    @default("active")
+  startDate     DateTime?
+  endDate       DateTime?
+  metadata      Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Coupon {
+  id             String   @id @default(uuid())
+  code           String   @unique
+  discountType   String // percentage, fixed
+  discountValue  Decimal  @db.Decimal(20, 2)
+  minOrderAmount Decimal  @default(0) @db.Decimal(20, 2)
+  maxDiscount    Decimal? @db.Decimal(20, 2)
+  startDate      DateTime
+  endDate        DateTime
+  usageLimit     Int?
+  usageCount     Int      @default(0)
+  isActive       Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+}
+
+model Contact {
+  id      String  @id @default(uuid())
+  name    String
+  email   String
+  phone   String?
+  subject String
+  message String
+  isRead  Boolean @default(false)
+
+  createdAt DateTime @default(now())
+}
+
+// ---------------------------------------------------------
+// RATES & SCHEMES
+// ---------------------------------------------------------
+
+model GoldRate {
+  id            String   @id @default(uuid())
+  metal         String   @default("gold") // gold, silver, platinum
+  purity        String // 24K, 22K, 18K
+  ratePerGram   Decimal  @db.Decimal(20, 2)
+  effectiveDate DateTime @default(now())
+
+  createdAt DateTime @default(now())
+}
+
+model DiamondRate {
+  id            String   @id @default(uuid())
+  cut           String   @default("All")
+  color         String   @default("All")
+  clarity       String   @default("All")
+  ratePerCarat  Decimal  @db.Decimal(20, 2)
+  effectiveDate DateTime @default(now())
+
+  updatedById String?
+  updatedBy   User?   @relation(fields: [updatedById], references: [id])
+
+  createdAt DateTime @default(now())
+}
+
+model Scheme {
+  id           String   @id @default(uuid())
+  schemeId     String   @unique
+  shopId       String
+  customerId   String
+  startDate    DateTime @default(now())
+  maturityDate DateTime
+
+  monthlyInstallment Decimal @db.Decimal(20, 2)
+  totalMonths        Int     @default(11)
+  bonusPercentage    Decimal @default(100) @db.Decimal(5, 2)
+
+  totalPaid Decimal @default(0) @db.Decimal(20, 2)
+  status    String  @default("active") // active, matured, redeemed, closed
+
+  redemptionOrderId String?
+  redemptionDate    DateTime?
+  redemptionValue   Decimal?  @db.Decimal(20, 2)
+  notes             String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  customer        User                @relation(fields: [customerId], references: [id])
+  redemptionOrder POSOrder?           @relation(fields: [redemptionOrderId], references: [id])
+  installments    SchemeInstallment[]
+
+  @@index([shopId])
+}
+
+model SchemeInstallment {
+  id            String   @id @default(uuid())
+  schemeId      String
+  date          DateTime @default(now())
+  amount        Decimal  @db.Decimal(20, 2)
+  method        String // cash, card, upi, bank_transfer
+  transactionId String?
+  notes         String?
+  collectedById String
+
+  createdAt DateTime @default(now())
+
+  scheme      Scheme @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+  collectedBy User   @relation(fields: [collectedById], references: [id])
+}
+
+// ---------------------------------------------------------
+// REPAIRS & AUDITS
+// ---------------------------------------------------------
+
+model Repair {
+  id              String    @id @default(uuid())
+  customerId      String
+  itemDescription String
+  estimatedCost   Decimal   @db.Decimal(20, 2)
+  actualCost      Decimal?  @db.Decimal(20, 2)
+  status          String    @default("received") // received, in_progress, ready, delivered
+  dueDate         DateTime?
+  notes           String?
+  receiptVoucher  String?   @unique
+  repairDetails   String?
+  storeId         String?
+  billedById      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  customer User   @relation(fields: [customerId], references: [id])
+  store    Store? @relation(fields: [storeId], references: [id])
+  billedBy User?  @relation("BilledRepairs", fields: [billedById], references: [id])
+}
+
+model Audit {
+  id            String @id @default(uuid())
+  entityType    String // User, Product, Order
+  entityId      String
+  action        String // CREATE, UPDATE, DELETE
+  changes       Json
+  performedById String
+
+  createdAt DateTime @default(now())
+
+  performedBy User @relation("Auditor", fields: [performedById], references: [id])
+
+  @@index([entityType, entityId])
+}

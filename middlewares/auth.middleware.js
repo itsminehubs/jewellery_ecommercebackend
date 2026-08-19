@@ -2,7 +2,7 @@ const ApiError = require('../utils/ApiError');
 const { verifyAccessToken, extractTokenFromHeader } = require('../utils/jwt');
 const { cacheHelper } = require('../config');
 const { CACHE_KEYS, USER_ROLES } = require('../utils/constants');
-const User = require('../modules/user/user.model');
+const prisma = require('../config/prisma');
 
 /**
  * Authenticate user middleware
@@ -28,7 +28,10 @@ const authenticate = async (req, res, next) => {
 
     if (!user) {
       // Fetch user from database
-      user = await User.findById(decoded.id).select('-password');
+      user = await prisma.user.findUnique({
+        where: { id: decoded.id },
+        select: { id: true, role: true, isActive: true, name: true, phone: true, email: true }
+      });
 
       if (!user) {
         throw ApiError.unauthorized('User not found');
@@ -71,7 +74,10 @@ const optionalAuth = async (req, res, next) => {
       let user = await cacheHelper.get(`${CACHE_KEYS.USER}${decoded.id}`);
 
       if (!user) {
-        user = await User.findById(decoded.id).select('-password');
+        user = await prisma.user.findUnique({
+          where: { id: decoded.id },
+          select: { id: true, role: true, isActive: true, name: true, phone: true, email: true }
+        });
         
         if (user && user.isActive) {
           await cacheHelper.set(`${CACHE_KEYS.USER}${decoded.id}`, user, 1800);

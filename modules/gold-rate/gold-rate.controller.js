@@ -5,7 +5,7 @@ const { asyncHandler } = require('../../middlewares/error.middleware');
 const updateRate = asyncHandler(async (req, res) => {
     const rateData = {
         ...req.body,
-        updatedBy: req.user._id
+        updatedBy: req.user.id
     };
     const rate = await goldRateService.updateRate(rateData);
     ApiResponse.created(rate, 'Gold rate updated successfully').send(res);
@@ -34,3 +34,4 @@ module.exports = {
     getLatestRate,
     deleteRate,
 };
+

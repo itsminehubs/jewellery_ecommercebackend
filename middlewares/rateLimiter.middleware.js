@@ -18,7 +18,7 @@ const createRateLimiter = (options = {}) => {
       logger.warn('Rate limit exceeded', {
         ip: req.ip,
         url: req.originalUrl,
-        userId: req.user?._id
+        userId: req.user?.id
       });
 
       return res.status(429).json({
@@ -178,7 +178,7 @@ const redisRateLimiter = (options = {}) => {
         logger.warn('Rate limit exceeded (Redis)', {
           ip: req.ip,
           url: req.originalUrl,
-          userId: req.user?._id
+          userId: req.user?.id
         });
 
         throw ApiError.tooManyRequests('Too many requests, please try again later');
@@ -211,3 +211,4 @@ module.exports = {
   webhookLimiter,
   redisRateLimiter
 };
+
