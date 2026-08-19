@@ -199,6 +199,11 @@ const createProduct = async (productData, imagePaths = [], userId = null) => {
 
   const initialStock = baseProductData.stock || 0;
   baseProductData.stock = 0; // Initialize as 0, let inventoryService handle it
+  
+  // Set initial status based on initial stock
+  if (!baseProductData.status || baseProductData.status === 'active' || baseProductData.status === 'sold') {
+    baseProductData.status = initialStock > 0 ? 'active' : 'sold';
+  }
 
   const product = await prisma.product.create({
     data: {

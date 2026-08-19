@@ -29,7 +29,10 @@ const updateStock = async (productId, quantityChange, options = {}) => {
     }
 
     // Prepare update data
-    const updateData = { stock: afterQuantity };
+    const updateData = { 
+        stock: afterQuantity,
+        status: afterQuantity > 0 ? 'active' : 'sold'
+    };
 
     // If it's a purchase, update the purchasePrice/vendor as well
     if (type === 'purchase' && costImpact) {
