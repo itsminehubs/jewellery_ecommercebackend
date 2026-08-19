@@ -346,8 +346,8 @@
                             </span>
                         </td>
                         <td class="col-qty"><%= item.quantity %></td>
-                        <td class="col-price">₹<%= item.price.toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
-                        <td class="col-total">₹<%= (item.price * item.quantity).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
+                        <td class="col-price">₹<%= Number(item.unitPrice || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
+                        <td class="col-total">₹<%= (Number(item.unitPrice || 0) * item.quantity).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
                     </tr>
                 <% }); %>
             </tbody>
@@ -362,25 +362,25 @@
             <table class="total-table">
                 <tr>
                     <td>Subtotal:</td>
-                    <td style="text-align: right;">₹<%= order.subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
+                    <td style="text-align: right;">₹<%= Number(order.subTotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
                 </tr>
                 <% if (order.discount > 0) { %>
                     <tr>
                         <td>Discount:</td>
-                        <td style="text-align: right;">-₹<%= order.discount.toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
+                        <td style="text-align: right;">-₹<%= Number(order.discountTotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
                     </tr>
                 <% } %>
                 <tr>
                     <td>GST (3%):</td>
-                    <td style="text-align: right;">₹<%= (order.tax || (order.subtotal * 0.03)).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
+                    <td style="text-align: right;">₹<%= Number(order.taxTotal || (Number(order.subTotal || 0) * 0.03)).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
                 </tr>
                 <tr>
                     <td>Shipping:</td>
-                    <td style="text-align: right;">₹<%= (order.shippingCost || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
+                    <td style="text-align: right;">₹<%= Number(order.shippingCost || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
                 </tr>
                 <tr class="grand-total-row">
                     <td>GRAND TOTAL:</td>
-                    <td style="text-align: right;">₹<%= order.total.toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
+                    <td style="text-align: right;">₹<%= Number(order.grandTotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
                 </tr>
             </table>
         </div>

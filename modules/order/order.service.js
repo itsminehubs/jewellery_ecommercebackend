@@ -133,7 +133,7 @@ const getUserOrders = async (userId, options = {}) => {
         orderBy: { createdAt: 'desc' },
         skip,
         take: limit,
-        include: { items: { include: { product: true } } }
+        include: { items: { include: { product: { include: { images: true } } } } }
     });
 
     const total = await prisma.order.count({ where: { userId } });
@@ -144,7 +144,7 @@ const getUserOrders = async (userId, options = {}) => {
 const getOrderById = async (orderId, userId) => {
     const order = await prisma.order.findFirst({
         where: { id: orderId, userId },
-        include: { items: { include: { product: true } } }
+        include: { items: { include: { product: { include: { images: true } } } } }
     });
     if (!order) throw ApiError.notFound('Order not found');
     return order;

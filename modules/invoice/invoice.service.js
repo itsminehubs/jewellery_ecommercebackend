@@ -20,14 +20,9 @@ const generateInvoice = async (orderId, adminId) => {
     const invoice = await prisma.invoice.create({
         data: {
             orderId: order.id,
-            userId: order.userId,
             invoiceNumber,
-            issueDate: new Date(),
+            date: new Date(),
             dueDate,
-            subTotal: order.subTotal,
-            taxTotal: order.taxTotal,
-            grandTotal: order.grandTotal,
-            status: 'SENT',
             // Schema expects JSON items or we could rely on relations. Prisma schema uses JSON for items?
             // Actually, Prisma schema for Invoice might not have an items field, it links to Order.
             // Let's check if there is an items field. If not, we don't save it and just use the relation.
@@ -71,7 +66,7 @@ const generateInvoice = async (orderId, adminId) => {
 const downloadInvoice = async (invoiceId) => {
     const invoice = await prisma.invoice.findUnique({
         where: { id: invoiceId },
-        include: { user: true, order: { include: { items: { include: { product: true } } } } }
+        include: { order: { include: { user: true, items: { include: { product: true } } } } }
     });
 
     if (!invoice) throw ApiError.notFound('Invoice not found');

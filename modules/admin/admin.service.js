@@ -10,7 +10,7 @@ const { sendEmail } = require('../../jobs/email.job');
 const { generateEmployeeWelcomeEmail } = require('../../utils/emailTemplates');
 
 const getDashboardStats = async (shopId = null) => {
-  const filter = shopId ? { storeId: shopId } : {};
+  const filter = {}; // Order model doesn't have storeId, so global stats only
   const totalUsers = await prisma.user.count({ where: { role: 'user' } });
   const totalProducts = await prisma.product.count();
   const totalOrders = await prisma.order.count({ where: filter });
@@ -75,7 +75,10 @@ const getAllOrders = async (filters = {}, options = {}) => {
 
   const orders = await prisma.order.findMany({
     where: filters,
-    include: { user: { select: { name: true, phone: true, email: true } } },
+    include: { 
+      user: { select: { name: true, phone: true, email: true } },
+      items: { include: { product: true } }
+    },
     orderBy: { createdAt: 'desc' },
     skip,
     take: Number(limit)
@@ -477,7 +480,65 @@ const adjustStock = async (productId, quantityChange, userId, notes) => {
   });
 };
 
+
+const deleteOrder = async (orderId, adminId) => {
+  const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true }
+  });
+  if (!order) throw ApiError.notFound('Order not found');
+
+  const inventoryService = require('../inventory/inventory.service');
+  
+  // Restore stock
+  for (const item of order.items) {
+      if (item.productId) {
+          try {
+              await inventoryService.updateStock(item.productId, item.quantity, {
+                  type: 'adjustment',
+                  action: 'ADMIN_DELETE_ORDER',
+                  performedBy: adminId,
+                  notes: 'Restored stock from deleted order'
+              });
+          } catch (e) {
+              console.warn('Could not restore stock:', e.message);
+          }
+      }
+  }
+
+  // Delete Order items
+  await prisma.orderItem.deleteMany({ where: { orderId: orderId } });
+  
+  // Delete Order
+  await prisma.order.delete({ where: { id: orderId } });
+  
+  logger.info(`Admin ${adminId} deleted order ${orderId}`);
+  return true;
+};
+
+const updateOrderDetails = async (orderId, updateData) => {
+  const order = await prisma.order.findUnique({ where: { id: orderId } });
+  if (!order) throw ApiError.notFound('Order not found');
+
+  const data = {};
+  if (updateData.paymentStatus) data.paymentStatus = updateData.paymentStatus;
+  if (updateData.orderNumber) data.orderNumber = updateData.orderNumber;
+  if (updateData.shippingAddress) {
+      data.shippingAddress = updateData.shippingAddress;
+  }
+
+  const updatedOrder = await prisma.order.update({
+      where: { id: orderId },
+      data
+  });
+  
+  logger.info(`Admin updated order details for ${orderId}`);
+  return updatedOrder;
+};
+
 module.exports = {
+  deleteOrder,
+  updateOrderDetails,
   getDashboardStats,
   getAllOrders,
   updateOrderStatus,

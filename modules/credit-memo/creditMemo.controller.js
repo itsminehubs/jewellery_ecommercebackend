@@ -31,6 +31,35 @@ const getAllCreditMemos = asyncHandler(async (req, res) => {
         take: limit
     });
 
+
+    // Enrich linkedItems with product details
+    const productIds = new Set();
+    creditMemos.forEach(memo => {
+        if (memo.linkedItems && Array.isArray(memo.linkedItems)) {
+            memo.linkedItems.forEach(item => {
+                if (item.product) productIds.add(item.product);
+            });
+        }
+    });
+
+    if (productIds.size > 0) {
+        const products = await prisma.product.findMany({
+            where: { id: { in: Array.from(productIds) } },
+            select: { id: true, name: true, tagId: true, sku: true }
+        });
+        const productMap = {};
+        products.forEach(p => productMap[p.id] = p);
+
+        creditMemos.forEach(memo => {
+            if (memo.linkedItems && Array.isArray(memo.linkedItems)) {
+                memo.linkedItems = memo.linkedItems.map(item => ({
+                    ...item,
+                    product: productMap[item.product] || { id: item.product, name: 'Unknown Product' }
+                }));
+            }
+        });
+    }
+
     ApiResponse.paginated(creditMemos, page, limit, total).send(res);
 });
 

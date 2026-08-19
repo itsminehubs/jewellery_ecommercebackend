@@ -17,11 +17,11 @@ const getDashboard = asyncHandler(async (req, res) => {
 });
 
 const getAllOrders = asyncHandler(async (req, res) => {
-  const { page = 1, limit = 20, search, status, ...otherFilters } = req.query;
+  const { page = 1, limit = 20, search, status, shop_id, ...otherFilters } = req.query;
   const filters = { ...otherFilters };
 
   if (status && status !== 'all') {
-    filters.status = status;
+    filters.orderStatus = status;
   }
 
   if (search) {
@@ -51,6 +51,16 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
   const { status, note } = req.body;
   const order = await adminService.updateOrderStatus(req.params.id, status, note);
   ApiResponse.success(order, 'Order status updated').send(res);
+});
+
+const updateOrderDetails = asyncHandler(async (req, res) => {
+  const order = await adminService.updateOrderDetails(req.params.id, req.body);
+  ApiResponse.success(order, 'Order details updated').send(res);
+});
+
+const deleteOrder = asyncHandler(async (req, res) => {
+  await adminService.deleteOrder(req.params.id, req.user.id);
+  ApiResponse.success(null, 'Order deleted successfully').send(res);
 });
 
 const getAllUsers = asyncHandler(async (req, res) => {
@@ -168,6 +178,8 @@ module.exports = {
   getDashboard,
   getAllOrders,
   updateOrderStatus,
+  updateOrderDetails,
+  deleteOrder,
   getAllUsers,
   toggleUserStatus,
   updateUserRole,

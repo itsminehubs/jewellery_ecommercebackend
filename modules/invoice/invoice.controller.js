@@ -57,13 +57,17 @@ const getInvoiceByOrder = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
   const invoice = await prisma.invoice.findUnique({
       where: { orderId },
-      include: { order: true, user: { select: { name: true, email: true } } }
+      include: { 
+          order: {
+              include: { user: { select: { id: true, name: true, email: true } } }
+          }
+      }
   });
 
   if (!invoice) throw ApiError.notFound('Invoice not found');
   
   const isStaff = req.user.role !== 'user';
-  if (!isStaff && invoice.userId !== req.user.id) {
+  if (!isStaff && invoice.order?.userId !== req.user.id) {
     throw ApiError.forbidden('You are not authorized to view this invoice');
   }
   ApiResponse.success(invoice, 'Invoice fetched successfully').send(res);

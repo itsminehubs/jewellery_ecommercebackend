@@ -9,11 +9,11 @@ const inventoryService = require('./inventory.service');
 const pricingService = require('./pricing.service');
 
 const getAllProducts = async (filters = {}, options = {}) => {
-  const { 
-    page = 1, 
-    limit = 20, 
-    sort = '-createdAt', 
-    search, 
+  const {
+    page = 1,
+    limit = 20,
+    sort = '-createdAt',
+    search,
     sku,
     category,
     minPrice,
@@ -27,9 +27,9 @@ const getAllProducts = async (filters = {}, options = {}) => {
     carbonsmithworld,
     status
   } = options;
-  
+
   const where = { ...filters };
-  
+
   if (status && status !== 'all') {
     where.status = status;
   } else if (Object.keys(filters).length === 0 && status !== 'all') {
@@ -45,8 +45,14 @@ const getAllProducts = async (filters = {}, options = {}) => {
       { sku: { contains: search, mode: 'insensitive' } }
     ];
   }
-  if (category) where.categoryId = category;
-  
+  if (category) {
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(category);
+    if (isUUID) {
+      where.categoryId = category;
+    } else {
+      where.category = { slug: category };
+    }
+  }
   if (minPrice || maxPrice) {
     where.finalPrice = {};
     if (minPrice) where.finalPrice.gte = Number(minPrice);
@@ -70,7 +76,7 @@ const getAllProducts = async (filters = {}, options = {}) => {
       }
     };
   }
-  
+
   // Note: Prisma schema does not currently have `basicDetails.occasion` (style) defined separately.
   // Assuming it might be stored in metadata or omitted for now.
 
@@ -122,7 +128,7 @@ const getProductById = async (productId) => {
         images: true
       }
     });
-    
+
     if (!product) throw ApiError.notFound('Product not found');
 
     productData = product;
@@ -163,7 +169,7 @@ const createProduct = async (productData, imagePaths = [], userId = null) => {
 
   // Run dynamic pricing engine before creation
   const pricingResults = await pricingService.calculateProductPrice(baseProductData, metalDetails, stoneDetails);
-  
+
   const images = imagePaths.length > 0 ? await uploadMultipleImages(imagePaths, 'products') : [];
 
   // Safe Category Handling
@@ -190,6 +196,9 @@ const createProduct = async (productData, imagePaths = [], userId = null) => {
       if (!foundCategory) throw require('../../utils/ApiError').badRequest(`Category ID '${category}' not found.`);
     }
   }
+
+  const initialStock = baseProductData.stock || 0;
+  baseProductData.stock = 0; // Initialize as 0, let inventoryService handle it
 
   const product = await prisma.product.create({
     data: {
@@ -309,6 +318,10 @@ const updateProduct = async (productId, updateData, imagePaths = [], imagesToDel
 
   const beforeStock = existingProduct.stock;
   const newStock = updateData.stock !== undefined ? updateData.stock : beforeStock;
+  
+  if (baseProductData.stock !== undefined) {
+      delete baseProductData.stock; // Let inventoryService handle the stock update
+  }
 
   const updatedProduct = await prisma.product.update({
     where: { id: productId },
@@ -343,7 +356,7 @@ const updateProduct = async (productId, updateData, imagePaths = [], imagesToDel
 
   // Clear caches: detail and listings
   await cacheHelper.del(`${CACHE_KEYS.PRODUCT_DETAIL}:${productId}`);
-  await cacheHelper.delPattern(`${CACHE_KEYS.PRODUCT_DETAIL}:*`); 
+  await cacheHelper.delPattern(`${CACHE_KEYS.PRODUCT_DETAIL}:*`);
 
   return updatedProduct;
 };

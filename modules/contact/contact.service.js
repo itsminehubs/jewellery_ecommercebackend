@@ -7,10 +7,10 @@ const prisma = require('../../config/prisma');
 const submitInquiry = async (contactData) => {
     return await prisma.contact.create({
         data: {
-            name: contactData.name,
+            name: contactData.fullName || contactData.name || 'Unknown',
             email: contactData.email,
             phone: contactData.phone,
-            subject: contactData.subject,
+            subject: contactData.purpose || contactData.subject || 'General Inquiry',
             message: contactData.message
         }
     });

@@ -24,7 +24,7 @@ exports.createCustomOrder = asyncHandler(async (req, res) => {
 
     const customOrderData = {
         jewelryType: payload.jewelryType,
-        customerId: req.user.id,
+        customerId: payload.customerId || req.user.id,
         status: payload.status || 'Draft',
         metalPreferences: payload.metalPreferences || {},
         stonePreferences: payload.stonePreferences || {},
@@ -49,8 +49,16 @@ exports.createCustomOrder = asyncHandler(async (req, res) => {
     const calculatedTotal = (Number(totalMetalCost) || 0) + (Number(totalStoneCost) || 0) + (Number(makingCharges) || 0) + (Number(taxAmount) || 0);
     customOrderData.pricingBreakdown.finalTotal = customOrderData.pricingBreakdown.finalTotal || calculatedTotal;
 
+    const count = await prisma.customOrder.count() + 1;
+    const orderNumber = `CS-${new Date().getFullYear()}-${count.toString().padStart(5, '0')}`;
+
     const customOrder = await prisma.customOrder.create({
-        data: customOrderData
+        data: {
+            ...customOrderData,
+            orderNumber,
+            description: payload.description || `Custom ${payload.jewelryType || 'Jewelry'} Order`,
+            estimatedPrice: calculatedTotal || 0
+        }
     });
 
     res.status(201).json({
@@ -104,7 +112,7 @@ exports.updateCustomOrder = asyncHandler(async (req, res) => {
     }
 
     if (
-        ['admin', 'super_admin', 'store_manager'].includes(req.user.role) || 
+        ['admin', 'super_admin', 'store_manager'].includes(req.user.role) ||
         (payload.status === 'Quote_Requested' && customOrder.status === 'Draft')
     ) {
         // keep payload.status
@@ -114,6 +122,27 @@ exports.updateCustomOrder = asyncHandler(async (req, res) => {
     delete payload.user;
 
     const updateData = { ...payload };
+
+    // Map legacy fields to new Prisma schema fields
+    if (updateData.metalDetails) {
+        updateData.metalPreferences = updateData.metalDetails;
+        delete updateData.metalDetails;
+    }
+    if (updateData.stoneDetails) {
+        updateData.stonePreferences = updateData.stoneDetails;
+        delete updateData.stoneDetails;
+    }
+    if (updateData.sizeDetails) {
+        updateData.personalization = { ...(updateData.personalization || {}), sizeDetails: updateData.sizeDetails };
+        delete updateData.sizeDetails;
+    }
+    
+    // Remove MongoDB specific or irrelevant fields
+    delete updateData._id;
+    delete updateData.__v;
+    delete updateData.customerId;
+    delete updateData.createdAt;
+    delete updateData.updatedAt;
 
     if (req.file) {
         const imageResult = await uploadImage(req.file.path, 'custom-orders');
@@ -134,6 +163,9 @@ exports.updateCustomOrder = asyncHandler(async (req, res) => {
         const makingCharges = Number(pb.makingCharges) || 0;
         const taxAmount = Number(pb.taxAmount) || 0;
         pb.finalTotal = pb.finalTotal || (totalMetalCost + totalStoneCost + makingCharges + taxAmount);
+        
+        // Ensure estimatedPrice is updated as well
+        updateData.estimatedPrice = pb.finalTotal;
     }
 
     const updatedCustomOrder = await prisma.customOrder.update({
