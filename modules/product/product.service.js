@@ -418,12 +418,22 @@ const getProductByScannedCode = async (scannedCode) => {
   return product;
 };
 
-const getProductsByCategory = async (categoryId, options = {}) => {
+const getProductsByCategory = async (categoryIdOrSlug, options = {}) => {
   const { page = 1, limit = 20, sort = '-createdAt', search, minPrice, maxPrice, metalType } = options;
 
+  // Attempt to resolve category ID if a slug was provided
+  let resolvedCategoryId = categoryIdOrSlug;
+  const isUUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(categoryIdOrSlug);
+  if (!isUUID) {
+    const category = await prisma.category.findUnique({ where: { slug: categoryIdOrSlug } });
+    if (category) {
+      resolvedCategoryId = category.id;
+    }
+  }
+
   const where = {
-    categoryId,
-    status: 'ACTIVE'
+    categoryId: resolvedCategoryId,
+    status: 'active'
   };
 
   if (search) {
@@ -470,7 +480,7 @@ const getFeaturedProducts = async (options = {}) => {
 
   const where = {
     featured: true,
-    status: 'ACTIVE'
+    status: 'active'
   };
 
   const skip = (page - 1) * limit;
@@ -494,7 +504,7 @@ const getTrendingProducts = async (options = {}) => {
 
   const where = {
     trending: true,
-    status: 'ACTIVE'
+    status: 'active'
   };
 
   const skip = (page - 1) * limit;
