@@ -82,7 +82,10 @@ const calculateProductPrice = async (productData, metalDetails, stoneDetails) =>
         latestRate = await prisma.goldRate.findFirst({
             where: {
                 metal: metalDetails.metalType.toLowerCase(),
-                purity: metalDetails.purity
+                purity: {
+                    equals: metalDetails.purity,
+                    mode: 'insensitive'
+                }
             },
             orderBy: { effectiveDate: 'desc' }
         });

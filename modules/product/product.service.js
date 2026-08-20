@@ -241,8 +241,8 @@ const createProduct = async (productData, imagePaths = [], userId = null) => {
   });
 
   // 📝 LOG AUDIT: Centralized Stock Arrival
-  if (product.stock > 0) {
-    await inventoryService.updateStock(product.id, product.stock, {
+  if (initialStock > 0) {
+    await inventoryService.updateStock(product.id, initialStock, {
       type: 'purchase',
       action: 'INITIAL_STOCK',
       performedBy: userId,
@@ -327,6 +327,9 @@ const updateProduct = async (productId, updateData, imagePaths = [], imagesToDel
   if (baseProductData.stock !== undefined) {
       delete baseProductData.stock; // Let inventoryService handle the stock update
   }
+  if (baseProductData.imagesToDelete !== undefined) {
+      delete baseProductData.imagesToDelete; // Prevent Prisma unknown argument error
+  }
 
   const updatedProduct = await prisma.product.update({
     where: { id: productId },
@@ -399,7 +402,8 @@ const deleteProduct = async (productId, userId = null) => {
     where: { id: productId },
     data: {
       status: 'archived',
-      deletedAt: new Date()
+      deletedAt: new Date(),
+      stock: 0
     }
   });
 

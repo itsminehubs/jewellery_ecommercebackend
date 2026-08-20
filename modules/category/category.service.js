@@ -104,6 +104,14 @@ const deleteCategory = async (id) => {
     const category = await prisma.category.findUnique({ where: { id } });
     if (!category) throw ApiError.notFound('Category not found');
 
+    const productCount = await prisma.product.count({
+        where: { categoryId: id }
+    });
+
+    if (productCount > 0) {
+        throw ApiError.badRequest('Cannot delete category because it has products associated with it. Please reassign or delete the products first.');
+    }
+
     // Delete image from Cloudinary
     if (category.imagePublicId) {
         await deleteImage(category.imagePublicId);
