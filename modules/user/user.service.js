@@ -326,8 +326,14 @@ const deleteAccount = async (userId) => {
     await deleteImage(user.profileImagePublicId);
   }
 
-  // Soft delete or hard delete? Let's use Prisma's delete which cascades according to schema
-  await prisma.user.delete({ where: { id: userId } });
+  // Soft delete to preserve order history
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      isActive: false,
+      deletedAt: new Date()
+    }
+  });
   await cacheHelper.del(`${CACHE_KEYS.USER}${userId}`);
 
   logger.info(`Account deleted for user: ${userId}`);

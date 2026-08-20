@@ -109,6 +109,8 @@ const getAllUsers = async (filters = {}, options = {}) => {
   const { page = 1, limit = 20 } = options;
   const skip = (page - 1) * limit;
 
+  filters.deletedAt = null;
+
   const users = await prisma.user.findMany({
     where: filters,
     select: {
@@ -280,7 +282,14 @@ const deleteUser = async (userId, requesterRole) => {
     }
   }
 
-  await prisma.user.delete({ where: { id: userId } });
+  // Soft delete user to preserve order history
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      isActive: false,
+      deletedAt: new Date()
+    }
+  });
 
   logger.info(`Admin (${requesterRole}) deleted user: ${userId}`);
   return { message: 'User deleted successfully' };
@@ -288,15 +297,16 @@ const deleteUser = async (userId, requesterRole) => {
 
 const getStockAnalytics = async () => {
   const stats = await prisma.product.aggregate({
+    where: { deletedAt: null },
     _sum: { stock: true }
   });
   
   // For total value, we need db.$queryRaw because it's stock * price
-  const queryResult = await prisma.$queryRaw`SELECT SUM(stock * "finalPrice") as "totalValue" FROM "Product"`;
+  const queryResult = await prisma.$queryRaw`SELECT SUM(stock * "finalPrice") as "totalValue" FROM "Product" WHERE "deletedAt" IS NULL`;
   const totalValue = queryResult[0]?.totalValue || 0;
   
   const lowStockCount = await prisma.product.count({
-    where: { stock: { lt: 5 } }
+    where: { stock: { lt: 5 }, deletedAt: null }
   });
 
   const dispatchedOrders = await prisma.order.count({
@@ -305,6 +315,7 @@ const getStockAnalytics = async () => {
 
   const categoryStock = await prisma.product.groupBy({
     by: ['categoryId'], // Need to map category string if using names instead
+    where: { deletedAt: null },
     _sum: { stock: true }
   });
 
@@ -353,7 +364,7 @@ const getStockList = async (options = {}) => {
   const { page = 1, limit = 20, search, category, status } = options;
   const skip = (page - 1) * limit;
 
-  const where = {};
+  const where = { deletedAt: null };
 
   if (search) {
     where.OR = [
@@ -388,7 +399,7 @@ const getStockList = async (options = {}) => {
 };
 
 const exportProductsToCSV = async () => {
-  const products = await prisma.product.findMany();
+  const products = await prisma.product.findMany({ where: { deletedAt: null } });
 
   if (!products.length) return '';
 
@@ -489,7 +500,7 @@ const deleteOrder = async (orderId, adminId) => {
   });
   if (!order) throw ApiError.notFound('Order not found');
 
-  const inventoryService = require('../inventory/inventory.service');
+  const inventoryService = require('../product/inventory.service');
   
   // Restore stock
   for (const item of order.items) {
