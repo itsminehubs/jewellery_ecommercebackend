@@ -28,7 +28,7 @@ const getAllProducts = async (filters = {}, options = {}) => {
     status
   } = options;
 
-  const where = { ...filters };
+  const where = { ...filters, deletedAt: null };
 
   if (status && status !== 'all') {
     where.status = status;
@@ -394,8 +394,14 @@ const deleteProduct = async (productId, userId = null) => {
     });
   }
 
-  // Delete product document
-  await prisma.product.delete({ where: { id: productId } });
+  // Soft delete product document to preserve order constraints
+  await prisma.product.update({ 
+    where: { id: productId },
+    data: {
+      status: 'archived',
+      deletedAt: new Date()
+    }
+  });
 
   // Clear caches: detail and listings
   await cacheHelper.del(`${CACHE_KEYS.PRODUCT_DETAIL}:${productId}`);
