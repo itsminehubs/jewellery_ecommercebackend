@@ -31,6 +31,7 @@ const getDashboardStats = async (shopId = null) => {
   const todayRevenue = todayRevenueData._sum.grandTotal ? Number(todayRevenueData._sum.grandTotal) : 0;
 
   const topProducts = await prisma.product.findMany({
+    where: { deletedAt: null },
     orderBy: { sales: 'desc' },
     take: 5,
     include: { images: true }
