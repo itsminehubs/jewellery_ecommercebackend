@@ -70,6 +70,7 @@ const calculateGrossProfit = async (startDate, endDate) => {
  */
 const calculateInventoryValue = async () => {
     const products = await prisma.product.findMany({
+        where: { deletedAt: null },
         select: { stock: true, purchasePrice: true }
     });
 

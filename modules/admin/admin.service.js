@@ -12,7 +12,7 @@ const { generateEmployeeWelcomeEmail } = require('../../utils/emailTemplates');
 const getDashboardStats = async (shopId = null) => {
   const filter = {}; // Order model doesn't have storeId, so global stats only
   const totalUsers = await prisma.user.count({ where: { role: 'user' } });
-  const totalProducts = await prisma.product.count();
+  const totalProducts = await prisma.product.count({ where: { deletedAt: null } });
   const totalOrders = await prisma.order.count({ where: filter });
   const pendingOrders = await prisma.order.count({ where: { ...filter, orderStatus: 'pending' } });
 
