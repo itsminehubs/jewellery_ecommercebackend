@@ -200,45 +200,58 @@ const createProduct = async (productData, imagePaths = [], userId = null) => {
   const initialStock = baseProductData.stock || 0;
   baseProductData.stock = 0; // Initialize as 0, let inventoryService handle it
   
+  // Normalize unique fields to prevent Prisma constraint errors on empty strings
+  if (baseProductData.huid === "") baseProductData.huid = null;
+  
   // Set initial status based on initial stock
   if (!baseProductData.status || baseProductData.status === 'active' || baseProductData.status === 'sold') {
     baseProductData.status = initialStock > 0 ? 'active' : 'sold';
   }
 
-  const product = await prisma.product.create({
-    data: {
-      ...baseProductData,
-      sku: finalSku,
-      tagId: finalTagId,
-      categoryId: resolvedCategoryId,
-      price: pricingResults.price || 0,
-      finalPrice: pricingResults.finalPrice || 0,
-      metalDetails: metalDetails ? {
-        create: pricingResults.metalDetails
-      } : undefined,
-      stoneDetails: stoneDetails && stoneDetails.length > 0 ? {
-        create: pricingResults.stoneDetails.map(s => ({
-          stoneType: s.stoneType,
-          synthetic: s.synthetic,
-          shape: s.shape,
-          netWeight: s.netWeight || 0,
-          color: s.color,
-          clarity: s.clarity,
-          carat: s.carat,
-          cut: s.cut,
-          certification: s.certification,
-          rate: s.rate || 0
-        }))
-      } : undefined,
-      images: images.length > 0 ? {
-        create: images.map(img => ({
-          url: img.url,
-          publicId: img.public_id
-        }))
-      } : undefined
-    },
-    include: { metalDetails: true, stoneDetails: true, images: true }
-  });
+  let product;
+  try {
+    product = await prisma.product.create({
+      data: {
+        ...baseProductData,
+        sku: finalSku,
+        tagId: finalTagId,
+        categoryId: resolvedCategoryId,
+        price: pricingResults.price || 0,
+        finalPrice: pricingResults.finalPrice || 0,
+        metalDetails: metalDetails ? {
+          create: pricingResults.metalDetails
+        } : undefined,
+        stoneDetails: stoneDetails && stoneDetails.length > 0 ? {
+          create: pricingResults.stoneDetails.map(s => ({
+            stoneType: s.stoneType,
+            synthetic: s.synthetic,
+            shape: s.shape,
+            netWeight: s.netWeight || 0,
+            color: s.color,
+            clarity: s.clarity,
+            carat: s.carat,
+            cut: s.cut,
+            certification: s.certification,
+            rate: s.rate || 0
+          }))
+        } : undefined,
+        images: images.length > 0 ? {
+          create: images.map(img => ({
+            url: img.url,
+            publicId: img.public_id
+          }))
+        } : undefined
+      },
+      include: { metalDetails: true, stoneDetails: true, images: true }
+    });
+  } catch (error) {
+    if (error.code === 'P2002') {
+      const target = error.meta?.target || [];
+      const field = target[0] || 'unique field';
+      throw require('../../utils/ApiError').badRequest(`The ${field} you entered is already in use by another product.`);
+    }
+    throw error;
+  }
 
   // 📝 LOG AUDIT: Centralized Stock Arrival
   if (initialStock > 0) {
@@ -331,26 +344,39 @@ const updateProduct = async (productId, updateData, imagePaths = [], imagesToDel
       delete baseProductData.imagesToDelete; // Prevent Prisma unknown argument error
   }
 
-  const updatedProduct = await prisma.product.update({
-    where: { id: productId },
-    data: {
-      ...baseProductData,
-      categoryId: resolvedCategoryId || undefined,
-      price: pricingResults.price || existingProduct.price,
-      finalPrice: pricingResults.finalPrice || existingProduct.finalPrice,
-      images: newImagesData.length > 0 ? {
-        create: newImagesData
-      } : undefined,
-      metalDetails: metalDetails ? {
-        upsert: {
-          create: (() => { const { id, productId, ...rest } = pricingResults.metalDetails || {}; return rest; })(),
-          update: (() => { const { id, productId, ...rest } = pricingResults.metalDetails || {}; return rest; })()
-        }
-      } : undefined
-      // For stone details, it's safer to delete and recreate if passed, or manage individually
-    },
-    include: { images: true, metalDetails: true, stoneDetails: true }
-  });
+  // Normalize unique fields
+  if (baseProductData.huid === "") baseProductData.huid = null;
+
+  let updatedProduct;
+  try {
+    updatedProduct = await prisma.product.update({
+      where: { id: productId },
+      data: {
+        ...baseProductData,
+        categoryId: resolvedCategoryId || undefined,
+        price: pricingResults.price || existingProduct.price,
+        finalPrice: pricingResults.finalPrice || existingProduct.finalPrice,
+        images: newImagesData.length > 0 ? {
+          create: newImagesData
+        } : undefined,
+        metalDetails: metalDetails ? {
+          upsert: {
+            create: (() => { const { id, productId, ...rest } = pricingResults.metalDetails || {}; return rest; })(),
+            update: (() => { const { id, productId, ...rest } = pricingResults.metalDetails || {}; return rest; })()
+          }
+        } : undefined
+        // For stone details, it's safer to delete and recreate if passed, or manage individually
+      },
+      include: { images: true, metalDetails: true, stoneDetails: true }
+    });
+  } catch (error) {
+    if (error.code === 'P2002') {
+      const target = error.meta?.target || [];
+      const field = target[0] || 'unique field';
+      throw require('../../utils/ApiError').badRequest(`The ${field} you entered is already in use by another product.`);
+    }
+    throw error;
+  }
 
   // 📝 LOG AUDIT: Centralized Adjustment
   if (beforeStock !== newStock) {
