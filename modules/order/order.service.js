@@ -259,7 +259,7 @@ const verifyPrice = async (items) => {
         totalTax += itemTax;
     }
 
-    const shippingCost = subtotal > 2999 ? 0 : 99;
+    const shippingCost = subtotal > 2999 ? 0 : 0;
     const total = subtotal + totalTax + shippingCost;
 
     return { subtotal, tax: totalTax, shippingCost, total };
