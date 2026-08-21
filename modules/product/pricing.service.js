@@ -1,14 +1,15 @@
 const prisma = require('../../config/prisma');
 
 const roundTo2 = (num) => Number((Math.round((num + Number.EPSILON) * 100) / 100).toFixed(2));
+const roundTo3 = (num) => Number((Math.round((num + Number.EPSILON) * 1000) / 1000).toFixed(3));
 
 /**
  * Calculate dynamic pricing for a product
  * Takes in product data (including nested relations data) and computes the final price
  */
 const calculateProductPrice = async (productData, metalDetails, stoneDetails) => {
-    let price = 0;
-    let finalPrice = 0;
+    let price = productData.price ? Number(productData.price) : 0;
+    let finalPrice = productData.finalPrice ? Number(productData.finalPrice) : price;
 
     const grossWeight = metalDetails?.grossWeight ? Number(metalDetails.grossWeight) : 0;
     
@@ -21,7 +22,7 @@ const calculateProductPrice = async (productData, metalDetails, stoneDetails) =>
             let caratVal = stone.carat ? parseFloat(stone.carat) : 0;
             
             if (caratVal > 0) {
-                stone.netWeight = roundTo2(caratVal * 0.200);
+                stone.netWeight = roundTo3(caratVal * 0.200);
             }
 
             const stoneWeightGrams = stone.netWeight ? Number(stone.netWeight) : 0;
@@ -69,7 +70,7 @@ const calculateProductPrice = async (productData, metalDetails, stoneDetails) =>
     const stoneValue = roundTo2(dynamicStoneValue > 0 ? dynamicStoneValue : manualStoneCharges);
 
     // 2. Net Gold Weight
-    const netWeight = roundTo2(Math.max(0, grossWeight - totalStoneWeight));
+    const netWeight = roundTo3(Math.max(0, grossWeight - totalStoneWeight));
     if (metalDetails) {
         metalDetails.netWeight = netWeight;
     }
