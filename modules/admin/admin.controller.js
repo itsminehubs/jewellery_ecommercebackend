@@ -90,6 +90,10 @@ const getAllUsers = asyncHandler(async (req, res) => {
   ).send(res);
 });
 
+const getUserDetails = asyncHandler(async (req, res) => {
+  const userStats = await adminService.getUserDetails(req.params.id);
+  ApiResponse.success(userStats, 'User details fetched successfully').send(res);
+});
 
 const updateEmployee = asyncHandler(async (req, res) => {
   const user = await adminService.updateEmployee(req.params.id, req.body, req.user.role);
@@ -181,6 +185,7 @@ module.exports = {
   updateOrderDetails,
   deleteOrder,
   getAllUsers,
+  getUserDetails,
   toggleUserStatus,
   updateUserRole,
   getStockAnalytics,
