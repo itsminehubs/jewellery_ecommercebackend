@@ -114,6 +114,7 @@ const getAllOrders = async (filters = {}, options = {}) => {
         ...po,
         source: 'pos',
         orderStatus: po.status,
+        paymentStatus: 'paid', // POS orders are fully paid at checkout
         user: po.customer,
         shop_id: po.store?.name || po.storeId
     }));
@@ -160,6 +161,7 @@ const getAllOrders = async (filters = {}, options = {}) => {
         ...po,
         source: 'pos',
         orderStatus: po.status,
+        paymentStatus: 'paid', // POS orders are fully paid at checkout
         user: po.customer,
         shop_id: po.store?.name || po.storeId
     }));
