@@ -22,6 +22,7 @@ router.delete('/orders/:id', checkPermission(PERMISSIONS.ORDER_CANCEL), adminCon
 
 // User/Employee Management
 router.get('/users', checkAnyPermission([PERMISSIONS.CUSTOMER_VIEW, PERMISSIONS.MANAGE_EMPLOYEES]), adminController.getAllUsers);
+router.get('/users/:id', checkPermission(PERMISSIONS.CUSTOMER_VIEW), adminController.getUserDetails);
 router.post('/users', checkPermission(PERMISSIONS.MANAGE_EMPLOYEES), adminController.createEmployee);
 router.patch('/users/:id', checkPermission(PERMISSIONS.MANAGE_EMPLOYEES), adminController.updateEmployee);
 router.patch('/users/:id/toggle-status', checkPermission(PERMISSIONS.MANAGE_EMPLOYEES), adminController.toggleUserStatus);

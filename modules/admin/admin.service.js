@@ -239,6 +239,45 @@ const getAllUsers = async (filters = {}, options = {}) => {
   return { users, total, page, limit };
 };
 
+const getUserDetails = async (userId) => {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { addresses: true }
+  });
+
+  if (!user) throw ApiError.notFound('User not found');
+
+  const orders = await prisma.order.findMany({
+    where: { userId },
+    include: {
+      items: {
+        include: { product: true }
+      }
+    }
+  });
+
+  const totalOrders = orders.length;
+  const totalSpent = orders.reduce((acc, order) => acc + Number(order.grandTotal || 0), 0);
+  
+  const sortedOrders = [...orders].sort((a, b) => b.createdAt - a.createdAt);
+  const lastOrder = sortedOrders.length > 0 ? sortedOrders[0].createdAt : null;
+
+  const wishlistItems = await prisma.wishlistItem.count({
+    where: { wishlist: { userId } }
+  });
+
+  return {
+    ...user,
+    totalOrders,
+    totalSpent,
+    wishlistItems,
+    lastOrder,
+    joinedDate: user.createdAt,
+    addresses: user.addresses || [],
+    orders: sortedOrders
+  };
+};
+
 const createEmployee = async (employeeData, requesterRole) => {
   const { phone, email, name, role, password } = employeeData;
 
@@ -705,22 +744,23 @@ const updateOrderDetails = async (orderId, updateData) => {
 };
 
 module.exports = {
-  deleteOrder,
-  updateOrderDetails,
   getDashboardStats,
+  adjustLoyaltyPoints,
   getAllOrders,
   updateOrderStatus,
+  updateOrderDetails,
+  deleteOrder,
   getAllUsers,
-  toggleUserStatus,
-  updateUserRole,
+  getUserDetails,
   updateEmployee,
   createEmployee,
   deleteUser,
+  toggleUserStatus,
+  updateUserRole,
   getStockAnalytics,
   getSalesReports,
   getStockList,
   exportProductsToCSV,
   importProductsFromCSV,
-  adjustLoyaltyPoints,
   adjustStock
 };
