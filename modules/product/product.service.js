@@ -397,15 +397,29 @@ const deleteProduct = async (productId, userId = null) => {
     });
   }
 
-  // Soft delete product document to preserve order constraints
-  await prisma.product.update({ 
-    where: { id: productId },
-    data: {
-      status: 'archived',
-      deletedAt: new Date(),
-      stock: 0
+  // Try to completely erase the product (Hard Delete)
+  // If it fails due to foreign key constraints (e.g. past orders), fallback to Soft Delete
+  try {
+    await prisma.product.delete({
+      where: { id: productId }
+    });
+    logger.info(`Product permanently hard-deleted: ${productId}`);
+  } catch (error) {
+    // P2003 is the Prisma error code for Foreign Key Constraint Failed
+    if (error.code === 'P2003') {
+      logger.info(`Product ${productId} has associated records (orders/inventory), falling back to soft delete.`);
+      await prisma.product.update({ 
+        where: { id: productId },
+        data: {
+          status: 'archived',
+          deletedAt: new Date(),
+          stock: 0
+        }
+      });
+    } else {
+      throw error;
     }
-  });
+  }
 
   // Clear caches: detail and listings
   await cacheHelper.del(`${CACHE_KEYS.PRODUCT_DETAIL}:${productId}`);
@@ -417,6 +431,7 @@ const deleteProduct = async (productId, userId = null) => {
 const getProductByScannedCode = async (scannedCode) => {
   const product = await prisma.product.findFirst({
     where: {
+      deletedAt: null,
       OR: [
         { sku: scannedCode },
         { tagId: scannedCode },
@@ -448,7 +463,8 @@ const getProductsByCategory = async (categoryIdOrSlug, options = {}) => {
 
   const where = {
     categoryId: resolvedCategoryId,
-    status: 'active'
+    status: 'active',
+    deletedAt: null
   };
 
   if (search) {
@@ -495,7 +511,8 @@ const getFeaturedProducts = async (options = {}) => {
 
   const where = {
     featured: true,
-    status: 'active'
+    status: 'active',
+    deletedAt: null
   };
 
   const skip = (page - 1) * limit;
@@ -519,7 +536,8 @@ const getTrendingProducts = async (options = {}) => {
 
   const where = {
     trending: true,
-    status: 'active'
+    status: 'active',
+    deletedAt: null
   };
 
   const skip = (page - 1) * limit;
