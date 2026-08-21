@@ -4,403 +4,309 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tax Invoice - <%= invoice.invoiceNumber %></title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        :root {
-            --primary: #2C3E50;
-            --accent: #48C9B0;
-            --bg-light: #F4F7F6;
-            --text-main: #2E4053;
-            --text-muted: #7F8C8D;
-            --border: #D5DBDB;
+        @page { size: A4; margin: 5mm; }
+        body { 
+            -webkit-print-color-adjust: exact; 
+            print-color-adjust: exact; 
+            font-family: sans-serif;
+            color: #000;
+            font-size: 10px;
         }
-
-        @page {
-            size: A4;
-            margin: 0;
-        }
-
-        body {
-            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            margin: 0;
-            padding: 40px;
-            color: var(--text-main);
-            background-color: white;
-            font-size: 11px;
-            line-height: 1.5;
-        }
-
-        .invoice-container {
+        .invoice-container { 
             width: 100%;
-            max-width: 800px;
+            max-width: 210mm;
             margin: 0 auto;
         }
-
-        /* Header Branding */
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 30px;
-        }
-
-        .logo-section h1 {
-            margin: 0;
-            color: var(--primary);
-            font-size: 28px;
-            letter-spacing: 2px;
-            font-weight: 800;
-        }
-
-        .logo-section p {
-            margin: 5px 0 0 0;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            font-weight: bold;
-            font-size: 10px;
-        }
-
-        .title-section {
-            text-align: right;
-        }
-
-        .title-section h2 {
-            margin: 0;
-            font-size: 32px;
-            color: var(--primary);
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            opacity: 0.8;
-        }
-
-        /* Meta Info Bar */
-        .meta-bar {
-            background-color: var(--primary);
-            color: white;
-            display: flex;
-            padding: 12px 20px;
-            border-radius: 4px;
-            margin-bottom: 30px;
-        }
-
-        .meta-item {
-            flex: 1;
-        }
-
-        .meta-item label {
-            display: block;
-            font-size: 9px;
-            text-transform: uppercase;
-            opacity: 0.7;
-            font-weight: bold;
-            margin-bottom: 2px;
-        }
-
-        .meta-item span {
-            font-size: 12px;
-            font-weight: bold;
-        }
-
-        /* Addresses */
-        .address-section {
-            display: flex;
-            justify-content: space-between;
-            gap: 20px;
-            margin-bottom: 40px;
-        }
-
-        .address-box {
-            flex: 1;
-        }
-
-        .address-box h3 {
-            font-size: 14px;
-            border-bottom: 2px solid var(--accent);
-            padding-bottom: 5px;
-            margin-bottom: 12px;
-            color: var(--primary);
-            display: inline-block;
-            min-width: 120px;
-        }
-
-        .address-content {
-            font-size: 11px;
-            color: var(--text-main);
-        }
-
-        .address-content strong {
-            display: block;
-            margin-bottom: 4px;
-            font-size: 12px;
-            color: var(--primary);
-        }
-
-        /* Table Style */
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 30px;
-            overflow: hidden;
-            border-radius: 4px;
-        }
-
-        thead {
-            background-color: var(--primary);
-            color: white;
-        }
-
-        th {
-            padding: 12px 15px;
-            text-align: left;
-            font-size: 10px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-
-        td {
-            padding: 12px 15px;
-            border-bottom: 1px solid var(--border);
-        }
-
-        .alt-row {
-            background-color: var(--bg-light);
-        }
-
-        .col-sl { width: 40px; text-align: center; }
-        .col-qty { width: 60px; text-align: center; }
-        .col-price { width: 120px; text-align: right; }
-        .col-total { width: 140px; text-align: right; font-weight: bold; }
-
-        .total-section {
-            display: flex;
-            justify-content: flex-end;
-            margin-top: 20px;
-        }
-
-        .total-table {
-            width: 250px;
-            margin-bottom: 0;
-        }
-
-        .total-table td {
-            border: none;
-            padding: 5px 15px;
-        }
-
-        .grand-total-row {
-            background-color: var(--primary);
-            color: white;
-            font-size: 16px;
-            font-weight: 800;
-        }
-
-        .grand-total-row td {
-            padding: 15px !important;
-        }
-
-        /* Footer */
-        .footer {
-            margin-top: 50px;
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-end;
-        }
-
-        .terms {
-            width: 60%;
-        }
-
-        .terms h4 {
-            font-size: 10px;
-            margin-bottom: 5px;
-            color: var(--primary);
-            text-transform: uppercase;
-        }
-
-        .terms p {
-            font-size: 9px;
-            color: var(--text-muted);
-            margin: 0;
-            line-height: 1.4;
-        }
-
-        .signatures {
-            width: 35%;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
-
-        .sig-box {
-            width: 100%;
-            height: 60px;
-            border-bottom: 1px solid var(--primary);
-            margin-bottom: 10px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            font-style: italic;
-            color: var(--text-muted);
-        }
-
-        .sig-label {
-            font-weight: bold;
-            font-size: 10px;
-            text-transform: uppercase;
-            color: var(--primary);
-        }
+        .border-invoice { border: 1px solid #000; }
+        .border-b-invoice { border-bottom: 1px solid #000; }
+        .border-r-invoice { border-right: 1px solid #000; }
+        .border-l-invoice { border-left: 1px solid #000; }
+        .border-t-invoice { border-top: 1px solid #000; }
+        th, td { padding: 4px; }
     </style>
 </head>
-<body>
-    <div class="invoice-container">
-        <!-- Header -->
-        <div class="header">
-            <div class="logo-section">
-                <h1><%= store.name.toUpperCase() %></h1>
-                <p>Luxury Jewellery & Craftsmanship</p>
+<body class="bg-white">
+
+<div class="invoice-container">
+    <div class="border-invoice mb-2">
+        <div class="text-center border-b-invoice py-1">
+            <h1 class="text-lg font-bold">Tax Invoice</h1>
+        </div>
+
+        <!-- Header Row -->
+        <div class="flex justify-between px-2 py-1 border-b-invoice">
+            <div>Invoice Number : <span class="font-semibold"><%= invoice.invoiceNumber %></span></div>
+            <div>Date & Time : <span class="font-semibold"><%= new Date(invoice.createdAt || invoice.issueDate).toLocaleString('en-IN') %></span></div>
+        </div>
+
+        <!-- 3 Column Details Row -->
+        <div class="flex border-b-invoice">
+            <!-- Seller Details -->
+            <div class="w-1/3 border-r-invoice p-2">
+                <h2 class="font-bold text-xs uppercase"><%= store.name || 'CARBONSMITH PVT LTD' %></h2>
+                <p class="mt-1"><%= store.address || 'Ground Floor, Unit No G-03, Phoenix Mall of the Millennium, Wakad, Pune, Maharashtra, 411057' %></p>
+                <table class="mt-2 w-full">
+                    <tbody>
+                        <tr><td class="py-0.5 w-1/3">Sales Executive:</td><td class="py-0.5 font-semibold"><%= adminName || 'Admin' %></td></tr>
+                        <tr><td class="py-0.5 w-1/3">Store Contact No:</td><td class="py-0.5"><%= store.phone || '020-69121427' %></td></tr>
+                        <tr><td class="py-0.5">CIN:</td><td class="py-0.5">U36996MH2022PLC390282</td></tr>
+                        <tr><td class="py-0.5">PAN:</td><td class="py-0.5"><%= store.pan || 'AAICN4907E' %></td></tr>
+                        <tr><td class="py-0.5">GSTIN:</td><td class="py-0.5"><%= store.gstin || '27AAICN4907E1ZH' %></td></tr>
+                        <tr><td class="py-0.5">Place of Supply:</td><td class="py-0.5">Pune, Maharashtra</td></tr>
+                        <tr><td class="py-0.5">State Code:</td><td class="py-0.5">27</td></tr>
+                    </tbody>
+                </table>
             </div>
-            <div class="title-section">
-                <h2>Tax Invoice</h2>
+
+            <!-- Customer Details -->
+            <div class="w-1/3 border-r-invoice p-2">
+                <h2 class="font-bold text-xs uppercase mb-1">Customer Details</h2>
+                <table class="w-full">
+                    <tbody>
+                        <tr><td class="py-0.5 w-1/3">Name:</td><td class="py-0.5 font-semibold"><%= order.user ? order.user.name : (shippingAddress.name || 'Guest') %></td></tr>
+                        <tr>
+                            <td class="py-0.5 align-top">Address:</td>
+                            <td class="py-0.5"><%= shippingAddress.addressLine1 || 'Not Provided' %> <%= shippingAddress.city ? ', ' + shippingAddress.city : '' %></td>
+                        </tr>
+                        <tr><td class="py-0.5">Customer ID:</td><td class="py-0.5"><%= order.user ? order.user.id.slice(-6).toUpperCase() : 'N/A' %></td></tr>
+                        <tr><td class="py-0.5">Contact No:</td><td class="py-0.5"><%= order.user ? order.user.phone : (shippingAddress.phone || 'N/A') %></td></tr>
+                        <tr><td class="py-0.5">Email ID:</td><td class="py-0.5"><%= order.user ? order.user.email : 'N/A' %></td></tr>
+                        <tr><td class="py-0.5">PAN ID:</td><td class="py-0.5">Not Mentioned</td></tr>
+                        <tr><td class="py-0.5">GST NO:</td><td class="py-0.5">Not Mentioned</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Metal Rates -->
+            <div class="w-1/3 p-2">
+                <table class="w-full text-xs">
+                    <thead>
+                        <tr>
+                            <th class="text-left font-normal pb-1">Metal Type(Purity)</th>
+                            <th class="text-right font-normal pb-1">Rs/Gram</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Gold 24KT(999)</td><td class="text-right"><%= (typeof goldRates !== 'undefined' && goldRates && goldRates.rate24k) ? goldRates.rate24k.toFixed(2) : '---' %></td></tr>
+                        <tr><td>Gold 22KT(916)</td><td class="text-right"><%= (typeof goldRates !== 'undefined' && goldRates && goldRates.rate22k) ? goldRates.rate22k.toFixed(2) : '---' %></td></tr>
+                        <tr><td>Gold 18KT(750)</td><td class="text-right"><%= (typeof goldRates !== 'undefined' && goldRates && goldRates.rate18k) ? goldRates.rate18k.toFixed(2) : '---' %></td></tr>
+                        <tr><td>Gold 14KT(585)</td><td class="text-right"><%= (typeof goldRates !== 'undefined' && goldRates && goldRates.rate14k) ? goldRates.rate14k.toFixed(2) : '---' %></td></tr>
+                        <tr><td>Platinum (950)</td><td class="text-right">6661.37</td></tr>
+                        <tr><td>Silver</td><td class="text-right">261.14</td></tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
-        <!-- Meta Bar -->
-        <div class="meta-bar">
-            <div class="meta-item">
-                <label>Invoice #</label>
-                <span><%= invoice.invoiceNumber %></span>
-            </div>
-            <div class="meta-item">
-                <label>Date</label>
-                <span><%= new Date(invoice.issueDate).toLocaleDateString('en-IN') %></span>
-            </div>
-            <div class="meta-item">
-                <label>Order #</label>
-                <span><%= order.orderNumber %></span>
-            </div>
-            <div class="meta-item" style="text-align: right;">
-                <label>Payment</label>
-                <span><%= order.paymentStatus.toUpperCase() %></span>
-            </div>
-        </div>
+        <!-- Products Table -->
+        <div class="border-b-invoice">
+            <table class="w-full text-center text-[9px]">
+                <thead class="border-b-invoice">
+                    <tr class="bg-gray-50">
+                        <th class="border-r-invoice py-2 w-32">Description &<br />Serial Number</th>
+                        <th class="border-r-invoice py-2">HSN/Purity</th>
+                        <th class="border-r-invoice py-2">Qty (N)</th>
+                        <th class="border-r-invoice py-2">Gross Wt (g)</th>
+                        <th class="border-r-invoice py-2">Metal Wt (g)</th>
+                        <th class="border-r-invoice py-2">Stone Wt (carat)</th>
+                        <th class="border-r-invoice py-2">Metal Value (<br />Rs.)</th>
+                        <th class="border-r-invoice py-2">Stone Value (<br />Rs.)</th>
+                        <th class="border-r-invoice py-2">Making<br />Charges (Rs.)</th>
+                        <th class="border-r-invoice py-2">Gross Amount (<br />Rs.)</th>
+                        <th class="border-r-invoice py-2">Product<br />Discount (Rs.)</th>
+                        <th class="py-2">Product Value (<br />Rs.)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% 
+                    let totalGrossWt = 0;
+                    let totalMetalWt = 0;
+                    let totalStoneWt = 0;
+                    let totalMetalValue = 0;
+                    let totalStoneValue = 0;
+                    let totalMaking = 0;
+                    let totalGrossAmount = 0;
+                    let totalDiscount = 0;
+                    let taxableValue = 0;
+                    
+                    if (order && order.items) {
+                        order.items.forEach(function(item) {
+                            const product = item.product || {};
+                            const metalDetails = product.metalDetails || {};
+                            const stoneDetailsArray = product.stoneDetails || [];
+                            
+                            const netWeight = Number(metalDetails.netWeight || 0);
+                            const grossWeight = Number(metalDetails.grossWeight || 0);
+                            const stoneWeight = Number(stoneDetailsArray[0]?.netWeight || 0);
 
-        <!-- Addresses -->
-        <div class="address-section">
-            <div class="address-box">
-                <h3>Sold By</h3>
-                <div class="address-content">
-                    <strong><%= store.name %></strong>
-                    <%= store.address %><br>
-                    <%= store.city %>, <%= store.state %> - <%= store.pincode %><br>
-                    GSTIN: <%= store.gstin || 'N/A' %><br>
-                    Tel: <%= store.phone %>
-                </div>
-            </div>
-            <div class="address-box">
-                <h3>Bill To</h3>
-                <div class="address-content">
-                    <strong><%= order.user.name %></strong>
-                    <%= shippingAddress.addressLine1 %><br>
-                    <% if (shippingAddress.addressLine2) { %>
-                        <%= shippingAddress.addressLine2 %><br>
-                    <% } %>
-                    <%= shippingAddress.city %>, <%= shippingAddress.state %> - <%= shippingAddress.pincode %><br>
-                    Tel: <%= shippingAddress.phone || order.user.phone %>
-                </div>
-            </div>
-            <div class="address-box">
-                <h3>Ship To</h3>
-                <div class="address-content">
-                    <strong><%= shippingAddress.name %></strong>
-                    <%= shippingAddress.addressLine1 %><br>
-                    <% if (shippingAddress.addressLine2) { %>
-                        <%= shippingAddress.addressLine2 %><br>
-                    <% } %>
-                    <%= shippingAddress.city %>, <%= shippingAddress.state %> - <%= shippingAddress.pincode %><br>
-                    Tel: <%= shippingAddress.phone %>
-                </div>
-            </div>
-        </div>
+                            const makingCharge = Number(product.makingCharges || 0);
+                            const stoneCharge = Number(product.stoneCharges || 0);
+                            
+                            const itemTotal = Number(item.totalPrice || product.price || 0) * item.quantity;
+                            
+                            // fallback for metal val calculation
+                            const metalVal = itemTotal > 0 ? Math.max(0, itemTotal - makingCharge - stoneCharge) : 0;
+                            
+                            const grossAmt = metalVal + makingCharge + stoneCharge;
+                            const itemDiscount = Number(product.discount || 0) * item.quantity;
+                            const productVal = grossAmt - itemDiscount;
 
-        <!-- Items Table -->
-        <table>
-            <thead>
-                <tr>
-                    <th class="col-sl">SL.</th>
-                    <th>Product Description</th>
-                    <th class="col-qty">Qty</th>
-                    <th class="col-price">Unit Price</th>
-                    <th class="col-total">Total</th>
-                </tr>
-            </thead>
-            <tbody>
-                <% order.items.forEach((item, index) => { %>
-                    <tr class="<%= index % 2 === 1 ? 'alt-row' : '' %>">
-                        <td class="col-sl"><%= index + 1 %></td>
-                        <td>
-                            <strong><%= item.product.name %></strong><br>
-                            <span style="font-size: 9px; color: var(--text-muted);">
-                                SKU: <%= item.product.sku %> | 
-                                HSN: <%= item.product.hsnCode || '7113' %> |
-                                Weight: <%= item.product.grossWeight %>g |
-                                Purity: <%= item.product.purity || 'N/A' %>
-                            </span>
+                            totalGrossWt += grossWeight;
+                            totalMetalWt += netWeight;
+                            totalStoneWt += stoneWeight;
+                            totalMetalValue += metalVal;
+                            totalStoneValue += stoneCharge;
+                            totalMaking += makingCharge;
+                            totalGrossAmount += grossAmt;
+                            totalDiscount += itemDiscount;
+                            taxableValue += productVal;
+                    %>
+                    <tr class="border-b-invoice">
+                        <td class="border-r-invoice text-left">
+                            <%= product.name || 'Custom Item' %><br />
+                            <%= product.sku || '' %>
                         </td>
-                        <td class="col-qty"><%= item.quantity %></td>
-                        <td class="col-price">₹<%= Number(item.unitPrice || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
-                        <td class="col-total">₹<%= (Number(item.unitPrice || 0) * item.quantity).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
+                        <td class="border-r-invoice"><%= product.hsnCode || '71131912' %> / <%= metalDetails.purity || '22KT' %></td>
+                        <td class="border-r-invoice"><%= item.quantity || 1 %></td>
+                        <td class="border-r-invoice"><%= grossWeight.toFixed(3) %></td>
+                        <td class="border-r-invoice"><%= netWeight.toFixed(3) %></td>
+                        <td class="border-r-invoice"><%= stoneWeight.toFixed(3) %></td>
+                        <td class="border-r-invoice"><%= metalVal.toFixed(2) %></td>
+                        <td class="border-r-invoice"><%= stoneCharge.toFixed(2) %></td>
+                        <td class="border-r-invoice"><%= makingCharge.toFixed(2) %></td>
+                        <td class="border-r-invoice"><%= grossAmt.toFixed(2) %></td>
+                        <td class="border-r-invoice"><%= itemDiscount.toFixed(2) %></td>
+                        <td class=""><%= productVal.toFixed(2) %></td>
                     </tr>
-                <% }); %>
-            </tbody>
-        </table>
+                    <% 
+                        }); 
+                    } 
+                    %>
 
-        <!-- Totals -->
-        <div class="total-section">
-            <div style="flex: 1; padding-top: 10px;">
-                <p style="margin: 0; font-size: 10px; color: var(--text-muted); text-transform: uppercase;">Amount in Words:</p>
-                <p style="margin: 0; font-size: 11px; font-weight: bold; color: var(--primary);"><%= amountInWords %></p>
-            </div>
-            <table class="total-table">
-                <tr>
-                    <td>Subtotal:</td>
-                    <td style="text-align: right;">₹<%= Number(order.subTotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
-                </tr>
-                <% if (order.discount > 0) { %>
-                    <tr>
-                        <td>Discount:</td>
-                        <td style="text-align: right;">-₹<%= Number(order.discountTotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
+                    <!-- Totals Row -->
+                    <tr class="font-bold bg-gray-50">
+                        <td class="border-r-invoice text-right pr-4" colspan="2">Total</td>
+                        <td class="border-r-invoice"><%= order.items ? order.items.length : 0 %></td>
+                        <td class="border-r-invoice"><%= totalGrossWt.toFixed(3) %></td>
+                        <td class="border-r-invoice"></td>
+                        <td class="border-r-invoice"></td>
+                        <td class="border-r-invoice"><%= totalMetalValue.toFixed(2) %></td>
+                        <td class="border-r-invoice"><%= totalStoneValue.toFixed(2) %></td>
+                        <td class="border-r-invoice"><%= totalMaking.toFixed(2) %></td>
+                        <td class="border-r-invoice"><%= totalGrossAmount.toFixed(2) %></td>
+                        <td class="border-r-invoice"><%= totalDiscount.toFixed(2) %></td>
+                        <td class=""><%= taxableValue.toFixed(2) %></td>
                     </tr>
-                <% } %>
-                <tr>
-                    <td>GST (3%):</td>
-                    <td style="text-align: right;">₹<%= Number(order.taxTotal || (Number(order.subTotal || 0) * 0.03)).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
-                </tr>
-                <tr>
-                    <td>Shipping:</td>
-                    <td style="text-align: right;">₹<%= Number(order.shippingCost || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
-                </tr>
-                <tr class="grand-total-row">
-                    <td>GRAND TOTAL:</td>
-                    <td style="text-align: right;">₹<%= Number(order.grandTotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) %></td>
-                </tr>
+                </tbody>
             </table>
         </div>
 
-        <!-- Footer -->
-        <div class="footer">
-            <div class="terms">
-                <h4>Terms and Conditions:</h4>
-                <p>1. All jewellery items are BIS Hallmarked where applicable.</p>
-                <p>2. Goods once sold can only be returned or exchanged as per company policy.</p>
-                <p>3. Return value is calculated based on current market gold/diamond rates minus wastage/making charges.</p>
-                <p>4. This is a computer-generated tax invoice and requires no physical signature under IT Act 2000.</p>
+        <% 
+            const finalTaxable = Number(order.subTotal || taxableValue);
+            const cgst = Number(order.taxTotal || 0) / 2;
+            const sgst = Number(order.taxTotal || 0) / 2;
+            const invoiceValue = finalTaxable + cgst + sgst;
+            const roundOff = Math.round(invoiceValue) - invoiceValue;
+            const netPayable = Math.round(invoiceValue);
+        %>
+
+        <!-- Bottom Split Section -->
+        <div class="flex border-b-invoice">
+            <!-- Left: Payments & Discounts -->
+            <div class="w-1/2 border-r-invoice">
+                <table class="w-full text-xs">
+                    <thead class="border-b-invoice bg-gray-50">
+                        <tr>
+                            <th class="text-left font-normal border-r-invoice">Payment</th>
+                            <th class="text-left font-normal border-r-invoice">Reference No</th>
+                            <th class="text-right font-normal">Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="border-r-invoice"><%= (order.paymentMethod || 'Online').toUpperCase() %></td>
+                            <td class="border-r-invoice"><%= order.razorpayPaymentId || order.razorpayOrderId || '---' %></td>
+                            <td class="text-right"><%= netPayable.toFixed(2) %></td>
+                        </tr>
+                    </tbody>
+                </table>
+                <table class="w-full text-xs mt-4 border-t-invoice">
+                    <thead class="border-b-invoice bg-gray-50">
+                        <tr>
+                            <th class="text-left font-normal border-r-invoice">Discount Breakup</th>
+                            <th class="text-right font-normal">Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="border-r-invoice">Store Offer</td>
+                            <td class="text-right"><%= totalDiscount.toFixed(2) %></td>
+                        </tr>
+                        <tr class="border-t-invoice font-bold">
+                            <td class="border-r-invoice text-center">Total</td>
+                            <td class="text-right"><%= totalDiscount.toFixed(2) %></td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
-            <div class="signatures">
-                <div class="sig-box">
-                    Digitally Signed
-                </div>
-                <div class="sig-label">Authorized Signatory</div>
+
+            <!-- Right: Tax Summary -->
+            <div class="w-1/2">
+                <table class="w-full text-xs">
+                    <tbody>
+                        <tr><td class="py-1 px-2 border-b-invoice border-r-invoice">Taxable Value:</td><td class="py-1 px-2 border-b-invoice text-right"><%= finalTaxable.toFixed(2) %></td></tr>
+                        <tr><td class="py-1 px-2 border-b-invoice border-r-invoice">CGST 1.5%:</td><td class="py-1 px-2 border-b-invoice text-right"><%= cgst.toFixed(2) %></td></tr>
+                        <tr><td class="py-1 px-2 border-b-invoice border-r-invoice">SGST 1.5%:</td><td class="py-1 px-2 border-b-invoice text-right"><%= sgst.toFixed(2) %></td></tr>
+                        <tr><td class="py-1 px-2 border-b-invoice border-r-invoice">Total Invoice Value:</td><td class="py-1 px-2 border-b-invoice text-right"><%= invoiceValue.toFixed(2) %></td></tr>
+                        <tr><td class="py-1 px-2 border-b-invoice border-r-invoice">Round off:</td><td class="py-1 px-2 border-b-invoice text-right"><%= roundOff.toFixed(2) %></td></tr>
+                        <tr class="font-bold bg-gray-50"><td class="py-2 px-2 border-b-invoice border-r-invoice">Net Payable:</td><td class="py-2 px-2 border-b-invoice text-right text-sm"><%= netPayable.toFixed(2) %></td></tr>
+                        <tr>
+                            <td colspan="2" class="py-2 px-2 text-right italic">
+                                <span class="float-left not-italic">Amount In Words</span>
+                                <%= amountInWords %> 
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
+
+        <!-- Declarations -->
+        <div class="p-2 text-[8px] leading-tight border-b-invoice">
+            <div class="flex justify-between font-bold mb-1">
+                <span>Declaration</span>
+                <span>*E&OE*</span>
+            </div>
+            <ol class="list-decimal pl-4 space-y-0.5">
+                <li>Total Invoice Value includes Metal Cost, Stone Cost (Precious, Non-Precious), Wastage charges, Making Charges including Hall Marking(HM), GST, other taxes (as applicable) and applicable discounts.</li>
+                <li>Product Value is inclusive of Hallmarking Charges(HM) of Rs.45/- per piece for Gold & Rs.35/- per piece for Silver.</li>
+                <li>Gross weight includes the total weight of the product including metal, stones etc.</li>
+                <li>Net weight of metal(s) include the total weight of all metal(s) which are part of the product.</li>
+                <li>Net weight of stone(s) include the total weight of all Precious, Non-Precious stone(s) which are part of the product.</li>
+                <li>The Certificate of Authenticity has been issued for the invoiced products and handed over to the customer.</li>
+                <li>The consumer can get the purity of the Hallmarked jewellery/articles verified from any of the BIS recognised A & H Centre.</li>
+                <li>The list of A & H recognised centre along with address and contact details is available on the website www.bis.gov.in.</li>
+            </ol>
+            <div class="mt-2 font-bold p-1 border border-black bg-gray-50">
+                I hereby confirm the weight, purity and Invoice value stated above and read all terms and conditions overleaf. I further acknowledge the receipt of the products in good condition along with necessary certificates.
+            </div>
+        </div>
+
+        <!-- Signatures -->
+        <div class="flex justify-end p-4 pt-12">
+            <div class="text-xs">
+                <div class="flex items-center gap-4 mb-8">
+                    <span class="w-28 text-right">Customer Name :</span>
+                    <span class="font-bold border-b border-black w-40 text-center"><%= order.user ? order.user.name : (shippingAddress.name || 'Guest') %></span>
+                </div>
+                <div class="text-right pr-20">Customer Signature</div>
+            </div>
+        </div>
+
     </div>
+</div>
+
 </body>
 </html>

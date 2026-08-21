@@ -297,9 +297,9 @@ const checkPhoneExists = async (phone) => {
 const verifyPOSOverride = async (phoneOrEmail, password) => {
   const result = await login(phoneOrEmail, password);
   const user = result.user;
-  
+
   const { ROLE_PERMISSIONS, PERMISSIONS } = require('../../utils/constants');
-  
+
   const allowedPermissions = ROLE_PERMISSIONS[user.role] || [];
   if (!allowedPermissions.includes(PERMISSIONS.POS_OVERRIDE_BILL)) {
     throw ApiError.forbidden('You do not have permission to override POS bills');

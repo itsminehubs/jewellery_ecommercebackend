@@ -12,7 +12,6 @@ const calculateProductPrice = async (productData, metalDetails, stoneDetails) =>
     let finalPrice = productData.finalPrice ? Number(productData.finalPrice) : price;
 
     const grossWeight = metalDetails?.grossWeight ? Number(metalDetails.grossWeight) : 0;
-    
     let totalStoneWeight = 0;
     let dynamicStoneValue = 0;
 
@@ -20,7 +19,6 @@ const calculateProductPrice = async (productData, metalDetails, stoneDetails) =>
     if (stoneDetails && stoneDetails.length > 0) {
         for (let stone of stoneDetails) {
             let caratVal = stone.carat ? parseFloat(stone.carat) : 0;
-            
             if (caratVal > 0) {
                 stone.netWeight = roundTo3(caratVal * 0.200);
             }
@@ -36,7 +34,6 @@ const calculateProductPrice = async (productData, metalDetails, stoneDetails) =>
                     color: stone.color || 'All',
                     clarity: stone.clarity || 'All'
                 };
-                
                 let diamondRateDoc = await prisma.diamondRate.findFirst({
                     where: query,
                     orderBy: { effectiveDate: 'desc' }
@@ -53,7 +50,6 @@ const calculateProductPrice = async (productData, metalDetails, stoneDetails) =>
                     rate = Number(diamondRateDoc.ratePerCarat);
                     stone.rate = rate;
                 }
-                
                 const calculationCarat = caratVal > 0 ? caratVal : (stoneWeightGrams / 0.200);
                 dynamicStoneValue += calculationCarat * rate;
             } else {
@@ -106,7 +102,7 @@ const calculateProductPrice = async (productData, metalDetails, stoneDetails) =>
     if (productData.makingChargeType === 'per_gram') {
         makingValue = makingCharges * grossWeight;
     } else {
-        makingValue = makingCharges; 
+        makingValue = makingCharges;
     }
 
     const discount = productData.discount ? Number(productData.discount) : 0;
@@ -152,7 +148,6 @@ const recalculatePricesForMetal = async (metal, purity) => {
 
     for (const product of products) {
         const { price, finalPrice, metalDetails, stoneDetails } = await calculateProductPrice(product, product.metalDetails, product.stoneDetails);
-        
         await prisma.product.update({
             where: { id: product.id },
             data: {
@@ -166,7 +161,6 @@ const recalculatePricesForMetal = async (metal, purity) => {
             }
         });
     }
-    
     console.log(`Recalculated prices for ${products.length} products with ${metal} ${purity}`);
 };
 
@@ -186,7 +180,6 @@ const recalculatePricesForDiamond = async (diamondRate) => {
 
     for (const product of products) {
         const { price, finalPrice, metalDetails, stoneDetails } = await calculateProductPrice(product, product.metalDetails, product.stoneDetails);
-        
         await prisma.product.update({
             where: { id: product.id },
             data: {
@@ -210,7 +203,6 @@ const recalculatePricesForDiamond = async (diamondRate) => {
             }
         });
     }
-    
     console.log(`Recalculated prices for ${products.length} diamond products`);
 };
 
