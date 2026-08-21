@@ -113,15 +113,13 @@ const calculateProductPrice = async (productData, metalDetails, stoneDetails) =>
     let discountedMakingValue = makingValue - (makingValue * (discount / 100));
     discountedMakingValue = roundTo2(discountedMakingValue);
 
-    // 6. GST Split (3% Metal, 5% Making (on discounted), 0.25% Stones)
-    const gst = roundTo2(
-        (metalValue * 0.03) +
-        (discountedMakingValue * 0.05) +
-        (stoneValue * 0.0025)
-    );
-
-    // 7. Subtotal and Totals
+    // 6. Subtotal
     const subtotal = roundTo2(metalValue + discountedMakingValue + stoneValue);
+
+    // 7. GST (Flat 3% on Subtotal)
+    const gst = roundTo2(subtotal * 0.03);
+
+    // 8. Totals
     const totalCalculatedPrice = roundTo2(subtotal + gst);
 
     if (subtotal > 0) {
