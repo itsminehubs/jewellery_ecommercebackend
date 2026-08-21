@@ -1,3 +1,5 @@
+const { sendEmail } = require('../../jobs/email.job');
+const { generateOrderConfirmationEmail } = require('../../utils/emailTemplates');
 const prisma = require('../../config/prisma');
 const loyaltyService = require('../user/loyalty.service');
 const couponService = require('../coupon/coupon.service');
@@ -118,6 +120,29 @@ const createOrder = async (userId, orderData) => {
         await tx.cartItem.deleteMany({ where: { userId: userId } });
 
         logger.info(`Order created: ${order.id}`);
+
+        if (order.paymentMethod === 'COD' || order.paymentMethod === 'cod') {
+            try {
+                const user = await tx.user.findUnique({ where: { id: userId } });
+                const fullOrderForEmail = await tx.order.findUnique({
+                    where: { id: order.id },
+                    include: { items: { include: { product: true } } }
+                });
+                
+                if (user && user.email) {
+                    const emailContent = generateOrderConfirmationEmail(fullOrderForEmail, user);
+                    sendEmail({
+                        to: user.email,
+                        emailType: 'customer',
+                        subject: emailContent.subject,
+                        text: emailContent.text,
+                        html: emailContent.html
+                    }).catch(e => logger.error(`Order Confirmation Email error: ${e.message}`));
+                }
+            } catch (err) {
+                logger.error(`Failed to send order email: ${err.message}`);
+            }
+        }
 
         return order;
     });

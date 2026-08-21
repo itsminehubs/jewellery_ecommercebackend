@@ -32,96 +32,109 @@ const generateEmployeeWelcomeEmail = (employee, password, loginUrl) => {
 };
 
 const generateOrderConfirmationEmail = (order, user) => {
-  // Use order.id as fallback if orderId isn't explicitly set
-  const orderId = order.orderId || order.id;
+  const orderId = order.orderNumber || order.id;
   const customerName = user?.name || order.shippingAddress?.name || 'Valued Customer';
-  const subject = `Order Confirmation - #${orderId}`;
+  const subject = `Thank You for Your Order! - #${orderId}`;
   
-  // Format currency helper
   const formatCurrency = (amount) => `₹${Number(amount || 0).toLocaleString('en-IN')}`;
 
-  // Generate table rows for items
-  const itemsHtml = (order.items || []).map(item => `
-    <tr>
-      <td style="padding: 10px; border-bottom: 1px solid #eee;">
-        <span style="font-weight: bold; color: #333;">${item.name || 'Jewelry Item'}</span><br/>
-        <span style="font-size: 12px; color: #888;">Qty: ${item.quantity}</span>
-      </td>
-      <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right; color: #333;">
-        ${formatCurrency(item.price)}
-      </td>
-    </tr>
-  `).join('');
+  const address = order.shippingAddress || {};
+  const orderDate = new Date(order.createdAt || new Date()).toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' });
+  const estimatedDelivery = new Date(order.createdAt || new Date());
+  estimatedDelivery.setDate(estimatedDelivery.getDate() + 7);
+  const deliveryDateStr = estimatedDelivery.toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' });
 
-  const shippingHtml = order.shippingAddress ? `
-    <div style="margin-top: 20px; padding: 15px; background-color: #f9f9f9; border-radius: 5px;">
-      <h3 style="margin-top: 0; color: #333; font-size: 16px;">Shipping Address</h3>
-      <p style="margin: 0; color: #555; font-size: 14px; line-height: 1.5;">
-        <strong>${order.shippingAddress.name}</strong><br/>
-        ${order.shippingAddress.addressLine1} ${order.shippingAddress.addressLine2 ? ', ' + order.shippingAddress.addressLine2 : ''}<br/>
-        ${order.shippingAddress.city}, ${order.shippingAddress.state} ${order.shippingAddress.pincode}<br/>
-        Ph: ${order.shippingAddress.phone}
-      </p>
-    </div>
-  ` : '';
+  let itemsText = '';
+  let itemsHtml = '';
+  (order.items || []).forEach(item => {
+      const pName = item.name || item.product?.name || 'Jewelry Item';
+      const qty = item.quantity || 1;
+      const price = item.price || item.product?.price || 0;
+      const total = price * qty;
+      
+      itemsText += `${pName}\nQuantity: ${qty}\nPrice: ${formatCurrency(price)}\nTotal: ${formatCurrency(total)}\n\n`;
+      
+      itemsHtml += `
+        <div style="margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 10px;">
+          <h4 style="margin: 0 0 5px 0; color: #333;">${pName}</h4>
+          <p style="margin: 0; color: #555; font-size: 14px;">Quantity: ${qty} <span style="float:right;">Price: ${formatCurrency(price)}</span></p>
+          <p style="margin: 5px 0 0 0; color: #000; font-weight: bold; text-align: right;">Total: ${formatCurrency(total)}</p>
+        </div>
+      `;
+  });
 
-  const text = `Thank you for your order, ${customerName}!\n\nYour order #${orderId} has been confirmed. Total amount: ${formatCurrency(order.total)}.\n\nThank you for shopping with CarbonSmith!`;
-  
+  const text = `Thank You for Your Order! \n\nDear ${customerName},\n\nThank you for choosing Carbon Smith. We’re delighted to confirm that your order has been received successfully.\n\nOrder Details\nOrder ID: ${orderId}\nOrder Date: ${orderDate}\nPayment Status: ${order.paymentStatus || 'PENDING'}\nPayment Method: ${order.paymentMethod || 'COD'}\nOrder Status: ${order.orderStatus || 'Processing'}\n\nYour Products\n${itemsText}\nOrder Summary\nSubtotal: ${formatCurrency(order.subTotal || 0)}\nDiscount: -${formatCurrency(order.discount || 0)}\nShipping: ${formatCurrency(order.shippingCost || 0)}\nTax: ${formatCurrency(order.taxTotal || 0)}\nGrand Total: ${formatCurrency(order.grandTotal || order.subTotal || 0)}\n\nDelivery Address\n${customerName}\n${address.addressLine1 || ''}\n${address.addressLine2 ? address.addressLine2 + '\n' : ''}${address.city || ''}, ${address.state || ''} - ${address.pincode || ''}\n${address.country || 'India'}\nPhone: ${address.phone || user?.phone || ''}\n\nDelivery Information\nEstimated Delivery: ${deliveryDateStr}\n\nWe’ll keep you updated throughout the delivery process. Once your order is shipped, you’ll receive another notification with your tracking details.\n\nThank you for trusting Carbon Smith. Every piece is prepared with care, and we’re excited for you to receive your order. \n\nIf you have any questions regarding your order, our support team is happy to help.\n\nNeed Help?\nCall Us: +91 72-18528566\nEmail Us: Support@thecarbonsmith.com\nWebsite: www.thecarbonsmith.com\n\nThank you for choosing Carbon Smith.\n\nWarm regards,\nTeam Carbon Smith\nCarbon Smith Private Limited\nCrafted with Elegance. Made to Last. `;
+
   const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
-      <div style="text-align: center; border-bottom: 1px solid #eee; padding-bottom: 15px; margin-bottom: 20px;">
-        <h1 style="color: #333; margin: 0;">CarbonSmith</h1>
-        <p style="color: #777; margin: 5px 0 0 0; font-size: 14px;">Order Confirmation</p>
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333; line-height: 1.6;">
+      <div style="text-align: center; margin-bottom: 30px;">
+        <h2 style="color: #000;">Thank You for Your Order! </h2>
       </div>
       
-      <p style="font-size: 16px; color: #555;">Hi <strong>${customerName}</strong>,</p>
-      <p style="font-size: 16px; color: #555; line-height: 1.5;">Thank you for your order! We've received it and are getting it ready for you. Below are your order details:</p>
+      <p>Dear <strong>${customerName}</strong>,</p>
+      <p>Thank you for choosing Carbon Smith. We’re delighted to confirm that your order has been received successfully.</p>
       
-      <div style="margin: 20px 0;">
-        <p style="margin: 0 0 10px 0; font-weight: bold; color: #333;">Order ID: <span style="font-weight: normal; color: #555;">#${orderId}</span></p>
-        
-        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
-          <thead>
-            <tr>
-              <th style="text-align: left; padding: 10px; border-bottom: 2px solid #eee; color: #333;">Item</th>
-              <th style="text-align: right; padding: 10px; border-bottom: 2px solid #eee; color: #333;">Price</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${itemsHtml}
-          </tbody>
-          <tfoot>
-            <tr>
-              <td style="padding: 10px; text-align: right; color: #555; font-size: 14px;">Subtotal:</td>
-              <td style="padding: 10px; text-align: right; color: #333;">${formatCurrency(order.subtotal)}</td>
-            </tr>
-            <tr>
-              <td style="padding: 10px; text-align: right; color: #555; font-size: 14px;">Tax:</td>
-              <td style="padding: 10px; text-align: right; color: #333;">${formatCurrency(order.tax)}</td>
-            </tr>
-            ${order.shippingCost > 0 ? `
-            <tr>
-              <td style="padding: 10px; text-align: right; color: #555; font-size: 14px;">Shipping:</td>
-              <td style="padding: 10px; text-align: right; color: #333;">${formatCurrency(order.shippingCost)}</td>
-            </tr>` : ''}
-            ${order.discount > 0 ? `
-            <tr>
-              <td style="padding: 10px; text-align: right; color: #555; font-size: 14px;">Discount:</td>
-              <td style="padding: 10px; text-align: right; color: green;">-${formatCurrency(order.discount)}</td>
-            </tr>` : ''}
-            <tr>
-              <td style="padding: 10px; text-align: right; font-weight: bold; font-size: 16px; color: #333; border-top: 2px solid #eee;">Total:</td>
-              <td style="padding: 10px; text-align: right; font-weight: bold; font-size: 16px; color: #333; border-top: 2px solid #eee;">${formatCurrency(order.total)}</td>
-            </tr>
-          </tfoot>
+      <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 25px 0;">
+        <h3 style="margin-top: 0; color: #000; border-bottom: 2px solid #ddd; padding-bottom: 5px;">Order Details</h3>
+        <table style="width: 100%; font-size: 14px;">
+          <tr><td style="padding: 4px 0; color: #555;">Order ID:</td><td style="text-align: right; font-weight: bold;">${orderId}</td></tr>
+          <tr><td style="padding: 4px 0; color: #555;">Order Date:</td><td style="text-align: right; font-weight: bold;">${orderDate}</td></tr>
+          <tr><td style="padding: 4px 0; color: #555;">Payment Status:</td><td style="text-align: right; font-weight: bold;">${order.paymentStatus || 'PENDING'}</td></tr>
+          <tr><td style="padding: 4px 0; color: #555;">Payment Method:</td><td style="text-align: right; font-weight: bold;">${order.paymentMethod || 'COD'}</td></tr>
+          <tr><td style="padding: 4px 0; color: #555;">Order Status:</td><td style="text-align: right; font-weight: bold; color: #48C9B0;">${order.orderStatus || 'Processing'}</td></tr>
         </table>
-        
-        ${shippingHtml}
       </div>
-      
-      <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;" />
-      <p style="font-size: 14px; color: #888; text-align: center;">If you have any questions about your order, please reply to this email or contact us at support@thecarbonsmith.com</p>
-      <p style="font-size: 14px; color: #888; text-align: center; margin-top: 5px;">Best regards,<br/>The CarbonSmith Team</p>
+
+      <h3 style="color: #000; border-bottom: 2px solid #eee; padding-bottom: 5px;">Your Products</h3>
+      <div style="margin-bottom: 25px;">
+        ${itemsHtml}
+      </div>
+
+      <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 25px 0;">
+        <h3 style="margin-top: 0; color: #000; border-bottom: 2px solid #ddd; padding-bottom: 5px;">Order Summary</h3>
+        <table style="width: 100%; font-size: 14px;">
+          <tr><td style="padding: 4px 0; color: #555;">Subtotal:</td><td style="text-align: right;">${formatCurrency(order.subTotal || 0)}</td></tr>
+          <tr><td style="padding: 4px 0; color: #555;">Discount:</td><td style="text-align: right; color: #e74c3c;">-${formatCurrency(order.discount || 0)}</td></tr>
+          <tr><td style="padding: 4px 0; color: #555;">Shipping:</td><td style="text-align: right;">${formatCurrency(order.shippingCost || 0)}</td></tr>
+          <tr><td style="padding: 4px 0; color: #555;">Tax:</td><td style="text-align: right;">${formatCurrency(order.taxTotal || 0)}</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold; font-size: 16px; border-top: 1px solid #ddd;">Grand Total:</td><td style="text-align: right; font-weight: bold; font-size: 16px; border-top: 1px solid #ddd;">${formatCurrency(order.grandTotal || order.subTotal || 0)}</td></tr>
+        </table>
+      </div>
+
+      <div style="margin: 25px 0;">
+        <h3 style="color: #000; border-bottom: 2px solid #eee; padding-bottom: 5px;">Delivery Address</h3>
+        <p style="margin: 5px 0; color: #555;">
+          <strong>${customerName}</strong><br/>
+          ${address.addressLine1 || ''}<br/>
+          ${address.addressLine2 ? address.addressLine2 + '<br/>' : ''}
+          ${address.city || ''}, ${address.state || ''} - ${address.pincode || ''}<br/>
+          ${address.country || 'India'}<br/>
+          <strong>Phone:</strong> ${address.phone || user?.phone || ''}
+        </p>
+      </div>
+
+      <div style="background-color: #e8f8f5; padding: 15px; border-radius: 5px; margin: 25px 0;">
+        <h3 style="margin-top: 0; color: #000;">Delivery Information</h3>
+        <p style="margin: 5px 0; color: #2c3e50; font-weight: bold;">Estimated Delivery: ${deliveryDateStr}</p>
+        <p style="margin: 10px 0 0 0; font-size: 14px; color: #555;">We’ll keep you updated throughout the delivery process. Once your order is shipped, you’ll receive another notification with your tracking details.</p>
+      </div>
+
+      <p style="margin: 25px 0;">Thank you for trusting Carbon Smith. Every piece is prepared with care, and we’re excited for you to receive your order. </p>
+      <p>If you have any questions regarding your order, our support team is happy to help.</p>
+
+      <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 25px 0;">
+        <h3 style="margin-top: 0; color: #000; border-bottom: 2px solid #ddd; padding-bottom: 5px;">Need Help?</h3>
+        <p style="margin: 5px 0; color: #555;"><strong>Call Us:</strong> +91 72-18528566</p>
+        <p style="margin: 5px 0; color: #555;"><strong>Email Us:</strong> <a href="mailto:Support@thecarbonsmith.com" style="color: #48C9B0;">Support@thecarbonsmith.com</a></p>
+        <p style="margin: 5px 0; color: #555;"><strong>Website:</strong> <a href="http://www.thecarbonsmith.com/" style="color: #48C9B0;">www.thecarbonsmith.com</a></p>
+      </div>
+
+      <div style="margin-top: 40px; text-align: center; border-top: 1px solid #eee; padding-top: 20px;">
+        <p style="margin: 0 0 10px 0; font-weight: bold; color: #000;">Thank you for choosing Carbon Smith.</p>
+        <p style="margin: 0; color: #555;">Warm regards,</p>
+        <p style="margin: 5px 0; font-weight: bold; color: #000;">Team Carbon Smith</p>
+        <p style="margin: 5px 0; font-size: 14px; color: #888;">Carbon Smith Private Limited<br/>Crafted with Elegance. Made to Last. </p>
+      </div>
     </div>
   `;
 

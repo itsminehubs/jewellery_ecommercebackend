@@ -1,3 +1,5 @@
+const { sendEmail } = require('../../jobs/email.job');
+const { generateOrderConfirmationEmail } = require('../../utils/emailTemplates');
 const { createRazorpayOrder, verifyWebhookSignature, fetchPayment, refundPayment } = require('../../config/razorpay');
 const prisma = require('../../config/prisma');
 const ApiError = require('../../utils/ApiError');
@@ -61,6 +63,27 @@ const verifyPayment = async (paymentData) => {
     // AWARD POINTS ONLY AFTER SUCCESSFUL PAYMENT
     if (loyaltyService.awardPointsPrisma) {
         await loyaltyService.awardPointsPrisma(order.userId, Number(order.grandTotal));
+    }
+
+    try {
+        const fullOrderForEmail = await prisma.order.findUnique({
+            where: { id: order.id },
+            include: { items: { include: { product: true } } }
+        });
+        const user = await prisma.user.findUnique({ where: { id: order.userId } });
+
+        if (user && user.email) {
+            const emailContent = generateOrderConfirmationEmail(fullOrderForEmail, user);
+            sendEmail({
+                to: user.email,
+                emailType: 'customer',
+                subject: emailContent.subject,
+                text: emailContent.text,
+                html: emailContent.html
+            }).catch(e => logger.error(`Order Confirmation Email error: ${e.message}`));
+        }
+    } catch (err) {
+        logger.error(`Failed to send order confirmation email: ${err.message}`);
     }
 
     return updatedOrder;

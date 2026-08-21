@@ -64,6 +64,9 @@ const generateInvoice = async (orderId, adminId) => {
 };
 
 const downloadInvoice = async (invoiceId) => {
+    // We need to fetch current gold rates if possible, or pass null
+    const goldRates = await prisma.goldRate.findFirst({ orderBy: { createdAt: 'desc' } }) || {};
+
     const invoice = await prisma.invoice.findUnique({
         where: { id: invoiceId },
         include: { order: { include: { user: true, items: { include: { product: true } } } } }
@@ -90,7 +93,8 @@ const downloadInvoice = async (invoiceId) => {
         order,
         store,
         shippingAddress,
-        amountInWords: amountToWords(Number(order.grandTotal)),
+        goldRates,
+        amountInWords: amountToWords(Number(order.grandTotal || order.subTotal || 0)),
         adminName: 'Admin'
     });
 

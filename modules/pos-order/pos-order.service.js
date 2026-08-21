@@ -5,8 +5,174 @@ const cashbookService = require('../accounting/cashbook.service');
 const ledgerService = require('../accounting/customer-ledger.service');
 const { sendEmail } = require('../../jobs/email.job');
 const { generatePOSBillEmail } = require('../../utils/emailTemplates');
+const pricingService = require('../product/pricing.service');
 
 const MAX_RETRIES = 3;
+
+const roundTo2 = (num) => Math.round((num + Number.EPSILON) * 100) / 100;
+const roundTo3 = (num) => Math.round((num + Number.EPSILON) * 1000) / 1000;
+
+/**
+ * Calculate the exact price of a POS cart based on live rates
+ */
+const calculateCartPrice = async (items, storeId) => {
+    let cartSubtotal = 0;
+    let cartGst = 0;
+    let cartTotal = 0;
+    const calculatedItems = [];
+
+    for (const item of items) {
+        // Fetch full product from DB
+        const productData = await prisma.product.findFirst({
+            where: {
+                OR: [
+                    { sku: item.sku },
+                    { huid: item.sku }
+                ]
+            },
+            include: { metalDetails: true, stoneDetails: true }
+        });
+
+        if (!productData) {
+            throw require('../../utils/ApiError').notFound(`Product not found for SKU: ${item.sku}`);
+        }
+
+        const metalDetails = productData.metalDetails;
+        const stoneDetails = productData.stoneDetails;
+        const grossWeight = metalDetails?.grossWeight ? Number(metalDetails.grossWeight) : 0;
+        let totalStoneWeight = 0;
+        let dynamicStoneValue = 0;
+
+        // 1. Calculate Stone Weight and Value
+        if (stoneDetails && stoneDetails.length > 0) {
+            for (let stone of stoneDetails) {
+                let caratVal = stone.carat ? parseFloat(stone.carat) : 0;
+                if (caratVal > 0) {
+                    stone.netWeight = roundTo3(caratVal * 0.200);
+                }
+                const stoneWeightGrams = stone.netWeight ? Number(stone.netWeight) : 0;
+                totalStoneWeight += stoneWeightGrams;
+
+                let rate = stone.rate ? Number(stone.rate) : 0;
+                if (stone.stoneType === 'Diamond') {
+                    const query = {
+                        cut: stone.cut || 'All',
+                        color: stone.color || 'All',
+                        clarity: stone.clarity || 'All'
+                    };
+                    let diamondRateDoc = await prisma.diamondRate.findFirst({
+                        where: query,
+                        orderBy: { effectiveDate: 'desc' }
+                    });
+                    if (!diamondRateDoc) {
+                        diamondRateDoc = await prisma.diamondRate.findFirst({
+                            where: { cut: 'All', color: 'All', clarity: 'All' },
+                            orderBy: { effectiveDate: 'desc' }
+                        });
+                    }
+                    if (diamondRateDoc) {
+                        rate = Number(diamondRateDoc.ratePerCarat);
+                    }
+                    const calculationCarat = caratVal > 0 ? caratVal : (stoneWeightGrams / 0.200);
+                    dynamicStoneValue += calculationCarat * rate;
+                } else {
+                    if (caratVal > 0) {
+                        dynamicStoneValue += caratVal * rate;
+                    } else {
+                        dynamicStoneValue += stoneWeightGrams * rate;
+                    }
+                }
+            }
+        }
+
+        const manualStoneCharges = productData.stoneCharges ? Number(productData.stoneCharges) : 0;
+        const stoneValue = roundTo2(dynamicStoneValue > 0 ? dynamicStoneValue : manualStoneCharges);
+
+        // 2. Net Gold Weight
+        const netWeight = roundTo3(Math.max(0, grossWeight - totalStoneWeight));
+
+        let metalValue = 0;
+        let rateUsed = 0;
+        // 3. Fetch latest metal rate
+        if (metalDetails && metalDetails.metalType && metalDetails.purity) {
+            const latestRate = await prisma.goldRate.findFirst({
+                where: {
+                    metal: metalDetails.metalType.toLowerCase(),
+                    purity: {
+                        equals: metalDetails.purity,
+                        mode: 'insensitive'
+                    }
+                },
+                orderBy: { effectiveDate: 'desc' }
+            });
+
+            if (latestRate) {
+                const ratePerGram = Number(latestRate.ratePerGram);
+                rateUsed = ratePerGram;
+                const wastagePercent = productData.wastage ? Number(productData.wastage) : 0;
+                const wastageWeight = netWeight * (wastagePercent / 100);
+                const finalGoldWeight = netWeight + wastageWeight;
+                metalValue = roundTo2(finalGoldWeight * ratePerGram);
+            }
+        }
+
+        // 5. Calculate Making Charges & Apply Discount
+        let makingValue = 0;
+        const makingCharges = productData.makingCharges ? Number(productData.makingCharges) : 0;
+        if (productData.makingChargeType === 'per_gram') {
+            makingValue = makingCharges * grossWeight;
+        } else {
+            makingValue = makingCharges;
+        }
+
+        const discountAmount = Number(item.discount || 0);
+        let discountedMakingValue = makingValue;
+        if (discountAmount > 0) {
+            discountedMakingValue = Math.max(0, makingValue - discountAmount);
+        }
+        discountedMakingValue = roundTo2(discountedMakingValue);
+
+        // 6. Subtotal
+        const subtotal = roundTo2(metalValue + discountedMakingValue + stoneValue);
+
+        // 7. GST (Flat 3% on Subtotal)
+        const gstRate = Number(productData.gstRate || 3);
+        const gst = roundTo2(subtotal * (gstRate / 100));
+
+        // 8. Totals
+        const finalTotal = Math.round(subtotal + gst);
+
+        cartSubtotal += subtotal;
+        cartGst += gst;
+        cartTotal += finalTotal;
+
+        calculatedItems.push({
+            ...productData,
+            calculatedPrice: {
+                metalValue,
+                makingCharge: discountedMakingValue,
+                originalMakingCharge: makingValue,
+                stoneValue,
+                discountAmount,
+                subtotal,
+                gst,
+                finalTotal,
+                rateUsed
+            },
+            quantity: item.quantity || 1
+        });
+    }
+
+    return {
+        items: calculatedItems,
+        summary: {
+            subtotal: roundTo2(cartSubtotal),
+            gst: roundTo2(cartGst),
+            total: Math.round(cartTotal)
+        }
+    };
+};
+
 
 /**
  * Create a new POS sale with ERP Financial Integration
@@ -24,7 +190,7 @@ const createOrder = async (orderData) => {
         const count = await tx.pOSOrder.count({
             where: {
                 storeId: storeId,
-                createdAt: { gte: new Date(new Date().setHours(0,0,0,0)) }
+                createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) }
             }
         }) + 1;
         const orderNumber = `POS-${orderData.shop_id}-${dateStr}-${count.toString().padStart(4, '0')}`;
@@ -49,17 +215,17 @@ const createOrder = async (orderData) => {
         if (totalSchemeRedemption > 0) {
             if (!orderData.redeemedSchemeId) throw new Error('Scheme ID is required for scheme redemption');
             if (!orderData.customerId) throw new Error('Customer ID is required to redeem a scheme');
-            
+
             const scheme = await tx.scheme.findUnique({ where: { id: orderData.redeemedSchemeId } });
             if (!scheme) throw new Error('Scheme not found');
-            
+
             // Security Check
             if (scheme.customerId !== orderData.customerId) {
                 throw new Error('SECURITY ALERT: Unauthorized scheme redemption attempt. Scheme does not belong to this customer.');
             }
-            
+
             if (scheme.status === 'redeemed' || scheme.status === 'closed') throw new Error('Scheme is already redeemed or closed');
-            
+
             // Update scheme status (we will link order ID after order creation)
             await tx.scheme.update({
                 where: { id: scheme.id },
@@ -77,14 +243,14 @@ const createOrder = async (orderData) => {
             for (const payment of orderData.payments) {
                 if (payment.method === 'credit_memo') {
                     if (!payment.referenceId) throw new Error('Reference ID (Credit Memo ID) is required for credit_memo payment');
-                    
+
                     const memo = await tx.creditMemo.findFirst({
                         where: {
                             memoId: payment.referenceId,
                             balance: { gte: payment.amount }
                         }
                     });
-                    
+
                     if (!memo) throw new Error(`Credit Memo ${payment.referenceId} not found or insufficient balance.`);
 
                     const newBalance = Number(memo.balance) - payment.amount;
@@ -168,15 +334,15 @@ const createOrder = async (orderData) => {
         if (totalOnline > 0 && cashbookService.updateCashbookOnEventPrisma) {
             await cashbookService.updateCashbookOnEventPrisma(storeId, totalOnline, 'upi', 'sale', tx);
         }
-        
+
         // 7. Handle Customer Credit (Udhar)
         if (totalCredit > 0) {
             if (!orderData.customerId) throw new Error('Customer ID is required for credit (Udhar) sales');
-            
+
             if (cashbookService.updateCashbookOnEventPrisma) {
                 await cashbookService.updateCashbookOnEventPrisma(storeId, totalCredit, 'credit', 'sale', tx);
             }
-            
+
             if (ledgerService.recordTransactionPrisma) {
                 await ledgerService.recordTransactionPrisma({
                     customerId: orderData.customerId,
@@ -199,7 +365,7 @@ const createOrder = async (orderData) => {
                 if (loyaltyService.awardPointsPrisma) {
                     await loyaltyService.awardPointsPrisma(user.id, orderData.grandTotal, tx);
                 }
-                
+
                 // Dispatch Email
                 if (user.email) {
                     try {
@@ -235,11 +401,11 @@ const getStoreOrders = async (shop_id, query = {}) => {
     }
 
     const where = { storeId: storeId };
-    
+
     if (startDate && endDate) {
         where.createdAt = { gte: new Date(startDate), lte: new Date(endDate) };
     }
-    
+
     if (search) {
         where.OR = [
             { orderNumber: { contains: search, mode: 'insensitive' } },
@@ -250,10 +416,10 @@ const getStoreOrders = async (shop_id, query = {}) => {
 
     const items = await prisma.pOSOrder.findMany({
         where,
-        include: { 
-            staff: { select: { name: true } }, 
-            customer: { select: { name: true, phone: true } }, 
-            items: { include: { product: { include: { metalDetails: true, stoneDetails: true } } } } 
+        include: {
+            staff: { select: { name: true } },
+            customer: { select: { name: true, phone: true } },
+            items: { include: { product: { include: { metalDetails: true, stoneDetails: true } } } }
         },
         orderBy: { createdAt: 'desc' },
         skip,
@@ -275,10 +441,10 @@ const getStoreOrders = async (shop_id, query = {}) => {
 const getOrderById = async (id) => {
     return await prisma.pOSOrder.findUnique({
         where: { id },
-        include: { 
-            staff: { select: { name: true } }, 
-            customer: true, 
-            items: { include: { product: { include: { metalDetails: true, stoneDetails: true } } } } 
+        include: {
+            staff: { select: { name: true } },
+            customer: true,
+            items: { include: { product: { include: { metalDetails: true, stoneDetails: true } } } }
         }
     });
 };
@@ -320,7 +486,7 @@ const processReturn = async (orderId, returnData, performedBy) => {
             where: { id: orderId },
             include: { items: true }
         });
-        
+
         if (!order) throw new Error('Order not found');
         if (order.status === 'REFUNDED') throw new Error('Order is already fully refunded');
 
@@ -358,11 +524,11 @@ const processReturn = async (orderId, returnData, performedBy) => {
             await cashbookService.updateCashbookOnEventPrisma(order.storeId, refundTotal, 'cash', 'refund', tx);
         } else if (returnData.refundMethod === 'credit') {
             if (!order.customerId) throw new Error('Customer ID is required for Store Credit refund');
-            
+
             if (cashbookService.updateCashbookOnEventPrisma) {
                 await cashbookService.updateCashbookOnEventPrisma(order.storeId, refundTotal, 'credit', 'refund', tx);
             }
-            
+
             if (ledgerService.recordTransactionPrisma) {
                 await ledgerService.recordTransactionPrisma({
                     customerId: order.customerId,
@@ -389,10 +555,130 @@ const processReturn = async (orderId, returnData, performedBy) => {
     });
 };
 
+const updateOrder = async (orderId, orderData) => {
+    return await prisma.$transaction(async (tx) => {
+        const existingOrder = await tx.pOSOrder.findUnique({
+            where: { id: orderId },
+            include: { items: true }
+        });
+        if (!existingOrder) throw new Error('Order not found');
+
+        // Restore old stock
+        for (const item of existingOrder.items) {
+            await inventoryService.updateStock(item.productId, item.quantity, {
+                type: 'adjustment',
+                action: 'POS_ORDER_EDIT',
+                referenceId: existingOrder.id,
+                performedBy: orderData.billedBy,
+                notes: 'Restored stock for POS order edit',
+                tx
+            });
+            await tx.product.update({
+                where: { id: item.productId },
+                data: { status: 'available' }
+            });
+        }
+
+        // Delete old items
+        await tx.pOSOrderItem.deleteMany({ where: { posOrderId: orderId } });
+
+        // Calculate new payments
+        let totalCash = 0;
+        let totalOnline = 0;
+        let totalCredit = 0;
+
+        for (const payment of orderData.payments || []) {
+            if (payment.method === 'cash') totalCash += payment.amount;
+            else if (['card', 'upi', 'online', 'bank_transfer'].includes(payment.method)) totalOnline += payment.amount;
+            else if (payment.method === 'credit' || payment.method === 'udhar') totalCredit += payment.amount;
+        }
+
+        // Update the order details
+        const updatedOrder = await tx.pOSOrder.update({
+            where: { id: orderId },
+            data: {
+                customerId: orderData.customerId || null,
+                staffId: orderData.billedBy,
+                subTotal: orderData.subTotal || 0,
+                taxTotal: orderData.totalGST || 0,
+                discountTotal: orderData.discount || 0,
+                grandTotal: orderData.grandTotal || 0,
+                cashPaid: totalCash,
+                cardPaid: totalOnline,
+                upiPaid: 0,
+                creditUsed: totalCredit,
+                notes: orderData.notes,
+                items: {
+                    create: orderData.items.map(item => ({
+                        productId: item.product || item.productId || item.id, // accommodate payload formats
+                        quantity: 1,
+                        unitPrice: item.price || item.unitPrice || 0,
+                        discount: item.discount || 0,
+                        taxAmount: item.taxAmount || 0,
+                        totalPrice: item.totalAmount || item.totalPrice || 0
+                    }))
+                }
+            },
+            include: { items: true }
+        });
+
+        // Deduct new stock
+        for (const item of updatedOrder.items) {
+            await inventoryService.updateStock(item.productId, -item.quantity, {
+                type: 'sale',
+                action: 'POS_ORDER_EDIT',
+                referenceId: updatedOrder.id,
+                performedBy: orderData.billedBy,
+                notes: 'Sold via Edited POS Order',
+                tx
+            });
+            await tx.product.update({
+                where: { id: item.productId },
+                data: { status: 'sold' }
+            });
+        }
+
+        // Reconcile Ledgers / Cashbook
+        const cashDiff = totalCash - Number(existingOrder.cashPaid);
+        if (cashDiff !== 0 && cashbookService.updateCashbookOnEventPrisma) {
+            await cashbookService.updateCashbookOnEventPrisma(existingOrder.storeId, cashDiff, 'cash', cashDiff > 0 ? 'sale' : 'refund', tx);
+        }
+
+        const onlineDiff = totalOnline - Number(existingOrder.cardPaid);
+        if (onlineDiff !== 0 && cashbookService.updateCashbookOnEventPrisma) {
+            await cashbookService.updateCashbookOnEventPrisma(existingOrder.storeId, onlineDiff, 'upi', onlineDiff > 0 ? 'sale' : 'refund', tx);
+        }
+
+        const creditDiff = totalCredit - Number(existingOrder.creditUsed);
+        if (creditDiff !== 0) {
+            if (!orderData.customerId && creditDiff > 0) throw new Error('Customer ID required for credit sales');
+            if (cashbookService.updateCashbookOnEventPrisma) {
+                await cashbookService.updateCashbookOnEventPrisma(existingOrder.storeId, creditDiff, 'credit', creditDiff > 0 ? 'sale' : 'refund', tx);
+            }
+            if (ledgerService.recordTransactionPrisma && orderData.customerId) {
+                await ledgerService.recordTransactionPrisma({
+                    customerId: orderData.customerId,
+                    type: creditDiff > 0 ? 'debit' : 'credit',
+                    amount: Math.abs(creditDiff),
+                    transactionType: 'sale',
+                    referenceId: updatedOrder.id,
+                    referenceModel: 'POSOrder',
+                    notes: 'Credit adjustment for POS Order Edit',
+                    performedBy: orderData.billedBy
+                }, tx);
+            }
+        }
+
+        return updatedOrder;
+    });
+};
+
 module.exports = {
     createOrder,
+    updateOrder,
     getStoreOrders,
     getOrderById,
     getStoreAnalytics,
-    processReturn
+    processReturn,
+    calculateCartPrice
 };

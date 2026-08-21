@@ -56,11 +56,39 @@ const processReturn = asyncHandler(async (req, res) => {
     ApiResponse.success(order, 'Return processed successfully').send(res);
 });
 
+const calculateCart = asyncHandler(async (req, res) => {
+    const { items, storeId } = req.body;
+    
+    if (!items || !Array.isArray(items)) {
+        return ApiResponse.error('Items array is required', 400).send(res);
+    }
+
+    const calculatedCart = await posOrderService.calculateCartPrice(items, storeId);
+    ApiResponse.success(calculatedCart, 'Cart calculated successfully').send(res);
+});
+
+const updateOrder = asyncHandler(async (req, res) => {
+    const orderData = {
+        ...req.body,
+        billedBy: req.user.id,
+        shop_id: req.headers['x-shop-id'] || req.body.shop_id
+    };
+
+    if (!orderData.shop_id) {
+        return ApiResponse.error('Shop ID is required', 400).send(res);
+    }
+
+    const order = await posOrderService.updateOrder(req.params.id, orderData);
+    ApiResponse.success(order, 'Order updated successfully').send(res);
+});
+
 module.exports = {
     createOrder,
+    updateOrder,
     getStoreOrders,
     getOrderById,
     getStoreAnalytics,
-    processReturn
+    processReturn,
+    calculateCart
 };
 

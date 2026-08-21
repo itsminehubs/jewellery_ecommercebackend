@@ -75,35 +75,146 @@ const getAllOrders = async (filters = {}, options = {}) => {
   const { page = 1, limit = 20 } = options;
   const skip = (page - 1) * limit;
 
-  const orders = await prisma.order.findMany({
-    where: filters,
-    include: { 
-      user: { select: { name: true, phone: true, email: true } },
-      items: { include: { product: true } }
-    },
-    orderBy: { createdAt: 'desc' },
-    skip,
-    take: Number(limit)
-  });
+  // Extract source from filters
+  const { source, ...prismaFilters } = filters;
+  
+  let finalOrders = [];
+  let total = 0;
 
-  const total = await prisma.order.count({ where: filters });
-  return { orders, total, page, limit };
+  const onlineFilters = { ...prismaFilters };
+  const posFilters = { ...prismaFilters };
+  
+  if (prismaFilters.orderStatus) {
+      posFilters.status = prismaFilters.orderStatus;
+      delete posFilters.orderStatus;
+  }
+  if (posFilters.shop_id) {
+      posFilters.storeId = posFilters.shop_id;
+      delete posFilters.shop_id;
+  }
+  if (onlineFilters.shop_id) {
+      delete onlineFilters.shop_id;
+  }
+
+  if (source === 'pos') {
+    const posOrders = await prisma.pOSOrder.findMany({
+      where: posFilters,
+      include: {
+        customer: { select: { name: true, phone: true, email: true } },
+        items: { include: { product: true } },
+        store: true
+      },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: Number(limit)
+    });
+    total = await prisma.pOSOrder.count({ where: posFilters });
+    
+    finalOrders = posOrders.map(po => ({
+        ...po,
+        source: 'pos',
+        orderStatus: po.status,
+        user: po.customer,
+        shop_id: po.store?.name || po.storeId
+    }));
+  } else if (source === 'online') {
+    const orders = await prisma.order.findMany({
+      where: onlineFilters,
+      include: { 
+        user: { select: { name: true, phone: true, email: true } },
+        items: { include: { product: true } }
+      },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: Number(limit)
+    });
+    total = await prisma.order.count({ where: onlineFilters });
+    
+    finalOrders = orders.map(o => ({ ...o, source: 'online' }));
+  } else {
+    const fetchLimit = skip + Number(limit);
+    const [onlineOrders, posOrdersRaw] = await Promise.all([
+      prisma.order.findMany({
+        where: onlineFilters,
+        include: { 
+          user: { select: { name: true, phone: true, email: true } },
+          items: { include: { product: true } }
+        },
+        orderBy: { createdAt: 'desc' },
+        take: fetchLimit
+      }),
+      prisma.pOSOrder.findMany({
+        where: posFilters,
+        include: {
+          customer: { select: { name: true, phone: true, email: true } },
+          items: { include: { product: true } },
+          store: true
+        },
+        orderBy: { createdAt: 'desc' },
+        take: fetchLimit
+      })
+    ]);
+    
+    const mappedOnline = onlineOrders.map(o => ({ ...o, source: 'online' }));
+    const mappedPos = posOrdersRaw.map(po => ({
+        ...po,
+        source: 'pos',
+        orderStatus: po.status,
+        user: po.customer,
+        shop_id: po.store?.name || po.storeId
+    }));
+    
+    const combined = [...mappedOnline, ...mappedPos].sort((a, b) => b.createdAt - a.createdAt);
+    finalOrders = combined.slice(skip, skip + Number(limit));
+    
+    const [onlineCount, posCount] = await Promise.all([
+        prisma.order.count({ where: onlineFilters }),
+        prisma.pOSOrder.count({ where: posFilters })
+    ]);
+    total = onlineCount + posCount;
+  }
+
+  return { orders: finalOrders, total, page, limit };
 };
 
 const updateOrderStatus = async (orderId, status, note = '') => {
-  const order = await prisma.order.findUnique({ where: { id: orderId } });
-  if (!order) throw ApiError.notFound('Order not found');
-
-  const updateData = { orderStatus: status };
-  if (status === 'DELIVERED' || status === 'delivered') updateData.deliveredAt = new Date();
-
-  const updatedOrder = await prisma.order.update({
-    where: { id: orderId },
-    data: updateData
-  });
-
-  logger.info(`Admin updated order ${orderId} to ${status}`);
-  return updatedOrder;
+  let order = await prisma.order.findUnique({ where: { id: orderId } });
+  if (order) {
+      const updateData = { orderStatus: status };
+      if (status === 'DELIVERED' || status === 'delivered') updateData.deliveredAt = new Date();
+    
+      const updatedOrder = await prisma.order.update({
+        where: { id: orderId },
+        data: updateData
+      });
+      logger.info(`Admin updated order ${orderId} to ${status}`);
+      return updatedOrder;
+  }
+  
+  let posOrder = await prisma.pOSOrder.findUnique({ where: { id: orderId } });
+  if (posOrder) {
+      const updatedPosOrder = await prisma.pOSOrder.update({
+          where: { id: orderId },
+          data: { status: status.toLowerCase(), notes: note || posOrder.notes }
+      });
+      
+      if (['cancelled', 'refunded'].includes(status.toLowerCase()) && !['cancelled', 'refunded'].includes(posOrder.status.toLowerCase())) {
+         const inventoryService = require('../product/inventory.service');
+         const posItems = await prisma.pOSOrderItem.findMany({ where: { posOrderId: orderId } });
+         for (const item of posItems) {
+            await inventoryService.updateStock(item.productId, item.quantity, {
+                type: 'refund',
+                action: 'POS_RETURN',
+                referenceId: orderId,
+                performedBy: 'ADMIN',
+                notes: `POS Order ${status}`
+            });
+         }
+      }
+      logger.info(`Admin updated POS order ${orderId} to ${status}`);
+      return { ...updatedPosOrder, source: 'pos', orderStatus: updatedPosOrder.status };
+  }
+  throw ApiError.notFound('Order not found');
 };
 
 const getAllUsers = async (filters = {}, options = {}) => {
@@ -314,11 +425,24 @@ const getStockAnalytics = async () => {
     where: { orderStatus: { in: ['shipped', 'delivered'] } }
   });
 
-  const categoryStock = await prisma.product.groupBy({
-    by: ['categoryId'], // Need to map category string if using names instead
-    where: { deletedAt: null },
-    _sum: { stock: true }
-  });
+  const categoryStockRaw = await prisma.$queryRaw`
+    SELECT 
+      c.id as "categoryId",
+      c.name as name,
+      CAST(SUM(p.stock) AS INTEGER) as count,
+      SUM(p.stock * p."finalPrice") as value
+    FROM "Product" p
+    LEFT JOIN "Category" c ON p."categoryId" = c.id
+    WHERE p."deletedAt" IS NULL
+    GROUP BY c.id, c.name
+  `;
+
+  const categoryStock = categoryStockRaw.map(c => ({
+      categoryId: c.categoryId,
+      name: c.name || 'Unknown',
+      count: Number(c.count || 0),
+      value: Number(c.value || 0)
+  }));
 
   return {
     totalStock: stats._sum.stock || 0,
@@ -376,8 +500,7 @@ const getStockList = async (options = {}) => {
   }
 
   if (category) {
-      // Assuming category is ID in prisma
-      where.categoryId = category;
+      where.category = { slug: category };
   }
 
   if (status) {
@@ -495,58 +618,90 @@ const adjustStock = async (productId, quantityChange, userId, notes) => {
 
 
 const deleteOrder = async (orderId, adminId) => {
-  const order = await prisma.order.findUnique({
+  const inventoryService = require('../product/inventory.service');
+  
+  let order = await prisma.order.findUnique({
       where: { id: orderId },
       include: { items: true }
   });
-  if (!order) throw ApiError.notFound('Order not found');
-
-  const inventoryService = require('../product/inventory.service');
-  
-  // Restore stock
-  for (const item of order.items) {
-      if (item.productId) {
-          try {
-              await inventoryService.updateStock(item.productId, item.quantity, {
-                  type: 'adjustment',
-                  action: 'ADMIN_DELETE_ORDER',
-                  performedBy: adminId,
-                  notes: 'Restored stock from deleted order'
-              });
-          } catch (e) {
-              console.warn('Could not restore stock:', e.message);
+  if (order) {
+      for (const item of order.items) {
+          if (item.productId) {
+              try {
+                  await inventoryService.updateStock(item.productId, item.quantity, {
+                      type: 'adjustment',
+                      action: 'ADMIN_DELETE_ORDER',
+                      performedBy: adminId,
+                      notes: 'Restored stock from deleted order'
+                  });
+              } catch (e) {
+                  console.warn('Could not restore stock:', e.message);
+              }
           }
       }
+      await prisma.orderItem.deleteMany({ where: { orderId: orderId } });
+      await prisma.order.delete({ where: { id: orderId } });
+      logger.info(`Admin ${adminId} deleted order ${orderId}`);
+      return true;
   }
-
-  // Delete Order items
-  await prisma.orderItem.deleteMany({ where: { orderId: orderId } });
   
-  // Delete Order
-  await prisma.order.delete({ where: { id: orderId } });
-  
-  logger.info(`Admin ${adminId} deleted order ${orderId}`);
-  return true;
+  let posOrder = await prisma.pOSOrder.findUnique({
+      where: { id: orderId },
+      include: { items: true }
+  });
+  if (posOrder) {
+      for (const item of posOrder.items) {
+          if (item.productId) {
+              try {
+                  await inventoryService.updateStock(item.productId, item.quantity, {
+                      type: 'adjustment',
+                      action: 'ADMIN_DELETE_POS_ORDER',
+                      performedBy: adminId,
+                      notes: 'Restored stock from deleted POS bill'
+                  });
+              } catch (e) {
+                  console.warn('Could not restore stock:', e.message);
+              }
+          }
+      }
+      await prisma.pOSOrderItem.deleteMany({ where: { posOrderId: orderId } });
+      await prisma.pOSOrder.delete({ where: { id: orderId } });
+      logger.info(`Admin ${adminId} deleted POS order ${orderId}`);
+      return true;
+  }
+  throw ApiError.notFound('Order not found');
 };
 
 const updateOrderDetails = async (orderId, updateData) => {
-  const order = await prisma.order.findUnique({ where: { id: orderId } });
-  if (!order) throw ApiError.notFound('Order not found');
-
-  const data = {};
-  if (updateData.paymentStatus) data.paymentStatus = updateData.paymentStatus;
-  if (updateData.orderNumber) data.orderNumber = updateData.orderNumber;
-  if (updateData.shippingAddress) {
-      data.shippingAddress = updateData.shippingAddress;
+  let order = await prisma.order.findUnique({ where: { id: orderId } });
+  if (order) {
+      const data = {};
+      if (updateData.paymentStatus) data.paymentStatus = updateData.paymentStatus;
+      if (updateData.orderNumber) data.orderNumber = updateData.orderNumber;
+      if (updateData.shippingAddress) {
+          data.shippingAddress = updateData.shippingAddress;
+      }
+      const updatedOrder = await prisma.order.update({
+          where: { id: orderId },
+          data
+      });
+      logger.info(`Admin updated order details for ${orderId}`);
+      return updatedOrder;
+  }
+  
+  let posOrder = await prisma.pOSOrder.findUnique({ where: { id: orderId } });
+  if (posOrder) {
+      const data = {};
+      if (updateData.orderNumber) data.orderNumber = updateData.orderNumber;
+      const updatedPosOrder = await prisma.pOSOrder.update({
+          where: { id: orderId },
+          data
+      });
+      logger.info(`Admin updated POS order details for ${orderId}`);
+      return { ...updatedPosOrder, source: 'pos' };
   }
 
-  const updatedOrder = await prisma.order.update({
-      where: { id: orderId },
-      data
-  });
-  
-  logger.info(`Admin updated order details for ${orderId}`);
-  return updatedOrder;
+  throw ApiError.notFound('Order not found');
 };
 
 module.exports = {
