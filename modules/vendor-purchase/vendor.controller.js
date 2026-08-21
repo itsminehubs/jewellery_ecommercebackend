@@ -1,4 +1,4 @@
-﻿const vendorService = require('./vendor.service');
+const vendorService = require('./vendor.service');
 const ApiResponse = require('../../utils/ApiResponse');
 const { asyncHandler } = require('../../middlewares/error.middleware');
 
@@ -9,6 +9,9 @@ const createVendor = asyncHandler(async (req, res) => {
 
 const getAllVendors = asyncHandler(async (req, res) => {
   const vendors = await vendorService.getAllVendors(req.query);
+  if (vendors && vendors.items) {
+    return ApiResponse.paginated(vendors.items, vendors.page, req.query.limit || 10, vendors.total, 'Vendors fetched successfully').send(res);
+  }
   ApiResponse.success(vendors, 'Vendors fetched successfully').send(res);
 });
 

@@ -4,8 +4,11 @@ const { asyncHandler } = require('../../middlewares/error.middleware');
 const { deleteFile } = require('../../middlewares/upload.middleware');
 
 const getAllBanners = asyncHandler(async (req, res) => {
-  const banners = await bannerService.getAllBanners(req.query);
-  ApiResponse.success(banners, 'Banners fetched successfully').send(res);
+  const result = await bannerService.getAllBanners(req.query);
+  if (req.query.page && req.query.limit) {
+    return ApiResponse.paginated(result.items, result.page, result.limit, result.total, 'Banners fetched successfully').send(res);
+  }
+  ApiResponse.success(result, 'Banners fetched successfully').send(res);
 });
 
 const getActiveBanners = asyncHandler(async (req, res) => {

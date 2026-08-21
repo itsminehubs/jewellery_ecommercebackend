@@ -41,7 +41,28 @@ const getPurchaseOrders = async (filters = {}) => {
     if (filters.status) where.status = filters.status;
     if (filters.vendor) where.vendorId = filters.vendor;
 
-    return await prisma.purchaseOrder.findMany({
+    const page = parseInt(filters.page, 10) || 1;
+    const limit = parseInt(filters.limit, 10) || 10;
+    
+    if (filters.page && filters.limit) {
+        const skip = (page - 1) * limit;
+        const [items, total] = await Promise.all([
+            prisma.purchaseOrder.findMany({
+                where,
+                include: {
+                    vendor: { select: { name: true, phone: true } },
+                    items: { include: { product: { select: { name: true, sku: true, categoryId: true } } } }
+                },
+                orderBy: { createdAt: 'desc' },
+                skip,
+                take: limit
+            }),
+            prisma.purchaseOrder.count({ where })
+        ]);
+        return { items, total, page, pages: Math.ceil(total / limit) };
+    }
+
+    const items = await prisma.purchaseOrder.findMany({
         where,
         include: {
             vendor: { select: { name: true, phone: true } },
@@ -49,6 +70,7 @@ const getPurchaseOrders = async (filters = {}) => {
         },
         orderBy: { createdAt: 'desc' }
     });
+    return items;
 };
 
 const getPurchaseOrderById = async (id) => {

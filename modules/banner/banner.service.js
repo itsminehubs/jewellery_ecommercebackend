@@ -14,6 +14,26 @@ const getAllBanners = async (filters = {}) => {
   if (filters.status) where.status = filters.status;
   if (filters.type) where.type = filters.type;
 
+  if (filters.page && filters.limit) {
+    const page = parseInt(filters.page) || 1;
+    const limit = parseInt(filters.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const [items, total] = await Promise.all([
+      prisma.banner.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: [
+          { order: 'asc' },
+          { createdAt: 'desc' }
+        ]
+      }),
+      prisma.banner.count({ where })
+    ]);
+    return { items, total, page, limit };
+  }
+
   const banners = await prisma.banner.findMany({
     where,
     orderBy: [

@@ -7,8 +7,29 @@ const logger = require('../../utils/logger');
 const getAllCategories = async (query = {}) => {
     const where = {};
     if (query.isActive !== undefined) {
-        where.isActive = query.isActive;
+        where.isActive = query.isActive === 'true' || query.isActive === true;
     }
+
+    if (query.page && query.limit) {
+        const page = parseInt(query.page) || 1;
+        const limit = parseInt(query.limit) || 10;
+        const skip = (page - 1) * limit;
+
+        const [items, total] = await Promise.all([
+            prisma.category.findMany({
+                where,
+                skip,
+                take: limit,
+                orderBy: [
+                    { order: 'asc' },
+                    { name: 'asc' }
+                ]
+            }),
+            prisma.category.count({ where })
+        ]);
+        return { items, total, page, limit };
+    }
+
     return await prisma.category.findMany({
         where,
         orderBy: [
