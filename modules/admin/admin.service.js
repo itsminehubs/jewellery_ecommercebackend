@@ -263,7 +263,7 @@ const getUserDetails = async (userId) => {
   const lastOrder = sortedOrders.length > 0 ? sortedOrders[0].createdAt : null;
 
   const wishlistItems = await prisma.wishlistItem.count({
-    where: { wishlist: { userId } }
+    where: { userId }
   });
 
   return {
