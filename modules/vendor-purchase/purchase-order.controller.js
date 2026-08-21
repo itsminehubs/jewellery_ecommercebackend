@@ -9,6 +9,9 @@ const createPO = asyncHandler(async (req, res) => {
 
 const getAllPOs = asyncHandler(async (req, res) => {
     const pos = await poService.getPurchaseOrders(req.query);
+    if (pos && pos.items) {
+        return ApiResponse.paginated(pos.items, pos.page, req.query.limit || 10, pos.total, 'Purchase orders fetched').send(res);
+    }
     ApiResponse.success(pos, 'Purchase orders fetched').send(res);
 });
 

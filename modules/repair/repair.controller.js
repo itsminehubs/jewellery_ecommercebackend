@@ -86,15 +86,24 @@ exports.getAllRepairs = asyncHandler(async (req, res, next) => {
         filter.customerId = req.query.customer;
     }
 
-    const repairs = await prisma.repair.findMany({
-        where: filter,
-        include: {
-            customer: { select: { id: true, name: true, phone: true, email: true, addresses: true } },
-            store: { select: { id: true, name: true, address: true, phone: true } },
-            billedBy: { select: { id: true, name: true } }
-        },
-        orderBy: { createdAt: 'desc' }
-    });
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 10;
+    const skip = (page - 1) * limit;
+
+    const [repairs, total] = await Promise.all([
+        prisma.repair.findMany({
+            where: filter,
+            include: {
+                customer: { select: { id: true, name: true, phone: true, email: true, addresses: true } },
+                store: { select: { id: true, name: true, address: true, phone: true } },
+                billedBy: { select: { id: true, name: true } }
+            },
+            orderBy: { createdAt: 'desc' },
+            skip,
+            take: limit
+        }),
+        prisma.repair.count({ where: filter })
+    ]);
 
     const formattedRepairs = repairs.map(r => {
         let details = {};
@@ -112,6 +121,12 @@ exports.getAllRepairs = asyncHandler(async (req, res, next) => {
     res.status(200).json({
         status: 'success',
         results: formattedRepairs.length,
+        pagination: {
+            page,
+            limit,
+            total,
+            pages: Math.ceil(total / limit)
+        },
         data: formattedRepairs
     });
 });

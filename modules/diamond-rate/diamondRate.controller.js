@@ -32,11 +32,31 @@ const addRate = asyncHandler(async (req, res) => {
 // @route   GET /api/v1/diamond-rates/latest
 // @access  Public
 const getLatestRates = asyncHandler(async (req, res) => {
-  const { cut, color, clarity } = req.query;
+  const { cut, color, clarity, page, limit } = req.query;
   const where = {};
   if (cut) where.cut = cut;
   if (color) where.color = color;
   if (clarity) where.clarity = clarity;
+
+  if (page && limit) {
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 10;
+    const skip = (pageNum - 1) * limitNum;
+
+    const [rates, total] = await Promise.all([
+      prisma.diamondRate.findMany({
+        where,
+        skip,
+        take: limitNum,
+        orderBy: [
+          { effectiveDate: 'desc' },
+          { createdAt: 'desc' }
+        ]
+      }),
+      prisma.diamondRate.count({ where })
+    ]);
+    return ApiResponse.paginated(rates, pageNum, limitNum, total, 'Latest diamond rates fetched successfully').send(res);
+  }
 
   const rates = await prisma.diamondRate.findMany({
     where,

@@ -3,8 +3,11 @@ const ApiResponse = require('../../utils/ApiResponse');
 const { asyncHandler } = require('../../middlewares/error.middleware');
 
 const getAllCategories = asyncHandler(async (req, res) => {
-    const categories = await categoryService.getAllCategories();
-    ApiResponse.success(categories, 'Categories fetched successfully').send(res);
+    const result = await categoryService.getAllCategories(req.query);
+    if (req.query.page && req.query.limit) {
+        return ApiResponse.paginated(result.items, result.page, result.limit, result.total, 'Categories fetched successfully').send(res);
+    }
+    ApiResponse.success(result, 'Categories fetched successfully').send(res);
 });
 
 const getCategory = asyncHandler(async (req, res) => {

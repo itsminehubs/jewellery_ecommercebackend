@@ -8,7 +8,10 @@ const submitInquiry = asyncHandler(async (req, res) => {
 });
 
 const getAllInquiries = asyncHandler(async (req, res) => {
-    const inquiries = await contactService.getAllInquiries();
+    const inquiries = await contactService.getAllInquiries(req.query);
+    if (inquiries && inquiries.items) {
+        return ApiResponse.paginated(inquiries.items, inquiries.page, req.query.limit || 10, inquiries.total, 'Inquiries fetched successfully').send(res);
+    }
     ApiResponse.success(inquiries, 'Inquiries fetched successfully').send(res);
 });
 

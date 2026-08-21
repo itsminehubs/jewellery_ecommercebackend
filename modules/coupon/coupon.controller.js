@@ -57,6 +57,26 @@ const getCoupons = asyncHandler(async (req, res) => {
         ? {} 
         : { isActive: true, endDate: { gt: new Date() } };
         
+    const { page, limit } = req.query;
+
+    if (page && limit) {
+        const pageNum = parseInt(page) || 1;
+        const limitNum = parseInt(limit) || 10;
+        const skip = (pageNum - 1) * limitNum;
+
+        const [coupons, total] = await Promise.all([
+            prisma.coupon.findMany({
+                where: query,
+                skip,
+                take: limitNum,
+                orderBy: { createdAt: 'desc' }
+            }),
+            prisma.coupon.count({ where: query })
+        ]);
+
+        return ApiResponse.paginated(coupons, pageNum, limitNum, total, 'Coupons fetched successfully').send(res);
+    }
+
     const coupons = await prisma.coupon.findMany({
         where: query,
         orderBy: { createdAt: 'desc' }

@@ -47,16 +47,40 @@ const createVendor = async (vendorData, requesterRole) => {
 };
 
 const getAllVendors = async (filters = {}) => {
-  const where = { isActive: true, ...filters };
-  const vendors = await prisma.vendor.findMany({
-    where,
-    orderBy: { name: 'asc' }
-  });
+  const { page, limit, search, category, ...rest } = filters;
 
-  return vendors.map(vendor => ({
-    ...vendor,
-    gstin: vendor.gstNumber
-  }));
+  const where = { isActive: true };
+  if (category) where.category = category;
+  if (search) {
+    where.OR = [
+      { name: { contains: search, mode: 'insensitive' } },
+      { contactPerson: { contains: search, mode: 'insensitive' } },
+      { phone: { contains: search } }
+    ];
+  }
+
+  // If pagination params provided, return paginated result
+  if (page && limit) {
+    const pageNum = parseInt(page, 10);
+    const limitNum = parseInt(limit, 10);
+    const skip = (pageNum - 1) * limitNum;
+
+    const [vendors, total] = await Promise.all([
+      prisma.vendor.findMany({ where, orderBy: { name: 'asc' }, skip, take: limitNum }),
+      prisma.vendor.count({ where })
+    ]);
+
+    return {
+      items: vendors.map(v => ({ ...v, gstin: v.gstNumber })),
+      total,
+      page: pageNum,
+      pages: Math.ceil(total / limitNum)
+    };
+  }
+
+  // Legacy: return full list
+  const vendors = await prisma.vendor.findMany({ where, orderBy: { name: 'asc' } });
+  return vendors.map(vendor => ({ ...vendor, gstin: vendor.gstNumber }));
 };
 
 const getVendorById = async (id) => {
