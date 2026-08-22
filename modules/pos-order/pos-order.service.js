@@ -273,9 +273,9 @@ const createOrder = async (orderData) => {
                 storeId: storeId,
                 customerId: orderData.customerId || null,
                 staffId: orderData.billedBy,
-                subTotal: orderData.subTotal || 0,
-                taxTotal: orderData.totalGST || 0,
-                discountTotal: orderData.discount || 0,
+                subTotal: orderData.subTotal || orderData.subtotal || 0,
+                taxTotal: orderData.totalGST || orderData.taxTotal || 0,
+                discountTotal: orderData.discount || orderData.discountTotal || 0,
                 grandTotal: orderData.grandTotal || 0,
                 cashPaid: totalCash,
                 cardPaid: totalOnline, // Simplification
@@ -294,7 +294,7 @@ const createOrder = async (orderData) => {
                     }))
                 }
             },
-            include: { items: true }
+            include: { items: { include: { product: true } } }
         });
 
         // Link Scheme Redemption to Order
