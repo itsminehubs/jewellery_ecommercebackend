@@ -100,7 +100,7 @@ const calculateProductPrice = async (productData, metalDetails, stoneDetails) =>
     let makingValue = 0;
     const makingCharges = productData.makingCharges ? Number(productData.makingCharges) : 0;
     if (productData.makingChargeType === 'per_gram') {
-        makingValue = makingCharges * grossWeight;
+        makingValue = makingCharges * netWeight;
     } else {
         makingValue = makingCharges;
     }

@@ -120,7 +120,7 @@ const calculateCartPrice = async (items, storeId) => {
         let makingValue = 0;
         const makingCharges = productData.makingCharges ? Number(productData.makingCharges) : 0;
         if (productData.makingChargeType === 'per_gram') {
-            makingValue = makingCharges * grossWeight;
+            makingValue = makingCharges * netWeight;
         } else {
             makingValue = makingCharges;
         }
@@ -193,7 +193,8 @@ const createOrder = async (orderData) => {
                 createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) }
             }
         }) + 1;
-        const orderNumber = `POS-${orderData.shop_id}-${dateStr}-${count.toString().padStart(4, '0')}`;
+        const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
+        const orderNumber = `POS-${orderData.shop_id}-${dateStr}-${count.toString().padStart(4, '0')}-${randomSuffix}`;
 
         // Prepare totals
         let totalCash = 0;
