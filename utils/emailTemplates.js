@@ -4,9 +4,11 @@
 
 const generateEmployeeWelcomeEmail = (employee, password, loginUrl) => {
   const subject = 'Welcome to CarbonSmith - Your Account Details';
-  
-  const text = `Hello ${employee.name},\n\nYour employee account has been successfully created.\n\nRole: ${employee.role}\nEmail: ${employee.email}\nPassword: ${password}\n\nYou can log in at: ${loginUrl}\n\nBest regards,\nCarbonSmith Operations Team`;
-  
+
+  const emailLine = employee.email ? `\\nEmail: ${employee.email}` : '';
+  const phoneLine = employee.phone ? `\\nPhone: ${employee.phone}` : '';
+  const text = `Hello ${employee.name},\\n\\nYour employee account has been successfully created.\\n\\nRole: ${employee.role}${emailLine}${phoneLine}\\nPassword: ${password}\\n\\nYou can log in at: ${loginUrl}\\n\\nBest regards,\\nCarbonSmith Operations Team`;
+
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
       <h2 style="color: #333; text-align: center;">Welcome to CarbonSmith!</h2>
@@ -15,7 +17,8 @@ const generateEmployeeWelcomeEmail = (employee, password, loginUrl) => {
       <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0;">
         <ul style="list-style-type: none; padding: 0; margin: 0;">
           <li style="margin-bottom: 10px;"><strong>Role:</strong> ${employee.role}</li>
-          <li style="margin-bottom: 10px;"><strong>Email:</strong> ${employee.email}</li>
+          ${employee.email ? `<li style="margin-bottom: 10px;"><strong>Email:</strong> ${employee.email}</li>` : ''}
+          ${employee.phone ? `<li style="margin-bottom: 10px;"><strong>Phone:</strong> ${employee.phone}</li>` : ''}
           <li><strong>Password:</strong> ${password}</li>
         </ul>
       </div>
@@ -35,7 +38,7 @@ const generateOrderConfirmationEmail = (order, user) => {
   const orderId = order.orderNumber || order.id;
   const customerName = user?.name || order.shippingAddress?.name || 'Valued Customer';
   const subject = `Thank You for Your Order! - #${orderId}`;
-  
+
   const formatCurrency = (amount) => `₹${Number(amount || 0).toLocaleString('en-IN')}`;
 
   const address = order.shippingAddress || {};
@@ -47,14 +50,14 @@ const generateOrderConfirmationEmail = (order, user) => {
   let itemsText = '';
   let itemsHtml = '';
   (order.items || []).forEach(item => {
-      const pName = item.name || item.product?.name || 'Jewelry Item';
-      const qty = item.quantity || 1;
-      const price = item.price || item.product?.price || 0;
-      const total = price * qty;
-      
-      itemsText += `${pName}\nQuantity: ${qty}\nPrice: ${formatCurrency(price)}\nTotal: ${formatCurrency(total)}\n\n`;
-      
-      itemsHtml += `
+    const pName = item.name || item.product?.name || 'Jewelry Item';
+    const qty = item.quantity || 1;
+    const price = item.unitPrice || item.price || item.product?.price || 0;
+    const total = item.totalPrice || item.total || (price * qty);
+
+    itemsText += `${pName}\nQuantity: ${qty}\nPrice: ${formatCurrency(price)}\nTotal: ${formatCurrency(total)}\n\n`;
+
+    itemsHtml += `
         <div style="margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 10px;">
           <h4 style="margin: 0 0 5px 0; color: #333;">${pName}</h4>
           <p style="margin: 0; color: #555; font-size: 14px;">Quantity: ${qty} <span style="float:right;">Price: ${formatCurrency(price)}</span></p>
@@ -94,7 +97,7 @@ const generateOrderConfirmationEmail = (order, user) => {
         <h3 style="margin-top: 0; color: #000; border-bottom: 2px solid #ddd; padding-bottom: 5px;">Order Summary</h3>
         <table style="width: 100%; font-size: 14px;">
           <tr><td style="padding: 4px 0; color: #555;">Subtotal:</td><td style="text-align: right;">${formatCurrency(order.subTotal || 0)}</td></tr>
-          <tr><td style="padding: 4px 0; color: #555;">Discount:</td><td style="text-align: right; color: #e74c3c;">-${formatCurrency(order.discount || 0)}</td></tr>
+          <tr><td style="padding: 4px 0; color: #555;">Discount:</td><td style="text-align: right; color: #e74c3c;">-${formatCurrency(order.discountTotal || order.discount || 0)}</td></tr>
           <tr><td style="padding: 4px 0; color: #555;">Shipping:</td><td style="text-align: right;">${formatCurrency(order.shippingCost || 0)}</td></tr>
           <tr><td style="padding: 4px 0; color: #555;">Tax:</td><td style="text-align: right;">${formatCurrency(order.taxTotal || 0)}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold; font-size: 16px; border-top: 1px solid #ddd;">Grand Total:</td><td style="text-align: right; font-weight: bold; font-size: 16px; border-top: 1px solid #ddd;">${formatCurrency(order.grandTotal || order.subTotal || 0)}</td></tr>
@@ -144,23 +147,24 @@ const generateOrderConfirmationEmail = (order, user) => {
 const generateInvoiceEmail = (invoice, order, user) => {
   const customerName = user?.name || order?.shippingAddress?.name || 'Valued Customer';
   const subject = `Your Invoice - #${invoice.invoiceNumber}`;
-  
+
   const formatCurrency = (amount) => `₹${Number(amount || 0).toLocaleString('en-IN')}`;
 
-  const itemsHtml = (invoice.items || []).map(item => `
+  const itemsHtml = (order?.items || invoice?.items || []).map(item => `
     <tr>
       <td style="padding: 10px; border-bottom: 1px solid #eee;">
-        <span style="font-weight: bold; color: #333;">${item.name || 'Jewelry Item'}</span><br/>
-        <span style="font-size: 12px; color: #888;">Qty: ${item.quantity}</span>
+        <span style="font-weight: bold; color: #333;">${item.name || item.productName || item.product?.name || 'Jewelry Item'}</span><br/>
+        <span style="font-size: 12px; color: #888;">Qty: ${item.quantity || 1}</span>
       </td>
       <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right; color: #333;">
-        ${formatCurrency(item.total)}
+        ${formatCurrency(item.totalPrice || item.total || item.price || 0)}
       </td>
     </tr>
   `).join('');
 
-  const text = `Hi ${customerName},\n\nYour invoice #${invoice.invoiceNumber} has been generated. Total amount: ${formatCurrency(invoice.total)}.\n\nThank you for choosing CarbonSmith!`;
-  
+  const grandTotal = order?.grandTotal || invoice?.total || 0;
+  const text = `Hi ${customerName},\n\nYour invoice #${invoice.invoiceNumber} has been generated. Total amount: ${formatCurrency(grandTotal)}.\n\nThank you for choosing CarbonSmith!`;
+
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
       <div style="text-align: center; border-bottom: 1px solid #eee; padding-bottom: 15px; margin-bottom: 20px;">
@@ -173,7 +177,7 @@ const generateInvoiceEmail = (invoice, order, user) => {
       
       <div style="margin: 20px 0;">
         <p style="margin: 0 0 5px 0; font-weight: bold; color: #333;">Invoice ID: <span style="font-weight: normal; color: #555;">${invoice.invoiceNumber}</span></p>
-        <p style="margin: 0 0 15px 0; font-weight: bold; color: #333;">Date: <span style="font-weight: normal; color: #555;">${new Date(invoice.issueDate).toLocaleDateString('en-IN')}</span></p>
+        <p style="margin: 0 0 15px 0; font-weight: bold; color: #333;">Date: <span style="font-weight: normal; color: #555;">${new Date(invoice.date || invoice.issueDate || invoice.createdAt).toLocaleDateString('en-IN')}</span></p>
         
         <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
           <thead>
@@ -188,15 +192,15 @@ const generateInvoiceEmail = (invoice, order, user) => {
           <tfoot>
             <tr>
               <td style="padding: 10px; text-align: right; color: #555; font-size: 14px;">Subtotal:</td>
-              <td style="padding: 10px; text-align: right; color: #333;">${formatCurrency(invoice.subtotal)}</td>
+              <td style="padding: 10px; text-align: right; color: #333;">${formatCurrency(order?.subTotal || invoice?.subtotal || 0)}</td>
             </tr>
             <tr>
               <td style="padding: 10px; text-align: right; color: #555; font-size: 14px;">Tax:</td>
-              <td style="padding: 10px; text-align: right; color: #333;">${formatCurrency(invoice.tax)}</td>
+              <td style="padding: 10px; text-align: right; color: #333;">${formatCurrency(order?.taxTotal || invoice?.tax || 0)}</td>
             </tr>
             <tr>
               <td style="padding: 10px; text-align: right; font-weight: bold; font-size: 16px; color: #333; border-top: 2px solid #eee;">Total:</td>
-              <td style="padding: 10px; text-align: right; font-weight: bold; font-size: 16px; color: #333; border-top: 2px solid #eee;">${formatCurrency(invoice.total)}</td>
+              <td style="padding: 10px; text-align: right; font-weight: bold; font-size: 16px; color: #333; border-top: 2px solid #eee;">${formatCurrency(grandTotal)}</td>
             </tr>
           </tfoot>
         </table>
@@ -212,24 +216,25 @@ const generateInvoiceEmail = (invoice, order, user) => {
 };
 
 const generatePOSBillEmail = (posOrder, customerName) => {
-  const subject = `Your Purchase Receipt - #${posOrder.orderId}`;
-  
+  const safeOrderId = posOrder.orderId || posOrder.id || posOrder._id || 'POS-ORDER';
+  const subject = `Your Purchase Receipt - #${safeOrderId}`;
+
   const formatCurrency = (amount) => `₹${Number(amount || 0).toLocaleString('en-IN')}`;
 
   const itemsHtml = (posOrder.items || []).map(item => `
     <tr>
       <td style="padding: 10px; border-bottom: 1px solid #eee;">
-        <span style="font-weight: bold; color: #333;">${item.productName || 'Jewelry Item'}</span><br/>
-        <span style="font-size: 12px; color: #888;">Qty: ${item.quantity}</span>
+        <span style="font-weight: bold; color: #333;">${item.name || item.productName || item.product?.name || 'Jewelry Item'}</span><br/>
+        <span style="font-size: 12px; color: #888;">Qty: ${item.quantity || 1}</span>
       </td>
       <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right; color: #333;">
-        ${formatCurrency(item.price)}
+        ${formatCurrency(item.price || item.totalPrice || item.calculatedPrice?.total || 0)}
       </td>
     </tr>
   `).join('');
 
-  const text = `Hi ${customerName},\n\nThank you for shopping at CarbonSmith. Your order #${posOrder.orderId} total is ${formatCurrency(posOrder.grandTotal)}.\n\nSee you again soon!`;
-  
+  const text = `Hi ${customerName},\n\nThank you for shopping at CarbonSmith. Your order #${safeOrderId} total is ${formatCurrency(posOrder.grandTotal)}.\n\nSee you again soon!`;
+
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
       <div style="text-align: center; border-bottom: 1px solid #eee; padding-bottom: 15px; margin-bottom: 20px;">
@@ -241,7 +246,7 @@ const generatePOSBillEmail = (posOrder, customerName) => {
       <p style="font-size: 16px; color: #555; line-height: 1.5;">Thank you for shopping with us today. Here is a copy of your receipt:</p>
       
       <div style="margin: 20px 0;">
-        <p style="margin: 0 0 5px 0; font-weight: bold; color: #333;">Receipt No: <span style="font-weight: normal; color: #555;">${posOrder.orderId}</span></p>
+        <p style="margin: 0 0 5px 0; font-weight: bold; color: #333;">Receipt No: <span style="font-weight: normal; color: #555;">${safeOrderId}</span></p>
         <p style="margin: 0 0 15px 0; font-weight: bold; color: #333;">Date: <span style="font-weight: normal; color: #555;">${new Date(posOrder.createdAt).toLocaleString('en-IN')}</span></p>
         
         <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
@@ -261,12 +266,12 @@ const generatePOSBillEmail = (posOrder, customerName) => {
             </tr>
             <tr>
               <td style="padding: 10px; text-align: right; color: #555; font-size: 14px;">Tax/GST:</td>
-              <td style="padding: 10px; text-align: right; color: #333;">${formatCurrency(posOrder.totalGST)}</td>
+              <td style="padding: 10px; text-align: right; color: #333;">${formatCurrency(posOrder.taxTotal || posOrder.totalGST)}</td>
             </tr>
-            ${posOrder.discountAmount > 0 ? `
+            ${(posOrder.discountTotal > 0 || posOrder.discountAmount > 0 || posOrder.discount > 0) ? `
             <tr>
               <td style="padding: 10px; text-align: right; color: #555; font-size: 14px;">Discount:</td>
-              <td style="padding: 10px; text-align: right; color: green;">-${formatCurrency(posOrder.discountAmount)}</td>
+              <td style="padding: 10px; text-align: right; color: green;">-${formatCurrency(posOrder.discountTotal || posOrder.discountAmount || posOrder.discount)}</td>
             </tr>` : ''}
             <tr>
               <td style="padding: 10px; text-align: right; font-weight: bold; font-size: 16px; color: #333; border-top: 2px solid #eee;">Total Paid:</td>
