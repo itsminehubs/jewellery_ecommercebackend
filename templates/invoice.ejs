@@ -1,154 +1,262 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tax Invoice - <%= invoice.invoiceNumber %></title>
+    <title>Tax Invoice - <%= invoice.invoiceNumber %>
+    </title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        @page { size: A4; margin: 5mm; }
-        body { 
-            -webkit-print-color-adjust: exact; 
-            print-color-adjust: exact; 
+        @page {
+            size: A4;
+            margin: 5mm;
+        }
+
+        body {
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
             font-family: sans-serif;
             color: #000;
             font-size: 10px;
         }
-        .invoice-container { 
+
+        .invoice-container {
             width: 100%;
             max-width: 210mm;
             margin: 0 auto;
         }
-        .border-invoice { border: 1px solid #000; }
-        .border-b-invoice { border-bottom: 1px solid #000; }
-        .border-r-invoice { border-right: 1px solid #000; }
-        .border-l-invoice { border-left: 1px solid #000; }
-        .border-t-invoice { border-top: 1px solid #000; }
-        th, td { padding: 4px; }
+
+        .border-invoice {
+            border: 1px solid #000;
+        }
+
+        .border-b-invoice {
+            border-bottom: 1px solid #000;
+        }
+
+        .border-r-invoice {
+            border-right: 1px solid #000;
+        }
+
+        .border-l-invoice {
+            border-left: 1px solid #000;
+        }
+
+        .border-t-invoice {
+            border-top: 1px solid #000;
+        }
+
+        th,
+        td {
+            padding: 4px;
+        }
     </style>
 </head>
+
 <body class="bg-white">
 
-<div class="invoice-container">
-    <div class="border-invoice mb-2">
-        <div class="text-center border-b-invoice py-1">
-            <h1 class="text-lg font-bold">Tax Invoice</h1>
-        </div>
-
-        <!-- Header Row -->
-        <div class="flex justify-between px-2 py-1 border-b-invoice">
-            <div>Invoice Number : <span class="font-semibold"><%= invoice.invoiceNumber %></span></div>
-            <div>Date & Time : <span class="font-semibold"><%= new Date(invoice.createdAt || invoice.issueDate).toLocaleString('en-IN') %></span></div>
-        </div>
-
-        <!-- 3 Column Details Row -->
-        <div class="flex border-b-invoice">
-            <!-- Seller Details -->
-            <div class="w-1/3 border-r-invoice p-2">
-                <h2 class="font-bold text-xs uppercase"><%= store.name || 'CARBONSMITH PVT LTD' %></h2>
-                <p class="mt-1"><%= store.address || 'Ground Floor, Unit No G-03, Phoenix Mall of the Millennium, Wakad, Pune, Maharashtra, 411057' %></p>
-                <table class="mt-2 w-full">
-                    <tbody>
-                        <tr><td class="py-0.5 w-1/3">Sales Executive:</td><td class="py-0.5 font-semibold"><%= adminName || 'Admin' %></td></tr>
-                        <tr><td class="py-0.5 w-1/3">Store Contact No:</td><td class="py-0.5"><%= store.phone || '020-69121427' %></td></tr>
-                        <tr><td class="py-0.5">CIN:</td><td class="py-0.5">U36996MH2022PLC390282</td></tr>
-                        <tr><td class="py-0.5">PAN:</td><td class="py-0.5"><%= store.pan || 'AAICN4907E' %></td></tr>
-                        <tr><td class="py-0.5">GSTIN:</td><td class="py-0.5"><%= store.gstin || '27AAICN4907E1ZH' %></td></tr>
-                        <tr><td class="py-0.5">Place of Supply:</td><td class="py-0.5">Pune, Maharashtra</td></tr>
-                        <tr><td class="py-0.5">State Code:</td><td class="py-0.5">27</td></tr>
-                    </tbody>
-                </table>
+    <div class="invoice-container">
+        <div class="border-invoice mb-2">
+            <div class="text-center border-b-invoice py-1">
+                <h1 class="text-lg font-bold">Tax Invoice</h1>
             </div>
 
-            <!-- Customer Details -->
-            <div class="w-1/3 border-r-invoice p-2">
-                <h2 class="font-bold text-xs uppercase mb-1">Customer Details</h2>
-                <table class="w-full">
-                    <tbody>
-                        <tr><td class="py-0.5 w-1/3">Name:</td><td class="py-0.5 font-semibold"><%= order.user ? order.user.name : (shippingAddress.name || 'Guest') %></td></tr>
-                        <tr>
-                            <td class="py-0.5 align-top">Address:</td>
-                            <td class="py-0.5"><%= shippingAddress.addressLine1 || 'Not Provided' %> <%= shippingAddress.city ? ', ' + shippingAddress.city : '' %></td>
-                        </tr>
-                        <tr><td class="py-0.5">Customer ID:</td><td class="py-0.5"><%= order.user ? order.user.id.slice(-6).toUpperCase() : 'N/A' %></td></tr>
-                        <tr><td class="py-0.5">Contact No:</td><td class="py-0.5"><%= order.user ? order.user.phone : (shippingAddress.phone || 'N/A') %></td></tr>
-                        <tr><td class="py-0.5">Email ID:</td><td class="py-0.5"><%= order.user ? order.user.email : 'N/A' %></td></tr>
-                        <tr><td class="py-0.5">PAN ID:</td><td class="py-0.5">Not Mentioned</td></tr>
-                        <tr><td class="py-0.5">GST NO:</td><td class="py-0.5">Not Mentioned</td></tr>
-                    </tbody>
-                </table>
+            <!-- Header Row -->
+            <div class="flex justify-between px-2 py-1 border-b-invoice">
+                <div>Invoice Number : <span class="font-semibold">
+                        <%= invoice.invoiceNumber %>
+                    </span></div>
+                <div>Date & Time : <span class="font-semibold">
+                        <%= new Date(invoice.createdAt || invoice.issueDate).toLocaleString('en-IN') %>
+                    </span></div>
             </div>
 
-            <!-- Metal Rates -->
-            <div class="w-1/3 p-2">
-                <table class="w-full text-xs">
-                    <thead>
-                        <tr>
-                            <th class="text-left font-normal pb-1">Metal Type(Purity)</th>
-                            <th class="text-right font-normal pb-1">Rs/Gram</th>
+            <!-- 3 Column Details Row -->
+            <div class="flex border-b-invoice">
+                <!-- Seller Details -->
+                <div class="w-1/3 border-r-invoice p-2">
+                    <h2 class="font-bold text-xs uppercase">
+                        <%= store.name || 'CARBONSMITH PVT LTD' %>
+                    </h2>
+                    <p class="mt-1">
+                        <%= store.address
+                            || 'Ground Floor, Unit No G-03, Phoenix Mall of the Millennium, Wakad, Pune, Maharashtra, 411057'
+                            %>
+                    </p>
+                    <table class="mt-2 w-full">
+                        <tbody>
+                            <tr>
+                                <td class="py-0.5 w-1/3">Sales Executive:</td>
+                                <td class="py-0.5 font-semibold">
+                                    <%= adminName || 'Admin' %>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="py-0.5 w-1/3">Store Contact No:</td>
+                                <td class="py-0.5">
+                                    <%= store.phone || '020-69121427' %>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="py-0.5">CIN:</td>
+                                <td class="py-0.5">U32119PN2026PTC257070</td>
+                            </tr>
+                            <tr>
+                                <td class="py-0.5">PAN:</td>
+                                <td class="py-0.5">
+                                    <%= store.pan || 'AANCC9664L' %>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="py-0.5">GSTIN:</td>
+                                <td class="py-0.5">
+                                    <%= store.gstin || '27AANCC9664L1ZS' %>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="py-0.5">Place of Supply:</td>
+                                <td class="py-0.5">Pune, Maharashtra</td>
+                            </tr>
+                            <tr>
+                                <td class="py-0.5">State Code:</td>
+                                <td class="py-0.5">27</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Customer Details -->
+                <div class="w-1/3 border-r-invoice p-2">
+                    <h2 class="font-bold text-xs uppercase mb-1">Customer Details</h2>
+                    <table class="w-full">
+                        <tbody>
+                            <tr>
+                                <td class="py-0.5 w-1/3">Name:</td>
+                                <td class="py-0.5 font-semibold">
+                                    <%= order.user ? order.user.name : (shippingAddress.name || 'Guest' ) %>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="py-0.5 align-top">Address:</td>
+                                <td class="py-0.5">
+                                    <%= shippingAddress.addressLine1 || 'Not Provided' %>
+                                        <%= shippingAddress.city ? ', ' + shippingAddress.city : '' %>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="py-0.5">Customer ID:</td>
+                                <td class="py-0.5">
+                                    <%= order.user ? order.user.id.slice(-6).toUpperCase() : 'N/A' %>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="py-0.5">Contact No:</td>
+                                <td class="py-0.5">
+                                    <%= order.user ? order.user.phone : (shippingAddress.phone || 'N/A' ) %>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="py-0.5">Email ID:</td>
+                                <td class="py-0.5">
+                                    <%= order.user ? order.user.email : 'N/A' %>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="py-0.5">PAN ID:</td>
+                                <td class="py-0.5">Not Mentioned</td>
+                            </tr>
+                            <tr>
+                                <td class="py-0.5">GST NO:</td>
+                                <td class="py-0.5">Not Mentioned</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Metal Rates -->
+                <div class="w-1/3 p-2">
+                    <table class="w-full text-xs">
+                        <thead>
+                            <tr>
+                                <th class="text-left font-normal pb-1">Metal Type(Purity)</th>
+                                <th class="text-right font-normal pb-1">Rs/Gram</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Gold 24KT</td>
+                                <td class="text-right">
+                                    <%= (typeof goldRates !=='undefined' && goldRates && goldRates.rate24k) ?
+                                        goldRates.rate24k.toFixed(2) : '---' %>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>Gold 22KT</td>
+                                <td class="text-right">
+                                    <%= (typeof goldRates !=='undefined' && goldRates && goldRates.rate22k) ?
+                                        goldRates.rate22k.toFixed(2) : '---' %>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>Gold 18KT</td>
+                                <td class="text-right">
+                                    <%= (typeof goldRates !=='undefined' && goldRates && goldRates.rate18k) ?
+                                        goldRates.rate18k.toFixed(2) : '---' %>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>Gold 14KT</td>
+                                <td class="text-right">
+                                    <%= (typeof goldRates !=='undefined' && goldRates && goldRates.rate14k) ?
+                                        goldRates.rate14k.toFixed(2) : '---' %>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>Platinum </td>
+                                <td class="text-right">6661.37</td>
+                            </tr>
+                            <tr>
+                                <td>Silver</td>
+                                <td class="text-right">261.14</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Products Table -->
+            <div class="border-b-invoice">
+                <table class="w-full text-center text-[9px]">
+                    <thead class="border-b-invoice">
+                        <tr class="bg-gray-50">
+                            <th class="border-r-invoice py-2 w-32">Description &<br />Serial Number</th>
+                            <th class="border-r-invoice py-2">HSN/Purity</th>
+                            <th class="border-r-invoice py-2">Qty (N)</th>
+                            <th class="border-r-invoice py-2">Gross Wt (g)</th>
+                            <th class="border-r-invoice py-2">Metal Wt (g)</th>
+                            <th class="border-r-invoice py-2">Stone Wt (carat)</th>
+                            <th class="border-r-invoice py-2">Metal Value (<br />Rs.)</th>
+                            <th class="border-r-invoice py-2">Stone Value (<br />Rs.)</th>
+                            <th class="border-r-invoice py-2">Making<br />Charges (Rs.)</th>
+                            <th class="border-r-invoice py-2">Gross Amount (<br />Rs.)</th>
+                            <th class="border-r-invoice py-2">Product<br />Discount (Rs.)</th>
+                            <th class="py-2">Product Value (<br />Rs.)</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <tr><td>Gold 24KT(999)</td><td class="text-right"><%= (typeof goldRates !== 'undefined' && goldRates && goldRates.rate24k) ? goldRates.rate24k.toFixed(2) : '---' %></td></tr>
-                        <tr><td>Gold 22KT(916)</td><td class="text-right"><%= (typeof goldRates !== 'undefined' && goldRates && goldRates.rate22k) ? goldRates.rate22k.toFixed(2) : '---' %></td></tr>
-                        <tr><td>Gold 18KT(750)</td><td class="text-right"><%= (typeof goldRates !== 'undefined' && goldRates && goldRates.rate18k) ? goldRates.rate18k.toFixed(2) : '---' %></td></tr>
-                        <tr><td>Gold 14KT(585)</td><td class="text-right"><%= (typeof goldRates !== 'undefined' && goldRates && goldRates.rate14k) ? goldRates.rate14k.toFixed(2) : '---' %></td></tr>
-                        <tr><td>Platinum (950)</td><td class="text-right">6661.37</td></tr>
-                        <tr><td>Silver</td><td class="text-right">261.14</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
+                        <% let totalGrossWt=0; let totalMetalWt=0; let totalStoneWt=0; let totalMetalValue=0; let
+                            totalStoneValue=0; let totalMaking=0; let totalGrossAmount=0; let totalDiscount=0; let
+                            taxableValue=0; if (order && order.items) { order.items.forEach(function(item) { const
+                            product=item.product || {}; const metalDetails=product.metalDetails || {}; const
+                            stoneDetailsArray=product.stoneDetails || []; const netWeight=Number(metalDetails.netWeight
+                            || 0); const grossWeight=Number(metalDetails.grossWeight || 0); const
+                            stoneWeight=Number(stoneDetailsArray[0]?.netWeight || 0); const
+                            makingCharge=Number(product.makingCharges || 0); const
+                            stoneCharge=Number(product.stoneCharges || 0); const itemTotal=Number(item.totalPrice ||
+                            product.price || 0) * item.quantity; // fallback for metal val calculation const
+                            metalVal=itemTotal> 0 ? Math.max(0, itemTotal - makingCharge - stoneCharge) : 0;
 
-        <!-- Products Table -->
-        <div class="border-b-invoice">
-            <table class="w-full text-center text-[9px]">
-                <thead class="border-b-invoice">
-                    <tr class="bg-gray-50">
-                        <th class="border-r-invoice py-2 w-32">Description &<br />Serial Number</th>
-                        <th class="border-r-invoice py-2">HSN/Purity</th>
-                        <th class="border-r-invoice py-2">Qty (N)</th>
-                        <th class="border-r-invoice py-2">Gross Wt (g)</th>
-                        <th class="border-r-invoice py-2">Metal Wt (g)</th>
-                        <th class="border-r-invoice py-2">Stone Wt (carat)</th>
-                        <th class="border-r-invoice py-2">Metal Value (<br />Rs.)</th>
-                        <th class="border-r-invoice py-2">Stone Value (<br />Rs.)</th>
-                        <th class="border-r-invoice py-2">Making<br />Charges (Rs.)</th>
-                        <th class="border-r-invoice py-2">Gross Amount (<br />Rs.)</th>
-                        <th class="border-r-invoice py-2">Product<br />Discount (Rs.)</th>
-                        <th class="py-2">Product Value (<br />Rs.)</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <% 
-                    let totalGrossWt = 0;
-                    let totalMetalWt = 0;
-                    let totalStoneWt = 0;
-                    let totalMetalValue = 0;
-                    let totalStoneValue = 0;
-                    let totalMaking = 0;
-                    let totalGrossAmount = 0;
-                    let totalDiscount = 0;
-                    let taxableValue = 0;
-                    
-                    if (order && order.items) {
-                        order.items.forEach(function(item) {
-                            const product = item.product || {};
-                            const metalDetails = product.metalDetails || {};
-                            const stoneDetailsArray = product.stoneDetails || [];
-                            
-                            const netWeight = Number(metalDetails.netWeight || 0);
-                            const grossWeight = Number(metalDetails.grossWeight || 0);
-                            const stoneWeight = Number(stoneDetailsArray[0]?.netWeight || 0);
-
-                            const makingCharge = Number(product.makingCharges || 0);
-                            const stoneCharge = Number(product.stoneCharges || 0);
-                            
-                            const itemTotal = Number(item.totalPrice || product.price || 0) * item.quantity;
-                            
-                            // fallback for metal val calculation
-                            const metalVal = itemTotal > 0 ? Math.max(0, itemTotal - makingCharge - stoneCharge) : 0;
-                            
                             const grossAmt = metalVal + makingCharge + stoneCharge;
                             const itemDiscount = Number(product.discount || 0) * item.quantity;
                             const productVal = grossAmt - itemDiscount;
@@ -162,151 +270,234 @@
                             totalGrossAmount += grossAmt;
                             totalDiscount += itemDiscount;
                             taxableValue += productVal;
-                    %>
-                    <tr class="border-b-invoice">
-                        <td class="border-r-invoice text-left">
-                            <%= product.name || 'Custom Item' %><br />
-                            <%= product.sku || '' %>
-                        </td>
-                        <td class="border-r-invoice"><%= product.hsnCode || '71131912' %> / <%= metalDetails.purity || '22KT' %></td>
-                        <td class="border-r-invoice"><%= item.quantity || 1 %></td>
-                        <td class="border-r-invoice"><%= grossWeight.toFixed(3) %></td>
-                        <td class="border-r-invoice"><%= netWeight.toFixed(3) %></td>
-                        <td class="border-r-invoice"><%= stoneWeight.toFixed(3) %></td>
-                        <td class="border-r-invoice"><%= metalVal.toFixed(2) %></td>
-                        <td class="border-r-invoice"><%= stoneCharge.toFixed(2) %></td>
-                        <td class="border-r-invoice"><%= makingCharge.toFixed(2) %></td>
-                        <td class="border-r-invoice"><%= grossAmt.toFixed(2) %></td>
-                        <td class="border-r-invoice"><%= itemDiscount.toFixed(2) %></td>
-                        <td class=""><%= productVal.toFixed(2) %></td>
-                    </tr>
-                    <% 
-                        }); 
-                    } 
-                    %>
+                            %>
+                            <tr class="border-b-invoice">
+                                <td class="border-r-invoice text-left">
+                                    <%= product.name || 'Custom Item' %><br />
+                                        <%= product.sku || '' %>
+                                </td>
+                                <td class="border-r-invoice">
+                                    <%= product.hsnCode || '71131912' %> / <%= metalDetails.purity || '22KT' %>
+                                </td>
+                                <td class="border-r-invoice">
+                                    <%= item.quantity || 1 %>
+                                </td>
+                                <td class="border-r-invoice">
+                                    <%= grossWeight.toFixed(3) %>
+                                </td>
+                                <td class="border-r-invoice">
+                                    <%= netWeight.toFixed(3) %>
+                                </td>
+                                <td class="border-r-invoice">
+                                    <%= stoneWeight.toFixed(3) %>
+                                </td>
+                                <td class="border-r-invoice">
+                                    <%= metalVal.toFixed(2) %>
+                                </td>
+                                <td class="border-r-invoice">
+                                    <%= stoneCharge.toFixed(2) %>
+                                </td>
+                                <td class="border-r-invoice">
+                                    <%= makingCharge.toFixed(2) %>
+                                </td>
+                                <td class="border-r-invoice">
+                                    <%= grossAmt.toFixed(2) %>
+                                </td>
+                                <td class="border-r-invoice">
+                                    <%= itemDiscount.toFixed(2) %>
+                                </td>
+                                <td class="">
+                                    <%= productVal.toFixed(2) %>
+                                </td>
+                            </tr>
+                            <% }); } %>
 
-                    <!-- Totals Row -->
-                    <tr class="font-bold bg-gray-50">
-                        <td class="border-r-invoice text-right pr-4" colspan="2">Total</td>
-                        <td class="border-r-invoice"><%= order.items ? order.items.length : 0 %></td>
-                        <td class="border-r-invoice"><%= totalGrossWt.toFixed(3) %></td>
-                        <td class="border-r-invoice"></td>
-                        <td class="border-r-invoice"></td>
-                        <td class="border-r-invoice"><%= totalMetalValue.toFixed(2) %></td>
-                        <td class="border-r-invoice"><%= totalStoneValue.toFixed(2) %></td>
-                        <td class="border-r-invoice"><%= totalMaking.toFixed(2) %></td>
-                        <td class="border-r-invoice"><%= totalGrossAmount.toFixed(2) %></td>
-                        <td class="border-r-invoice"><%= totalDiscount.toFixed(2) %></td>
-                        <td class=""><%= taxableValue.toFixed(2) %></td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-
-        <% 
-            const finalTaxable = Number(order.subTotal || taxableValue);
-            const cgst = Number(order.taxTotal || 0) / 2;
-            const sgst = Number(order.taxTotal || 0) / 2;
-            const invoiceValue = finalTaxable + cgst + sgst;
-            const roundOff = Math.round(invoiceValue) - invoiceValue;
-            const netPayable = Math.round(invoiceValue);
-        %>
-
-        <!-- Bottom Split Section -->
-        <div class="flex border-b-invoice">
-            <!-- Left: Payments & Discounts -->
-            <div class="w-1/2 border-r-invoice">
-                <table class="w-full text-xs">
-                    <thead class="border-b-invoice bg-gray-50">
-                        <tr>
-                            <th class="text-left font-normal border-r-invoice">Payment</th>
-                            <th class="text-left font-normal border-r-invoice">Reference No</th>
-                            <th class="text-right font-normal">Amount</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td class="border-r-invoice"><%= (order.paymentMethod || 'Online').toUpperCase() %></td>
-                            <td class="border-r-invoice"><%= order.razorpayPaymentId || order.razorpayOrderId || '---' %></td>
-                            <td class="text-right"><%= netPayable.toFixed(2) %></td>
-                        </tr>
-                    </tbody>
-                </table>
-                <table class="w-full text-xs mt-4 border-t-invoice">
-                    <thead class="border-b-invoice bg-gray-50">
-                        <tr>
-                            <th class="text-left font-normal border-r-invoice">Discount Breakup</th>
-                            <th class="text-right font-normal">Amount</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td class="border-r-invoice">Store Offer</td>
-                            <td class="text-right"><%= totalDiscount.toFixed(2) %></td>
-                        </tr>
-                        <tr class="border-t-invoice font-bold">
-                            <td class="border-r-invoice text-center">Total</td>
-                            <td class="text-right"><%= totalDiscount.toFixed(2) %></td>
-                        </tr>
+                                <!-- Totals Row -->
+                                <tr class="font-bold bg-gray-50">
+                                    <td class="border-r-invoice text-right pr-4" colspan="2">Total</td>
+                                    <td class="border-r-invoice">
+                                        <%= order.items ? order.items.length : 0 %>
+                                    </td>
+                                    <td class="border-r-invoice">
+                                        <%= totalGrossWt.toFixed(3) %>
+                                    </td>
+                                    <td class="border-r-invoice"></td>
+                                    <td class="border-r-invoice"></td>
+                                    <td class="border-r-invoice">
+                                        <%= totalMetalValue.toFixed(2) %>
+                                    </td>
+                                    <td class="border-r-invoice">
+                                        <%= totalStoneValue.toFixed(2) %>
+                                    </td>
+                                    <td class="border-r-invoice">
+                                        <%= totalMaking.toFixed(2) %>
+                                    </td>
+                                    <td class="border-r-invoice">
+                                        <%= totalGrossAmount.toFixed(2) %>
+                                    </td>
+                                    <td class="border-r-invoice">
+                                        <%= totalDiscount.toFixed(2) %>
+                                    </td>
+                                    <td class="">
+                                        <%= taxableValue.toFixed(2) %>
+                                    </td>
+                                </tr>
                     </tbody>
                 </table>
             </div>
 
-            <!-- Right: Tax Summary -->
-            <div class="w-1/2">
-                <table class="w-full text-xs">
-                    <tbody>
-                        <tr><td class="py-1 px-2 border-b-invoice border-r-invoice">Taxable Value:</td><td class="py-1 px-2 border-b-invoice text-right"><%= finalTaxable.toFixed(2) %></td></tr>
-                        <tr><td class="py-1 px-2 border-b-invoice border-r-invoice">CGST 1.5%:</td><td class="py-1 px-2 border-b-invoice text-right"><%= cgst.toFixed(2) %></td></tr>
-                        <tr><td class="py-1 px-2 border-b-invoice border-r-invoice">SGST 1.5%:</td><td class="py-1 px-2 border-b-invoice text-right"><%= sgst.toFixed(2) %></td></tr>
-                        <tr><td class="py-1 px-2 border-b-invoice border-r-invoice">Total Invoice Value:</td><td class="py-1 px-2 border-b-invoice text-right"><%= invoiceValue.toFixed(2) %></td></tr>
-                        <tr><td class="py-1 px-2 border-b-invoice border-r-invoice">Round off:</td><td class="py-1 px-2 border-b-invoice text-right"><%= roundOff.toFixed(2) %></td></tr>
-                        <tr class="font-bold bg-gray-50"><td class="py-2 px-2 border-b-invoice border-r-invoice">Net Payable:</td><td class="py-2 px-2 border-b-invoice text-right text-sm"><%= netPayable.toFixed(2) %></td></tr>
-                        <tr>
-                            <td colspan="2" class="py-2 px-2 text-right italic">
-                                <span class="float-left not-italic">Amount In Words</span>
-                                <%= amountInWords %> 
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
+            <% const finalTaxable=Number(order.subTotal || taxableValue); const cgst=Number(order.taxTotal || 0) / 2;
+                const sgst=Number(order.taxTotal || 0) / 2; const invoiceValue=finalTaxable + cgst + sgst; const
+                roundOff=Math.round(invoiceValue) - invoiceValue; const netPayable=Math.round(invoiceValue); %>
 
-        <!-- Declarations -->
-        <div class="p-2 text-[8px] leading-tight border-b-invoice">
-            <div class="flex justify-between font-bold mb-1">
-                <span>Declaration</span>
-                <span>*E&OE*</span>
-            </div>
-            <ol class="list-decimal pl-4 space-y-0.5">
-                <li>Total Invoice Value includes Metal Cost, Stone Cost (Precious, Non-Precious), Wastage charges, Making Charges including Hall Marking(HM), GST, other taxes (as applicable) and applicable discounts.</li>
-                <li>Product Value is inclusive of Hallmarking Charges(HM) of Rs.45/- per piece for Gold & Rs.35/- per piece for Silver.</li>
-                <li>Gross weight includes the total weight of the product including metal, stones etc.</li>
-                <li>Net weight of metal(s) include the total weight of all metal(s) which are part of the product.</li>
-                <li>Net weight of stone(s) include the total weight of all Precious, Non-Precious stone(s) which are part of the product.</li>
-                <li>The Certificate of Authenticity has been issued for the invoiced products and handed over to the customer.</li>
-                <li>The consumer can get the purity of the Hallmarked jewellery/articles verified from any of the BIS recognised A & H Centre.</li>
-                <li>The list of A & H recognised centre along with address and contact details is available on the website www.bis.gov.in.</li>
-            </ol>
-            <div class="mt-2 font-bold p-1 border border-black bg-gray-50">
-                I hereby confirm the weight, purity and Invoice value stated above and read all terms and conditions overleaf. I further acknowledge the receipt of the products in good condition along with necessary certificates.
-            </div>
-        </div>
+                <!-- Bottom Split Section -->
+                <div class="flex border-b-invoice">
+                    <!-- Left: Payments & Discounts -->
+                    <div class="w-1/2 border-r-invoice">
+                        <table class="w-full text-xs">
+                            <thead class="border-b-invoice bg-gray-50">
+                                <tr>
+                                    <th class="text-left font-normal border-r-invoice">Payment</th>
+                                    <th class="text-left font-normal border-r-invoice">Reference No</th>
+                                    <th class="text-right font-normal">Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td class="border-r-invoice">
+                                        <%= (order.paymentMethod || 'Online' ).toUpperCase() %>
+                                    </td>
+                                    <td class="border-r-invoice">
+                                        <%= order.razorpayPaymentId || order.razorpayOrderId || '---' %>
+                                    </td>
+                                    <td class="text-right">
+                                        <%= netPayable.toFixed(2) %>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <table class="w-full text-xs mt-4 border-t-invoice">
+                            <thead class="border-b-invoice bg-gray-50">
+                                <tr>
+                                    <th class="text-left font-normal border-r-invoice">Discount Breakup</th>
+                                    <th class="text-right font-normal">Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td class="border-r-invoice">Store Offer</td>
+                                    <td class="text-right">
+                                        <%= totalDiscount.toFixed(2) %>
+                                    </td>
+                                </tr>
+                                <tr class="border-t-invoice font-bold">
+                                    <td class="border-r-invoice text-center">Total</td>
+                                    <td class="text-right">
+                                        <%= totalDiscount.toFixed(2) %>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
 
-        <!-- Signatures -->
-        <div class="flex justify-end p-4 pt-12">
-            <div class="text-xs">
-                <div class="flex items-center gap-4 mb-8">
-                    <span class="w-28 text-right">Customer Name :</span>
-                    <span class="font-bold border-b border-black w-40 text-center"><%= order.user ? order.user.name : (shippingAddress.name || 'Guest') %></span>
+                    <!-- Right: Tax Summary -->
+                    <div class="w-1/2">
+                        <table class="w-full text-xs">
+                            <tbody>
+                                <tr>
+                                    <td class="py-1 px-2 border-b-invoice border-r-invoice">Taxable Value:</td>
+                                    <td class="py-1 px-2 border-b-invoice text-right">
+                                        <%= finalTaxable.toFixed(2) %>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="py-1 px-2 border-b-invoice border-r-invoice">CGST 1.5%:</td>
+                                    <td class="py-1 px-2 border-b-invoice text-right">
+                                        <%= cgst.toFixed(2) %>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="py-1 px-2 border-b-invoice border-r-invoice">SGST 1.5%:</td>
+                                    <td class="py-1 px-2 border-b-invoice text-right">
+                                        <%= sgst.toFixed(2) %>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="py-1 px-2 border-b-invoice border-r-invoice">Total Invoice Value:</td>
+                                    <td class="py-1 px-2 border-b-invoice text-right">
+                                        <%= invoiceValue.toFixed(2) %>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="py-1 px-2 border-b-invoice border-r-invoice">Round off:</td>
+                                    <td class="py-1 px-2 border-b-invoice text-right">
+                                        <%= roundOff.toFixed(2) %>
+                                    </td>
+                                </tr>
+                                <tr class="font-bold bg-gray-50">
+                                    <td class="py-2 px-2 border-b-invoice border-r-invoice">Net Payable:</td>
+                                    <td class="py-2 px-2 border-b-invoice text-right text-sm">
+                                        <%= netPayable.toFixed(2) %>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td colspan="2" class="py-2 px-2 text-right italic">
+                                        <span class="float-left not-italic">Amount In Words</span>
+                                        <%= amountInWords %>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
-                <div class="text-right pr-20">Customer Signature</div>
-            </div>
-        </div>
 
+                <!-- Declarations -->
+                <div class="p-2 text-[8px] leading-tight border-b-invoice">
+                    <div class="flex justify-between font-bold mb-1">
+                        <span>Declaration</span>
+                        <span>*E&OE*</span>
+                    </div>
+                    <ol class="list-decimal pl-4 space-y-0.5">
+                        <li>Total Invoice Value includes Metal Cost, Stone Cost (Precious, Non-Precious), Wastage
+                            charges, Making Charges including Hall Marking(HM), GST, other taxes (as applicable) and
+                            applicable discounts.</li>
+                        <li>Product Value is inclusive of Hallmarking Charges(HM) of Rs.45/- per piece for Gold &
+                            Rs.35/- per piece for Silver.</li>
+                        <li>Gross weight includes the total weight of the product including metal, stones etc.</li>
+                        <li>Net weight of metal(s) include the total weight of all metal(s) which are part of the
+                            product.</li>
+                        <li>Net weight of stone(s) include the total weight of all Precious, Non-Precious stone(s) which
+                            are part of the product.</li>
+                        <li>The Certificate of Authenticity has been issued for the invoiced products and handed over to
+                            the customer.</li>
+                        <li>The consumer can get the purity of the Hallmarked jewellery/articles verified from any of
+                            the BIS recognised A & H Centre.</li>
+                        <li>The list of A & H recognised centre along with address and contact details is available on
+                            the website www.bis.gov.in.</li>
+                    </ol>
+                    <div class="mt-2 font-bold p-1 border border-black bg-gray-50">
+                        I hereby confirm the weight, purity and Invoice value stated above and read all terms and
+                        conditions overleaf. I further acknowledge the receipt of the products in good condition along
+                        with necessary certificates.
+                    </div>
+                </div>
+
+                <!-- Signatures -->
+                <div class="flex justify-end p-4 pt-12">
+                    <div class="text-xs">
+                        <div class="flex items-center gap-4 mb-8">
+                            <span class="w-28 text-right">Customer Name :</span>
+                            <span class="font-bold border-b border-black w-40 text-center">
+                                <%= order.user ? order.user.name : (shippingAddress.name || 'Guest' ) %>
+                            </span>
+                        </div>
+                        <div class="text-right pr-20">Customer Signature</div>
+                    </div>
+                </div>
+
+        </div>
     </div>
-</div>
 
 </body>
+
 </html>
