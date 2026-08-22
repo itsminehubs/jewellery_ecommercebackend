@@ -65,6 +65,9 @@ model User {
   customOrders CustomOrder[]
   reviews      Review[]
 
+  imitationOrdersAsCustomer ImitationSale[] @relation("ImitationCustomer")
+  imitationOrdersAsStaff    ImitationSale[] @relation("ImitationStaff")
+
   repairs           Repair[]
   billedRepairs     Repair[]  @relation("BilledRepairs")
   auditsPerformed   Audit[]   @relation("Auditor")
@@ -316,6 +319,30 @@ model POSOrder {
   items             POSOrderItem[]
   invoice           Invoice?
   schemeRedemptions Scheme[]
+}
+
+model ImitationSale {
+  id          String   @id @default(uuid())
+  orderNumber String   @unique
+  customerId  String?
+  staffId     String
+
+  // Sale Details
+  productName String
+  unitPrice   Decimal  @db.Decimal(20, 2)
+  discount    Decimal  @default(0) @db.Decimal(20, 2)
+  gstAmount   Decimal  @default(0) @db.Decimal(20, 2)
+  grandTotal  Decimal  @db.Decimal(20, 2)
+  paymentMode String   @default("cash") // cash, card, upi, cheque
+
+  status      String   @default("completed") // completed, cancelled
+  notes       String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  customer    User?    @relation("ImitationCustomer", fields: [customerId], references: [id])
+  staff       User     @relation("ImitationStaff", fields: [staffId], references: [id])
 }
 
 model POSOrderItem {
