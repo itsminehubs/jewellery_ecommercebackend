@@ -419,7 +419,7 @@ const getStoreOrders = async (shop_id, query = {}) => {
         where,
         include: {
             staff: { select: { name: true } },
-            customer: { select: { name: true, phone: true } },
+            customer: { select: { id: true, name: true, phone: true, email: true, addresses: true } },
             items: { include: { product: { include: { metalDetails: true, stoneDetails: true } } } }
         },
         orderBy: { createdAt: 'desc' },
