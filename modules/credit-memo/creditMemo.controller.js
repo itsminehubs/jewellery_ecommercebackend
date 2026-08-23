@@ -86,7 +86,7 @@ const searchActiveMemos = asyncHandler(async (req, res) => {
 
 // Create new Credit Memo
 const createCreditMemo = asyncHandler(async (req, res) => {
-    const { customer, originalAmount, paymentMethod, notes, shop_id, linkedItems, totalProductPrice } = req.body;
+    const { customer, originalAmount, paymentMethod, notes, shop_id, linkedItems } = req.body;
     
     if (!customer || !originalAmount || !paymentMethod) {
         return ApiResponse.error('Customer ID, originalAmount, and paymentMethod are required', 400).send(res);
@@ -130,7 +130,6 @@ const createCreditMemo = asyncHandler(async (req, res) => {
                 balance: Number(originalAmount),
                 paymentMethod,
                 notes,
-                totalProductPrice: totalProductPrice ? Number(totalProductPrice) : 0,
                 linkedItems: validLinkedItems,
                 shopId: shop_id || 'MAIN',
                 createdById: req.user.id
