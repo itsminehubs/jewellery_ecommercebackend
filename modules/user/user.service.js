@@ -96,7 +96,7 @@ const createQuickCustomer = async (customerData) => {
       phone,
       email,
       password: hashedPassword,
-      role: 'USER',
+      role: 'user',
       isPhoneVerified: true, // Assumption for POS in-person
       addresses: addressData
     },
