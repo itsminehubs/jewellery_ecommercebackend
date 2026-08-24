@@ -36,10 +36,13 @@ const getOrderById = asyncHandler(async (req, res) => {
 });
 
 const getStoreAnalytics = asyncHandler(async (req, res) => {
-    const shop_id = req.headers['x-shop-id'] || req.query.shop_id;
+    let shop_id = req.headers['x-shop-id'] || req.query.shop_id;
+    if (shop_id === 'all' || shop_id === 'undefined' || !shop_id) {
+        shop_id = null;
+    }
     const { startDate, endDate, includeOnline } = req.query;
-    if (!shop_id || !startDate || !endDate) {
-        throw new ApiError(400, 'Shop ID, startDate, and endDate are required');
+    if (!startDate || !endDate) {
+        throw new ApiError(400, 'startDate and endDate are required');
     }
     const analytics = await posOrderService.getStoreAnalytics(shop_id, startDate, endDate, includeOnline === 'true');
     ApiResponse.success(analytics, 'Analytics fetched successfully').send(res);
