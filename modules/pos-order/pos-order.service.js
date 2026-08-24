@@ -450,7 +450,7 @@ const getOrderById = async (id) => {
     });
 };
 
-const getStoreAnalytics = async (shop_id, startDate, endDate) => {
+const getStoreAnalytics = async (shop_id, startDate, endDate, includeOnline = false) => {
     // Resolve store UUID
     let storeId = shop_id;
     const isUUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(shop_id);
@@ -474,10 +474,133 @@ const getStoreAnalytics = async (shop_id, startDate, endDate) => {
         }
     });
 
+    const imitationStats = await prisma.imitationSale.aggregate({
+        where: {
+            createdAt: { gte: new Date(startDate), lte: new Date(endDate) }
+        },
+        _sum: { grandTotal: true },
+        _count: { id: true }
+    });
+
+    const creditMemoStats = await prisma.creditMemo.aggregate({
+        where: {
+            createdAt: { gte: new Date(startDate), lte: new Date(endDate) }
+        },
+        _sum: { originalAmount: true },
+        _count: { id: true }
+    });
+
+    // Dynamic Chart Grouping Logic
+    const diffTime = Math.abs(new Date(endDate) - new Date(startDate));
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    const posOrdersRaw = await prisma.pOSOrder.findMany({
+        where: { storeId: storeId, createdAt: { gte: new Date(startDate), lte: new Date(endDate) }, status: 'completed' },
+        select: { createdAt: true, grandTotal: true, customerId: true },
+        orderBy: { createdAt: 'asc' }
+    });
+
+    const uniqueCustomerIds = new Set();
+    posOrdersRaw.forEach(order => {
+        if (order.customerId) {
+            uniqueCustomerIds.add(order.customerId);
+        }
+    });
+    const totalCustomers = uniqueCustomerIds.size;
+
+    
+    const imitationSalesRaw = await prisma.imitationSale.findMany({
+        where: { createdAt: { gte: new Date(startDate), lte: new Date(endDate) } },
+        select: { createdAt: true, grandTotal: true },
+        orderBy: { createdAt: 'asc' }
+    });
+    
+    const creditMemosRaw = await prisma.creditMemo.findMany({
+        where: { createdAt: { gte: new Date(startDate), lte: new Date(endDate) } },
+        select: { createdAt: true, originalAmount: true },
+        orderBy: { createdAt: 'asc' }
+    });
+
+    const onlineOrdersRaw = includeOnline ? await prisma.order.findMany({
+        where: { createdAt: { gte: new Date(startDate), lte: new Date(endDate) }, paymentStatus: 'completed' },
+        select: { createdAt: true, grandTotal: true },
+        orderBy: { createdAt: 'asc' }
+    }) : [];
+
+    const groupMultiData = (posData, onlineData) => {
+        const map = new Map();
+        
+        const processData = (data, key) => {
+            data.forEach(item => {
+                const date = new Date(item.createdAt);
+                let label = '';
+                if (diffDays <= 1) {
+                    const hr = date.getHours();
+                    label = `${hr % 12 || 12}${hr < 12 ? 'am' : 'pm'}`;
+                } else if (diffDays <= 7) {
+                    label = date.toLocaleDateString('en-US', { weekday: 'short' });
+                } else if (diffDays <= 31) {
+                    label = date.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+                } else {
+                    label = date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+                }
+                
+                if (!map.has(label)) {
+                    map.set(label, { name: label, sales: 0, onlineSales: 0 });
+                }
+                map.get(label)[key] += Number(item.grandTotal || 0);
+            });
+        };
+        
+        processData(posData, 'sales');
+        if (onlineData) {
+            processData(onlineData, 'onlineSales');
+        }
+        
+        const arr = Array.from(map.values());
+        return arr.length > 0 ? arr : [{ name: 'No Data', sales: 0, onlineSales: 0 }];
+    };
+
+    const groupData = (data, valueKey) => {
+        const map = new Map(); // using Map to preserve insertion order
+        data.forEach(item => {
+            const date = new Date(item.createdAt);
+            let label = '';
+            
+            if (diffDays <= 1) {
+                const hr = date.getHours();
+                label = `${hr % 12 || 12}${hr < 12 ? 'am' : 'pm'}`;
+            } else if (diffDays <= 7) {
+                label = date.toLocaleDateString('en-US', { weekday: 'short' });
+            } else if (diffDays <= 31) {
+                label = date.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+            } else {
+                label = date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+            }
+            
+            map.set(label, (map.get(label) || 0) + Number(item[valueKey] || 0));
+        });
+        
+        const arr = Array.from(map, ([name, sales]) => ({ name, sales }));
+        return arr.length > 0 ? arr : [{ name: 'No Data', sales: 0 }];
+    };
+
+    const charts = {
+        gold: groupMultiData(posOrdersRaw, onlineOrdersRaw),
+        imitation: groupData(imitationSalesRaw, 'grandTotal'),
+        credit: groupData(creditMemosRaw, 'originalAmount')
+    };
+
     return [{
         totalSales: stats._sum.grandTotal || 0,
         orderCount: stats._count.id || 0,
-        totalGST: stats._sum.taxTotal || 0
+        totalGST: stats._sum.taxTotal || 0,
+        imitationSalesTotal: imitationStats._sum.grandTotal || 0,
+        imitationCount: imitationStats._count.id || 0,
+        creditMemoTotal: creditMemoStats._sum.originalAmount || 0,
+        creditMemoCount: creditMemoStats._count.id || 0,
+        totalCustomers: totalCustomers || 0,
+        charts
     }];
 };
 
