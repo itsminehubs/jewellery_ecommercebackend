@@ -452,16 +452,19 @@ const getOrderById = async (id) => {
 
 const getStoreAnalytics = async (shop_id, startDate, endDate, includeOnline = false) => {
     // Resolve store UUID
-    let storeId = shop_id;
-    const isUUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(shop_id);
-    if (!isUUID) {
-        const store = await prisma.store.findUnique({ where: { shop_id } });
-        if (store) storeId = store.id;
+    let storeId = undefined;
+    if (shop_id) {
+        storeId = shop_id;
+        const isUUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(shop_id);
+        if (!isUUID) {
+            const store = await prisma.store.findUnique({ where: { shop_id } });
+            if (store) storeId = store.id;
+        }
     }
 
     const stats = await prisma.pOSOrder.aggregate({
         where: {
-            storeId: storeId,
+            ...(storeId ? { storeId: storeId } : {}),
             createdAt: { gte: new Date(startDate), lte: new Date(endDate) },
             status: 'completed'
         },
@@ -495,7 +498,7 @@ const getStoreAnalytics = async (shop_id, startDate, endDate, includeOnline = fa
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
     const posOrdersRaw = await prisma.pOSOrder.findMany({
-        where: { storeId: storeId, createdAt: { gte: new Date(startDate), lte: new Date(endDate) }, status: 'completed' },
+        where: { ...(storeId ? { storeId: storeId } : {}), createdAt: { gte: new Date(startDate), lte: new Date(endDate) }, status: 'completed' },
         select: { createdAt: true, grandTotal: true, customerId: true },
         orderBy: { createdAt: 'asc' }
     });
