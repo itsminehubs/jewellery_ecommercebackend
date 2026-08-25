@@ -8,8 +8,9 @@ const logger = require('../../utils/logger');
  * @returns {Promise<User>}
  */
 const awardPointsPrisma = async (userId, amountPaid, tx = null) => {
-    const pointsToAward = Math.floor(amountPaid / 1000);
-    if (pointsToAward <= 0) return;
+    const validAmount = Number(amountPaid) || 0;
+    const pointsToAward = Math.floor(validAmount / 1000);
+    if (isNaN(pointsToAward) || pointsToAward <= 0) return;
 
     const db = tx || prisma;
     const user = await db.user.findUnique({ where: { id: userId } });
@@ -63,8 +64,9 @@ const awardPoints = awardPointsPrisma;
  * Deduct user loyalty points
  */
 const deductPoints = async (userId, amountRefunded, tx = null) => {
-    const pointsToDeduct = Math.floor(amountRefunded / 1000);
-    if (pointsToDeduct <= 0) return;
+    const validAmount = Number(amountRefunded) || 0;
+    const pointsToDeduct = Math.floor(validAmount / 1000);
+    if (isNaN(pointsToDeduct) || pointsToDeduct <= 0) return;
 
     const db = tx || prisma;
     const user = await db.user.findUnique({ where: { id: userId } });

@@ -34,6 +34,10 @@ model User {
   dailyPointsEarned    Int      @default(0)
   lastPointsUpdateDate DateTime @default(now())
 
+  // Tax/KYC
+  panNumber            String?
+  gstNumber            String?
+
   // Financial (Udhar System)
   outstandingBalance Decimal   @default(0) @db.Decimal(20, 2)
   creditLimit        Decimal   @default(50000) @db.Decimal(20, 2)
@@ -310,6 +314,9 @@ model POSOrder {
   status String  @default("completed") // completed, refunded, cancelled
   notes  String?
 
+  customerPan String?
+  customerGst String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -397,6 +404,9 @@ model CreditMemo {
   linkedItems       Json?
   createdById       String?
 
+  customerPan       String?
+  customerGst       String?
+
   expiresAt DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -449,6 +459,9 @@ model Order {
   shippingAddressId String
   orderStatus       String  @default("pending") // pending, processing, shipped, delivered, cancelled
   trackingNumber    String?
+
+  customerPan       String?
+  customerGst       String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

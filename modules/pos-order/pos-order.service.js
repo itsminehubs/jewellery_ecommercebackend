@@ -196,6 +196,14 @@ const createOrder = async (orderData) => {
         const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
         const orderNumber = `POS-${orderData.shop_id}-${dateStr}-${count.toString().padStart(4, '0')}-${randomSuffix}`;
 
+        // Validate PAN for large transactions
+        if (orderData.grandTotal > 200000 && !orderData.customerPan) {
+            throw new Error('PAN is mandatory for transactions above ₹2,00,000');
+        }
+        if (orderData.customerPan && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(orderData.customerPan)) {
+            throw new Error('Invalid PAN card format. It should be like ABCDE1234F');
+        }
+
         // Prepare totals
         let totalCash = 0;
         let totalOnline = 0;
@@ -267,13 +275,14 @@ const createOrder = async (orderData) => {
             }
         }
 
-        // 4. Create the order
         const order = await tx.pOSOrder.create({
             data: {
                 orderNumber,
                 storeId: storeId,
                 customerId: orderData.customerId || null,
                 staffId: orderData.billedBy,
+                customerPan: orderData.customerPan || null,
+                customerGst: orderData.customerGst || null,
                 subTotal: orderData.subTotal || orderData.subtotal || 0,
                 taxTotal: orderData.totalGST || orderData.taxTotal || 0,
                 discountTotal: orderData.discount || orderData.discountTotal || 0,
