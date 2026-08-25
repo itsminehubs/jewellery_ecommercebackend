@@ -86,6 +86,9 @@ const createOrder = async (userId, orderData) => {
         if (total >= 200000 && !orderData.customerPan) {
             throw ApiError.badRequest('PAN number is required for orders above ₹2,00,000');
         }
+        if (orderData.customerPan && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(orderData.customerPan)) {
+            throw ApiError.badRequest('Invalid PAN card format. It should be like ABCDE1234F');
+        }
 
         // Generate Order Number
         const count = await tx.order.count() + 1;
@@ -95,6 +98,8 @@ const createOrder = async (userId, orderData) => {
             data: {
                 orderNumber,
                 userId: userId,
+                customerPan: orderData.customerPan || null,
+                customerGst: orderData.customerGst || null,
                 orderStatus: 'pending',
                 paymentStatus: 'pending',
                 paymentMethod: orderData.paymentMethod || 'COD',
