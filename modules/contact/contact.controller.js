@@ -15,7 +15,14 @@ const getAllInquiries = asyncHandler(async (req, res) => {
     ApiResponse.success(inquiries, 'Inquiries fetched successfully').send(res);
 });
 
+const deleteInquiry = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    await contactService.deleteInquiry(id);
+    ApiResponse.success(null, 'Inquiry deleted successfully').send(res);
+});
+
 module.exports = {
     submitInquiry,
-    getAllInquiries
+    getAllInquiries,
+    deleteInquiry
 };
