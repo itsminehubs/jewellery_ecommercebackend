@@ -6,20 +6,71 @@ const { sendEmail } = require('../../jobs/email.job');
 const { generateInvoiceEmail } = require('../../utils/emailTemplates');
 
 const generateInvoice = async (orderId, adminId) => {
-    const order = await prisma.order.findUnique({
+    let order = await prisma.order.findUnique({
         where: { id: orderId },
-        include: { user: true, items: { include: { product: true } } }
+        include: { user: { include: { addresses: true } }, items: { include: { product: true } } }
     });
+
+    let isPosOrder = false;
+
+    if (!order) {
+        order = await prisma.pOSOrder.findUnique({
+            where: { id: orderId },
+            include: { customer: { include: { addresses: true } }, items: { include: { product: true } } }
+        });
+        if (order) {
+            isPosOrder = true;
+            // Map customer to user for email dispatch compatibility
+            order.user = order.customer;
+        }
+    }
 
     if (!order) throw ApiError.notFound('Order not found');
 
-    const invoiceNumber = `INV-${Date.now()}`;
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    
+    let startYear, endYear;
+    if (currentMonth >= 3) {
+        startYear = currentYear;
+        endYear = currentYear + 1;
+    } else {
+        startYear = currentYear - 1;
+        endYear = currentYear;
+    }
+    
+    const startYearStr = startYear.toString().slice(-2);
+    const endYearStr = endYear.toString().slice(-2);
+    const fyString = `${startYearStr}/${endYearStr}`;
+
+    const fyStartDate = new Date(startYear, 3, 1);
+    
+    const lastInvoice = await prisma.invoice.findFirst({
+        where: { createdAt: { gte: fyStartDate } },
+        orderBy: { createdAt: 'desc' }
+    });
+
+    let nextNumber = 1;
+    if (lastInvoice && lastInvoice.invoiceNumber.includes(`CS-INV-${fyString}-`)) {
+        const parts = lastInvoice.invoiceNumber.split('-');
+        const lastNum = parseInt(parts[parts.length - 1], 10);
+        if (!isNaN(lastNum)) {
+            nextNumber = lastNum + 1;
+        }
+    } else if (!lastInvoice) {
+        const count = await prisma.invoice.count({ where: { createdAt: { gte: fyStartDate } } });
+        nextNumber = count + 1;
+    }
+
+    const formattedNumber = String(nextNumber).padStart(4, '0');
+    const invoiceNumber = `CS-INV-${fyString}-${formattedNumber}`;
     const dueDate = new Date();
     dueDate.setDate(dueDate.getDate() + 7);
 
     const invoice = await prisma.invoice.create({
         data: {
-            orderId: order.id,
+            [isPosOrder ? 'posOrderId' : 'orderId']: order.id,
             invoiceNumber,
             date: new Date(),
             dueDate,
@@ -69,13 +120,19 @@ const downloadInvoice = async (invoiceId) => {
 
     const invoice = await prisma.invoice.findUnique({
         where: { id: invoiceId },
-        include: { order: { include: { user: true, items: { include: { product: true } } } } }
+        include: { 
+            order: { include: { user: { include: { addresses: true } }, items: { include: { product: true } } } },
+            posOrder: { include: { customer: { include: { addresses: true } }, items: { include: { product: true } } } }
+        }
     });
 
     if (!invoice) throw ApiError.notFound('Invoice not found');
 
-    const order = invoice.order;
+    const order = invoice.order || invoice.posOrder;
     if (!order) throw ApiError.notFound('Order not found');
+    if (invoice.posOrder) {
+        order.user = invoice.posOrder.customer;
+    }
 
     const store = await prisma.store.findFirst({ where: { status: 'active' } }) || {
         name: 'Jewellery Store',

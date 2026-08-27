@@ -186,15 +186,18 @@ const createOrder = async (orderData) => {
         const storeId = store.id;
 
         // 1. Generate Order Number
-        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        const startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date();
+        endOfDay.setHours(23, 59, 59, 999);
+        const dateStr = `${new Date().getFullYear()}${(new Date().getMonth() + 1).toString().padStart(2, '0')}${new Date().getDate().toString().padStart(2, '0')}`;
         const count = await tx.pOSOrder.count({
             where: {
-                storeId: storeId,
-                createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) }
+                createdAt: { gte: startOfDay, lte: endOfDay }
             }
         }) + 1;
         const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
-        const orderNumber = `POS-${orderData.shop_id}-${dateStr}-${count.toString().padStart(4, '0')}-${randomSuffix}`;
+        const orderNumber = `CS-${dateStr}-${count.toString().padStart(4, '0')}-${randomSuffix}`;
 
         // Validate PAN for large transactions
         if (orderData.grandTotal > 200000 && !orderData.customerPan) {
@@ -286,7 +289,7 @@ const createOrder = async (orderData) => {
                 subTotal: orderData.subTotal || orderData.subtotal || 0,
                 taxTotal: orderData.totalGST || orderData.taxTotal || 0,
                 discountTotal: orderData.discount || orderData.discountTotal || 0,
-                grandTotal: orderData.grandTotal || 0,
+                grandTotal: orderData.grandTotal || ((orderData.subTotal || orderData.subtotal || 0) + (orderData.totalGST || orderData.taxTotal || 0) - (orderData.discount || orderData.discountTotal || 0) + (orderData.roundOff || 0)) || 0,
                 cashPaid: totalCash,
                 cardPaid: totalOnline, // Simplification
                 upiPaid: 0,
@@ -298,6 +301,7 @@ const createOrder = async (orderData) => {
                         productId: item.product,
                         quantity: 1, // Usually 1 for jewelry
                         unitPrice: item.price || 0,
+                        metalRate: item.goldRateAtTime || item.metalRate || orderData.metalRate || orderData.currentRate || 0,
                         discount: item.discount || 0,
                         taxAmount: item.taxAmount || 0,
                         totalPrice: item.totalAmount || 0
@@ -395,7 +399,7 @@ const createOrder = async (orderData) => {
         }
 
         return order;
-    });
+    }, { maxWait: 10000, timeout: 30000 });
 };
 
 const getStoreOrders = async (shop_id, query = {}) => {
@@ -620,7 +624,7 @@ const processReturn = async (orderId, returnData, performedBy) => {
     return await prisma.$transaction(async (tx) => {
         const order = await tx.pOSOrder.findUnique({
             where: { id: orderId },
-            include: { items: true }
+            include: { items: { include: { product: true } } }
         });
 
         if (!order) throw new Error('Order not found');
@@ -688,7 +692,7 @@ const processReturn = async (orderId, returnData, performedBy) => {
         });
 
         return updatedOrder;
-    });
+    }, { maxWait: 10000, timeout: 30000 });
 };
 
 const updateOrder = async (orderId, orderData) => {
@@ -749,6 +753,7 @@ const updateOrder = async (orderId, orderData) => {
                         productId: item.product || item.productId || item.id, // accommodate payload formats
                         quantity: 1,
                         unitPrice: item.price || item.unitPrice || 0,
+                        metalRate: item.goldRateAtTime || item.metalRate || orderData.metalRate || orderData.currentRate || 0,
                         discount: item.discount || 0,
                         taxAmount: item.taxAmount || 0,
                         totalPrice: item.totalAmount || item.totalPrice || 0
@@ -805,8 +810,8 @@ const updateOrder = async (orderId, orderData) => {
             }
         }
 
-        return updatedOrder;
-    });
+        return await getOrderById(existingOrder.id);
+    }, { maxWait: 10000, timeout: 30000 });
 };
 
 module.exports = {

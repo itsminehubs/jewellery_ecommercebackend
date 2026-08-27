@@ -42,7 +42,17 @@ const getAllInquiries = async (filters = {}) => {
     return items;
 };
 
+/**
+ * Delete a contact inquiry
+ */
+const deleteInquiry = async (id) => {
+    return await prisma.contact.delete({
+        where: { id }
+    });
+};
+
 module.exports = {
     submitInquiry,
-    getAllInquiries
+    getAllInquiries,
+    deleteInquiry
 };

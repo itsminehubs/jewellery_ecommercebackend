@@ -353,12 +353,13 @@ model ImitationSale {
 }
 
 model POSOrderItem {
-  id         String  @id @default(uuid())
-  posOrderId String
-  productId  String
-  quantity   Int
-  unitPrice  Decimal @db.Decimal(20, 2)
-  discount   Decimal @default(0) @db.Decimal(20, 2)
+    id         String  @id @default(uuid())
+    posOrderId String
+    productId  String
+    quantity   Int
+    unitPrice  Decimal @db.Decimal(20, 2)
+    metalRate  Decimal? @db.Decimal(20, 2)
+    discount   Decimal @default(0) @db.Decimal(20, 2)
   taxAmount  Decimal @default(0) @db.Decimal(20, 2)
   totalPrice Decimal @db.Decimal(20, 2)
 

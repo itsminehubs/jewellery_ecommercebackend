@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tax Invoice - <%= invoice.invoiceNumber %>
+    <title>Tax Invoice - <%= order.orderNumber || invoice.invoiceNumber %>
     </title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -65,7 +65,7 @@
             <!-- Header Row -->
             <div class="flex justify-between px-2 py-1 border-b-invoice">
                 <div>Invoice Number : <span class="font-semibold">
-                        <%= invoice.invoiceNumber %>
+                        <%= order.orderNumber || invoice.invoiceNumber %>
                     </span></div>
                 <div>Date & Time : <span class="font-semibold">
                         <%= new Date(invoice.createdAt || invoice.issueDate).toLocaleString('en-IN') %>
@@ -230,17 +230,17 @@
                 <table class="w-full text-center text-[9px]">
                     <thead class="border-b-invoice">
                         <tr class="bg-gray-50">
-                            <th class="border-r-invoice py-2 w-32">Description &<br />Serial Number</th>
+                            <th class="border-r-invoice py-2 w-32">Item Description &<br />Serial Number</th>
                             <th class="border-r-invoice py-2">HSN/Purity</th>
+                            <th class="border-r-invoice py-2">Metal Rate<br />(Rs.)</th>
                             <th class="border-r-invoice py-2">Qty (N)</th>
                             <th class="border-r-invoice py-2">Gross Wt (g)</th>
-                            <th class="border-r-invoice py-2">Metal Wt (g)</th>
+                            <th class="border-r-invoice py-2">Net Wt (g)</th>
                             <th class="border-r-invoice py-2">Stone Wt (carat)</th>
                             <th class="border-r-invoice py-2">Metal Value (<br />Rs.)</th>
                             <th class="border-r-invoice py-2">Stone Value (<br />Rs.)</th>
                             <th class="border-r-invoice py-2">Making<br />Charges (Rs.)</th>
                             <th class="border-r-invoice py-2">Gross Amount (<br />Rs.)</th>
-                            <th class="border-r-invoice py-2">Product<br />Discount (Rs.)</th>
                             <th class="py-2">Product Value (<br />Rs.)</th>
                         </tr>
                     </thead>
@@ -252,14 +252,18 @@
                             stoneDetailsArray=product.stoneDetails || []; const netWeight=Number(metalDetails.netWeight
                             || 0); const grossWeight=Number(metalDetails.grossWeight || 0); const
                             stoneWeight=Number(stoneDetailsArray[0]?.netWeight || 0); const
-                            makingCharge=Number(product.makingCharges || 0); const
-                            stoneCharge=Number(product.stoneCharges || 0); const itemTotal=Number(item.totalPrice ||
-                            product.price || 0) * item.quantity; // fallback for metal val calculation const
-                            metalVal=itemTotal> 0 ? Math.max(0, itemTotal - makingCharge - stoneCharge) : 0;
+                            baseMakingCharge=Number(product.makingCharges || 0); const
+                            stoneCharge=Number(product.stoneCharges || 0); const itemDiscountAmount=Number(item.discount
+                            || 0); const makingCharge=Math.max(0, baseMakingCharge - itemDiscountAmount); const
+                            itemTotal=Number(item.totalPrice || product.price || 0) * item.quantity; const
+                            preTaxItemTotal=itemTotal / 1.03; const metalVal=itemTotal> 0 ? (preTaxItemTotal -
+                            baseMakingCharge - stoneCharge) : (product.calculatedPrice?.goldValue ||
+                            ((item.goldRateAtTime || 0) * netWeight));
 
                             const grossAmt = metalVal + makingCharge + stoneCharge;
-                            const itemDiscount = Number(product.discount || 0) * item.quantity;
-                            const productVal = grossAmt - itemDiscount;
+                            const productVal = grossAmt;
+                            const computedMetalRate = item.metalRate ? Number(item.metalRate) : (netWeight > 0 ?
+                            (metalVal / netWeight) : 0);
 
                             totalGrossWt += grossWeight;
                             totalMetalWt += netWeight;
@@ -278,6 +282,9 @@
                                 </td>
                                 <td class="border-r-invoice">
                                     <%= product.hsnCode || '71131912' %> / <%= metalDetails.purity || '22KT' %>
+                                </td>
+                                <td class="border-r-invoice">
+                                    <%= computedMetalRate.toFixed(2) %>
                                 </td>
                                 <td class="border-r-invoice">
                                     <%= item.quantity || 1 %>
@@ -303,9 +310,6 @@
                                 <td class="border-r-invoice">
                                     <%= grossAmt.toFixed(2) %>
                                 </td>
-                                <td class="border-r-invoice">
-                                    <%= itemDiscount.toFixed(2) %>
-                                </td>
                                 <td class="">
                                     <%= productVal.toFixed(2) %>
                                 </td>
@@ -314,7 +318,7 @@
 
                                 <!-- Totals Row -->
                                 <tr class="font-bold bg-gray-50">
-                                    <td class="border-r-invoice text-right pr-4" colspan="2">Total</td>
+                                    <td class="border-r-invoice text-right pr-4" colspan="3">Total</td>
                                     <td class="border-r-invoice">
                                         <%= order.items ? order.items.length : 0 %>
                                     </td>
@@ -334,9 +338,6 @@
                                     </td>
                                     <td class="border-r-invoice">
                                         <%= totalGrossAmount.toFixed(2) %>
-                                    </td>
-                                    <td class="border-r-invoice">
-                                        <%= totalDiscount.toFixed(2) %>
                                     </td>
                                     <td class="">
                                         <%= taxableValue.toFixed(2) %>
