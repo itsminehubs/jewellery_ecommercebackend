@@ -29,13 +29,15 @@ const createOrder = async (userId, orderData) => {
             }
 
             const price = product.finalPrice ? Number(product.finalPrice) : Number(product.price);
-            const itemTotal = price * cartItem.quantity;
+            const itemGrossTotal = price * cartItem.quantity;
 
-            // Using 3% as default GST for jewelry if not on product
+            // finalPrice already includes GST. We need to extract the pre-tax amount and the tax amount.
             const itemGstRate = product.gstRate || 3;
-            const itemTax = itemTotal * (itemGstRate / 100);
+            // itemGrossTotal = itemSubtotal * (1 + itemGstRate/100)
+            const itemSubtotal = itemGrossTotal / (1 + (itemGstRate / 100));
+            const itemTax = itemGrossTotal - itemSubtotal;
 
-            subtotal += itemTotal;
+            subtotal += itemSubtotal;
             totalTax += itemTax;
 
             orderItemsData.push({
@@ -282,10 +284,13 @@ const verifyPrice = async (items) => {
         if (!product) throw ApiError.notFound('Product not found');
 
         const price = product.finalPrice ? Number(product.finalPrice) : Number(product.price);
-        const itemTotal = price * item.quantity;
-        const itemTax = itemTotal * ((product.gstRate || 3) / 100);
+        const itemGrossTotal = price * item.quantity;
+        
+        const itemGstRate = product.gstRate || 3;
+        const itemSubtotal = itemGrossTotal / (1 + (itemGstRate / 100));
+        const itemTax = itemGrossTotal - itemSubtotal;
 
-        subtotal += itemTotal;
+        subtotal += itemSubtotal;
         totalTax += itemTax;
     }
 
