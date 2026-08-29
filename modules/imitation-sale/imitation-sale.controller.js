@@ -63,7 +63,7 @@ const getImitationSales = async (req, res) => {
       take: parseInt(limit),
       orderBy: { createdAt: 'desc' },
       include: {
-        customer: { select: { id: true, name: true, phone: true, email: true } },
+        customer: { include: { addresses: true } },
         staff: { select: { id: true, name: true } }
       }
     });
@@ -91,7 +91,7 @@ const getImitationSaleById = async (req, res) => {
     const sale = await prisma.imitationSale.findUnique({
       where: { id },
       include: {
-        customer: { select: { id: true, name: true, phone: true, email: true } }, // limited address to keep it simple
+        customer: { include: { addresses: true } },
         staff: { select: { id: true, name: true } }
       }
     });
