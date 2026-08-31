@@ -215,11 +215,12 @@ const createOrder = async (orderData) => {
         let totalCreditMemo = 0;
 
         for (const payment of orderData.payments || []) {
-            if (payment.method === 'cash') totalCash += payment.amount;
-            else if (payment.method === 'upi' || payment.method === 'card' || payment.method === 'bank_transfer') totalOnline += payment.amount;
-            else if (payment.method === 'credit') totalCredit += payment.amount;
-            else if (payment.method === 'scheme_redemption') totalSchemeRedemption += payment.amount;
-            else if (payment.method === 'credit_memo') totalCreditMemo += payment.amount;
+            const amt = Number(payment.amount) || 0;
+            if (payment.method === 'cash') totalCash += amt;
+            else if (payment.method === 'upi' || payment.method === 'card' || payment.method === 'bank_transfer') totalOnline += amt;
+            else if (payment.method === 'credit') totalCredit += amt;
+            else if (payment.method === 'scheme_redemption') totalSchemeRedemption += amt;
+            else if (payment.method === 'credit_memo') totalCreditMemo += amt;
         }
 
         // 2. Handle Scheme Redemption (with SECURITY VALIDATION)
@@ -256,16 +257,19 @@ const createOrder = async (orderData) => {
                 if (payment.method === 'credit_memo') {
                     if (!payment.referenceId) throw new Error('Reference ID (Credit Memo ID) is required for credit_memo payment');
 
+                    const parsedAmount = Number(payment.amount);
                     const memo = await tx.creditMemo.findFirst({
                         where: {
-                            memoId: payment.referenceId,
-                            balance: { gte: payment.amount }
+                            memoId: payment.referenceId.trim()
                         }
                     });
 
-                    if (!memo) throw new Error(`Credit Memo ${payment.referenceId} not found or insufficient balance.`);
+                    if (!memo) throw new Error(`Credit Memo ${payment.referenceId} not found.`);
+                    if (Number(memo.balance) < parsedAmount) {
+                        throw new Error(`Credit Memo ${payment.referenceId} has insufficient balance. (Available: ₹${memo.balance}, Required: ₹${parsedAmount})`);
+                    }
 
-                    const newBalance = Number(memo.balance) - payment.amount;
+                    const newBalance = Number(memo.balance) - parsedAmount;
                     await tx.creditMemo.update({
                         where: { id: memo.id },
                         data: {
