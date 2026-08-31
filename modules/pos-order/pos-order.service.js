@@ -197,7 +197,7 @@ const createOrder = async (orderData) => {
             }
         }) + 1;
         const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
-        const orderNumber = `CS-${dateStr}-${count.toString().padStart(4, '0')}-${randomSuffix}`;
+        const orderNumber = `CS-INV-${dateStr}-${randomSuffix}-${count.toString().padStart(4, '0')}`;
 
         // Validate PAN for large transactions
         if (orderData.grandTotal > 200000 && !orderData.customerPan) {
@@ -278,6 +278,9 @@ const createOrder = async (orderData) => {
                             // For a robust system we'd track redemptions in a separate table, but updating balance is key
                         }
                     });
+
+                    // Store reference for invoice re-printing
+                    orderData.notes = (orderData.notes ? orderData.notes + '||' : '') + `PAYMENT_REF:credit_memo:${memo.memoId}:${parsedAmount}`;
                 }
             }
         }
@@ -528,13 +531,13 @@ const getStoreAnalytics = async (shop_id, startDate, endDate, includeOnline = fa
     });
     const totalCustomers = uniqueCustomerIds.size;
 
-    
+
     const imitationSalesRaw = await prisma.imitationSale.findMany({
         where: { createdAt: { gte: new Date(startDate), lte: new Date(endDate) } },
         select: { createdAt: true, grandTotal: true },
         orderBy: { createdAt: 'asc' }
     });
-    
+
     const creditMemosRaw = await prisma.creditMemo.findMany({
         where: { createdAt: { gte: new Date(startDate), lte: new Date(endDate) } },
         select: { createdAt: true, originalAmount: true },
@@ -549,7 +552,7 @@ const getStoreAnalytics = async (shop_id, startDate, endDate, includeOnline = fa
 
     const groupMultiData = (posData, onlineData) => {
         const map = new Map();
-        
+
         const processData = (data, key) => {
             data.forEach(item => {
                 const date = new Date(item.createdAt);
@@ -564,19 +567,19 @@ const getStoreAnalytics = async (shop_id, startDate, endDate, includeOnline = fa
                 } else {
                     label = date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
                 }
-                
+
                 if (!map.has(label)) {
                     map.set(label, { name: label, sales: 0, onlineSales: 0 });
                 }
                 map.get(label)[key] += Number(item.grandTotal || 0);
             });
         };
-        
+
         processData(posData, 'sales');
         if (onlineData) {
             processData(onlineData, 'onlineSales');
         }
-        
+
         const arr = Array.from(map.values());
         return arr.length > 0 ? arr : [{ name: 'No Data', sales: 0, onlineSales: 0 }];
     };
@@ -586,7 +589,7 @@ const getStoreAnalytics = async (shop_id, startDate, endDate, includeOnline = fa
         data.forEach(item => {
             const date = new Date(item.createdAt);
             let label = '';
-            
+
             if (diffDays <= 1) {
                 const hr = date.getHours();
                 label = `${hr % 12 || 12}${hr < 12 ? 'am' : 'pm'}`;
@@ -597,10 +600,10 @@ const getStoreAnalytics = async (shop_id, startDate, endDate, includeOnline = fa
             } else {
                 label = date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
             }
-            
+
             map.set(label, (map.get(label) || 0) + Number(item[valueKey] || 0));
         });
-        
+
         const arr = Array.from(map, ([name, sales]) => ({ name, sales }));
         return arr.length > 0 ? arr : [{ name: 'No Data', sales: 0 }];
     };

@@ -115,13 +115,13 @@ const searchActiveMemos = asyncHandler(async (req, res) => {
 // Create new Credit Memo
 const createCreditMemo = asyncHandler(async (req, res) => {
     const { customer, originalAmount, paymentMethod, notes, shop_id, linkedItems } = req.body;
-    
+
     if (!customer || !originalAmount || !paymentMethod) {
         return ApiResponse.error('Customer ID, originalAmount, and paymentMethod are required', 400).send(res);
     }
-    
+
     const validLinkedItems = linkedItems ? linkedItems.filter(item => item.product) : [];
-    
+
     // Create using transaction
     await prisma.$transaction(async (tx) => {
         let metalCode = 'GEN';
@@ -139,11 +139,18 @@ const createCreditMemo = asyncHandler(async (req, res) => {
             }
         }
 
+        const today = new Date();
+        const startOfDay = new Date(today.setHours(0, 0, 0, 0));
+
+        const count = await tx.creditMemo.count({
+            where: { createdAt: { gte: startOfDay } }
+        }) + 1;
+
         let isUnique = false;
         let memoId = '';
         while (!isUnique) {
             const randomNum = Math.floor(10000 + Math.random() * 90000);
-            memoId = `CS-${metalCode}-${randomNum}`;
+            memoId = `CS-CRED-${randomNum}-${count.toString().padStart(4, '0')}`;
             const exists = await tx.creditMemo.findUnique({ where: { memoId } });
             if (!exists) {
                 isUnique = true;
@@ -163,7 +170,7 @@ const createCreditMemo = asyncHandler(async (req, res) => {
                 createdById: req.user.id
             }
         });
-        
+
         if (recordTransactionPrisma) {
             await recordTransactionPrisma({
                 customerId: customer,
