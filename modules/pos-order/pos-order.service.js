@@ -274,7 +274,7 @@ const createOrder = async (orderData) => {
                         where: { id: memo.id },
                         data: {
                             balance: newBalance,
-                            status: newBalance <= 0 ? 'depleted' : 'active',
+                            status: newBalance <= 0 ? 'applied' : 'active',
                             // For a robust system we'd track redemptions in a separate table, but updating balance is key
                         }
                     });
