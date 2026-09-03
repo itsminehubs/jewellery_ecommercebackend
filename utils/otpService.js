@@ -8,18 +8,46 @@ const ApiError = require('./ApiError');
  * Generate and store OTP for a given key (phone/email)
  * @param {string} key - Unique identifier (phone or email)
  * @param {number} expiration - Expiration in seconds (default: 300)
+ * @param {string} purpose - 'login' or 'reset_password'
  * @returns {Promise<string>} Generated OTP
  */
-const generateAndStoreOTP = async (key, expiration = CACHE_TTL.OTP) => {
+const generateAndStoreOTP = async (key, expiration = CACHE_TTL.OTP, purpose = 'login') => {
   try {
     const otp = generateOTP(6);
     const otpKey = `${CACHE_KEYS.OTP}${key}`;
     
     await cacheHelper.set(otpKey, otp, expiration);
     
-    if (process.env.NODE_ENV === 'development') {
-      logger.info(`OTP for ${key}: ${otp}`);
-      console.log(`\n🔐 [DEV] OTP for ${key}: ${otp}\n`);
+    // Check if key is a phone number (10 digits)
+    if (/^\d{10}$/.test(key)) {
+      const minutes = Math.floor(expiration / 60);
+      let messageTemplate = '';
+      if (purpose === 'reset_password') {
+        messageTemplate = `The OTP to reset your CarbonSmith account password is ${otp}. Do not share this code with anyone.`;
+      } else {
+        messageTemplate = `${otp} is your OTP to log in to your CarbonSmith account. Valid for ${minutes} mins. Do not share it with anyone.`;
+      }
+      
+      const params = new URLSearchParams({
+        access_token: 'de9ba8ce66886140238eeeade03c8310',
+        to: key,
+        country_code: '+91',
+        sender: 'CRBNSM',
+        service: 'SI',
+        message: messageTemplate
+      });
+
+      try {
+        const response = await fetch(`https://apis.wappie.shop/v1/sms/messages?${params.toString()}`, { method: 'GET' });
+        if (!response.ok) {
+           const errorText = await response.text();
+           logger.error(`SMS API error for ${key}: ${response.status} ${errorText}`);
+        } else {
+           logger.info(`SMS sent successfully to ${key} for purpose: ${purpose}`);
+        }
+      } catch (smsError) {
+        logger.error(`Failed to send SMS to ${key}: ${smsError.message}`);
+      }
     }
     
     return otp;

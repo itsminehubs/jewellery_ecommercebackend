@@ -27,7 +27,7 @@ const opsTransporter = nodemailer.createTransport({
 });
 
 emailQueue.process(async (job) => {
-  const { to, cc, subject, text, html, emailType } = job.data;
+  const { to, cc, subject, text, html, emailType, attachments } = job.data;
   
   let transporter;
   let fromAddress;
@@ -42,20 +42,26 @@ emailQueue.process(async (job) => {
     transporter = customerTransporter;
     fromAddress = process.env.SMTP_USER_CUSTOMER || 'donotreply@thecarbonsmith.com';
     
-    // Always append support and akshay to customer emails
-    const customerUniversalCc = 'support@thecarbonsmith.com, akshay.gondhali@thecarbonsmith.com';
+    // Always append support, sales, and akshay to customer emails
+    const customerUniversalCc = 'support@thecarbonsmith.com, sales@thecarbonsmith.com, akshay.gondhali@thecarbonsmith.com';
     finalCc = finalCc ? `${finalCc}, ${customerUniversalCc}` : customerUniversalCc;
   }
 
   try {
-    await transporter.sendMail({
+    const mailOptions = {
       from: fromAddress,
       to,
       cc: finalCc,
       subject,
       text,
       html
-    });
+    };
+
+    if (attachments) {
+      mailOptions.attachments = attachments;
+    }
+
+    await transporter.sendMail(mailOptions);
 
     logger.info(`[${emailType || 'customer'}] Email sent to ${to}`);
     return { success: true };

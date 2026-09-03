@@ -10,14 +10,13 @@ const { comparePassword } = require('../../utils/hash');
 /**
  * Send OTP to phone number
  */
-const sendOTP = async (phone) => {
+const sendOTP = async (phone, purpose = 'login') => {
   try {
-    const otp = await otpService.generateAndStoreOTP(phone);
+    const otp = await otpService.generateAndStoreOTP(phone, undefined, purpose);
 
     return {
       message: SUCCESS_MESSAGES.OTP_SENT,
-      phone,
-      otp: process.env.NODE_ENV === 'development' ? otp : undefined
+      phone
     };
   } catch (error) {
     if (error instanceof ApiError) throw error;
@@ -337,7 +336,7 @@ const forgotPassword = async (phoneOrEmail) => {
     throw ApiError.badRequest('Phone number not associated with this account. Please contact admin.');
   }
 
-  return await sendOTP(user.phone);
+  return await sendOTP(user.phone, 'reset_password');
 };
 
 /**
