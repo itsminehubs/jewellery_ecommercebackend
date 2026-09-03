@@ -107,7 +107,7 @@ exports.createCustomOrder = asyncHandler(async (req, res) => {
             cc: 'sales@thecarbonsmith.com, akshay.gondhali@thecarbonsmith.com',
             subject: 'Your Custom Design Request - CarbonSmith',
             html: emailHtml,
-            emailType: 'ops', // this sets sender to ops email (often donotreply) per your job structure
+            emailType: 'customer', // sends from donotreply
             attachments: attachments
         });
     }
