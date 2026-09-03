@@ -2,6 +2,7 @@ const prisma = require('../../config/prisma');
 const ApiError = require('../../utils/ApiError');
 const { asyncHandler } = require('../../middlewares/error.middleware');
 const { uploadImage } = require('../../config/s3');
+const { sendEmail } = require('../../jobs/email.job');
 
 /**
  * @desc    Create a new Custom Jewelry Draft/Order
@@ -49,8 +50,29 @@ exports.createCustomOrder = asyncHandler(async (req, res) => {
     const calculatedTotal = (Number(totalMetalCost) || 0) + (Number(totalStoneCost) || 0) + (Number(makingCharges) || 0) + (Number(taxAmount) || 0);
     customOrderData.pricingBreakdown.finalTotal = customOrderData.pricingBreakdown.finalTotal || calculatedTotal;
 
-    const count = await prisma.customOrder.count() + 1;
-    const orderNumber = `CS-${new Date().getFullYear()}-${count.toString().padStart(5, '0')}`;
+    const year = new Date().getFullYear();
+    const lastOrder = await prisma.customOrder.findFirst({
+        where: {
+            orderNumber: {
+                startsWith: `CS-${year}-`
+            }
+        },
+        orderBy: {
+            createdAt: 'desc'
+        }
+    });
+
+    let nextNumber = 1;
+    if (lastOrder && lastOrder.orderNumber) {
+        const parts = lastOrder.orderNumber.split('-');
+        if (parts.length === 3) {
+            const lastNum = parseInt(parts[2], 10);
+            if (!isNaN(lastNum)) {
+                nextNumber = lastNum + 1;
+            }
+        }
+    }
+    const orderNumber = `CS-${year}-${nextNumber.toString().padStart(5, '0')}`;
 
     const customOrder = await prisma.customOrder.create({
         data: {
@@ -60,6 +82,35 @@ exports.createCustomOrder = asyncHandler(async (req, res) => {
             estimatedPrice: calculatedTotal || 0
         }
     });
+
+    if (payload.customerEmail) {
+        const emailHtml = `
+            <p>Dear Customer,</p>
+            <p>Thank you for sharing your custom design with us.</p>
+            <p>We’re pleased to confirm that we’ve received your design and that it is currently being reviewed by our artisans. They are carefully assessing the details, and we’ll be in touch with you soon with the next steps.</p>
+            <p>We truly appreciate your patience and look forward to bringing your vision to life.</p>
+            <p>Warm regards,<br>
+            <strong>CarbonSmith Team</strong><br>
+            <em>Yours’ BY DESIGN!</em></p>
+        `;
+
+        const attachments = [];
+        if (customOrderData.personalization && customOrderData.personalization.referenceImage) {
+            attachments.push({
+                filename: 'custom_design_image.jpg',
+                path: customOrderData.personalization.referenceImage
+            });
+        }
+
+        await sendEmail({
+            to: payload.customerEmail,
+            cc: 'sales@thecarbonsmith.com, akshay.gondhali@thecarbonsmith.com',
+            subject: 'Your Custom Design Request - CarbonSmith',
+            html: emailHtml,
+            emailType: 'ops', // this sets sender to ops email (often donotreply) per your job structure
+            attachments: attachments
+        });
+    }
 
     res.status(201).json({
         success: true,
