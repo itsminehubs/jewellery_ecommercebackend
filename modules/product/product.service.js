@@ -25,10 +25,15 @@ const getAllProducts = async (filters = {}, options = {}) => {
     minDiscount,
     forHer,
     carbonsmithworld,
-    status
+    status,
+    exclude
   } = options;
 
   const where = { ...filters, deletedAt: null };
+
+  if (exclude) {
+    where.id = { not: exclude };
+  }
 
   if (status && status !== 'all') {
     where.status = status;
@@ -82,7 +87,15 @@ const getAllProducts = async (filters = {}, options = {}) => {
 
   if (minDiscount) where.discount = { gte: Number(minDiscount) };
   if (forHer === 'true' || forHer === true) where.forHer = true;
-  if (carbonsmithworld === 'true' || carbonsmithworld === true) where.carbonsmithworld = true;
+  
+  if (carbonsmithworld === 'true' || carbonsmithworld === true) {
+    where.carbonsmithworld = true;
+  } else if (carbonsmithworld === 'all') {
+    // Show all products, do not filter by carbonsmithworld
+  } else {
+    // Hide carbonsmithworld products from regular store queries by default
+    where.carbonsmithworld = false;
+  }
 
   const skip = (page - 1) * limit;
 
@@ -490,7 +503,8 @@ const getProductsByCategory = async (categoryIdOrSlug, options = {}) => {
   const where = {
     categoryId: resolvedCategoryId,
     status: 'active',
-    deletedAt: null
+    deletedAt: null,
+    carbonsmithworld: false
   };
 
   if (search) {
@@ -538,7 +552,8 @@ const getFeaturedProducts = async (options = {}) => {
   const where = {
     featured: true,
     status: 'active',
-    deletedAt: null
+    deletedAt: null,
+    carbonsmithworld: false
   };
 
   const skip = (page - 1) * limit;
@@ -563,7 +578,8 @@ const getTrendingProducts = async (options = {}) => {
   const where = {
     trending: true,
     status: 'active',
-    deletedAt: null
+    deletedAt: null,
+    carbonsmithworld: false
   };
 
   const skip = (page - 1) * limit;

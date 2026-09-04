@@ -84,14 +84,43 @@ exports.createCustomOrder = asyncHandler(async (req, res) => {
     });
 
     if (payload.customerEmail) {
+        const customerName = payload.customerName || req.user?.name || 'Customer';
+
         const emailHtml = `
-            <p>Dear Customer,</p>
-            <p>Thank you for sharing your custom design with us.</p>
-            <p>We’re pleased to confirm that we’ve received your design and that it is currently being reviewed by our artisans. They are carefully assessing the details, and we’ll be in touch with you soon with the next steps.</p>
-            <p>We truly appreciate your patience and look forward to bringing your vision to life.</p>
-            <p>Warm regards,<br>
-            <strong>CarbonSmith Team</strong><br>
-            <em>Yours’ BY DESIGN!</em></p>
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
+                <div style="text-align: center; margin-bottom: 20px;">
+                    <a href="https://thecarbonsmith.com" target="_blank">
+                        <!-- Replace src with the actual image URL you want to use -->
+                        <img src="https://www.thecarbonsmith.com/assets/cslogo3-cIe_cQLB.png" alt="CarbonSmith" style="max-width: 100%; height: auto;" />
+                    </a>
+                </div>
+                
+                <div style="text-align: center; margin-bottom: 30px;">
+                    <p style="font-size: 16px; font-style: italic; color: #555;">Bespoke. Artisanal. Uniquely Yours.</p>
+                </div>
+                
+                <hr style="border: 0; border-top: 1px solid #ccc; margin: 20px 0;">
+                
+                <div style="text-align: center; margin-bottom: 30px;">
+                    <h2 style="font-size: 18px; letter-spacing: 2px; text-transform: uppercase; color: #111; margin: 0;">YOUR VISION, IN THE HANDS OF OUR ARTISANS</h2>
+                    <h3 style="font-size: 16px; font-weight: normal; color: #555; margin-top: 10px;">Custom Design Received</h3>
+                </div>
+                
+                <p>Dear ${customerName},</p>
+                
+                <p>Thank you for sharing your custom design with us.</p>
+                
+                <p>We’re pleased to confirm that we’ve received your design and it is now being carefully reviewed by our Master Artisans. Every detail is being thoughtfully assessed to ensure your vision is translated with the craftsmanship and attention it deserves.</p>
+                
+                <p>We’ll connect with you soon with the next steps.</p>
+                
+                <p>We truly appreciate your patience and look forward to bringing your vision to life.</p>
+                
+                <br>
+                <p>With warm regards,</p>
+                <p><strong>CarbonSmith Team</strong></p>
+                <p style="font-style: italic;">Yours' BY DESIGN</p>
+            </div>
         `;
 
         const attachments = [];
@@ -105,7 +134,7 @@ exports.createCustomOrder = asyncHandler(async (req, res) => {
         await sendEmail({
             to: payload.customerEmail,
             cc: 'sales@thecarbonsmith.com, akshay.gondhali@thecarbonsmith.com',
-            subject: 'Your Custom Design Request - CarbonSmith',
+            subject: 'Your Custom Design | Now Being Reviewed',
             html: emailHtml,
             emailType: 'customer', // sends from donotreply
             attachments: attachments
@@ -187,7 +216,7 @@ exports.updateCustomOrder = asyncHandler(async (req, res) => {
         updateData.personalization = { ...(updateData.personalization || {}), sizeDetails: updateData.sizeDetails };
         delete updateData.sizeDetails;
     }
-    
+
     // Remove MongoDB specific or irrelevant fields
     delete updateData._id;
     delete updateData.__v;
@@ -214,7 +243,7 @@ exports.updateCustomOrder = asyncHandler(async (req, res) => {
         const makingCharges = Number(pb.makingCharges) || 0;
         const taxAmount = Number(pb.taxAmount) || 0;
         pb.finalTotal = pb.finalTotal || (totalMetalCost + totalStoneCost + makingCharges + taxAmount);
-        
+
         // Ensure estimatedPrice is updated as well
         updateData.estimatedPrice = pb.finalTotal;
     }
