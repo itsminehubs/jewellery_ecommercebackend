@@ -87,8 +87,10 @@ exports.createCustomOrder = asyncHandler(async (req, res) => {
         const customerName = payload.customerName || req.user?.name || 'Customer';
 
         let emailHtml = '';
+        let emailSubject = '';
 
         if (payload.orderSource === 'Builder') {
+            emailSubject = 'Your Custom Design | Now Being Reviewed';
             emailHtml = `
                 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
                     <div style="text-align: center; margin-bottom: 20px;">
@@ -135,6 +137,7 @@ exports.createCustomOrder = asyncHandler(async (req, res) => {
                 </div>
             `;
         } else {
+            emailSubject = 'Thank You for Your Distinguished Selection';
             emailHtml = `
                 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
                     <div style="text-align: center; margin-bottom: 20px;">
@@ -150,23 +153,29 @@ exports.createCustomOrder = asyncHandler(async (req, res) => {
                     <hr style="border: 0; border-top: 1px solid #ccc; margin: 20px 0;">
                     
                     <div style="text-align: center; margin-bottom: 30px;">
-                        <h2 style="font-size: 18px; letter-spacing: 2px; text-transform: uppercase; color: #111; margin: 0;">YOUR VISION, IN THE HANDS OF OUR ARTISANS</h2>
-                        <h3 style="font-size: 16px; font-weight: normal; color: #555; margin-top: 10px;">Product Quote Requested</h3>
+                        <h2 style="font-size: 18px; letter-spacing: 2px; text-transform: uppercase; color: #111; margin: 0;">YOUR DISTINGUISHED SELECTION</h2>
                     </div>
                     
                     <p>Dear ${customerName},</p>
                     
-                    <p>Thank you for requesting a quote for one of our signature pieces.</p>
+                    <p>Thank you for your interest and for selecting a piece that reflects such distinctive taste and individuality.</p>
                     
-                    <p>We’re pleased to confirm that we’ve received your inquiry for <strong>${payload.personalization?.productName || 'our signature piece'}</strong> ${payload.personalization?.sku ? `(SKU: ${payload.personalization.sku})` : ''}. Our team is currently reviewing your request and will reach out to you shortly with more details.</p>
+                    <p>We are delighted to know that our selection has caught your eye. Each piece is chosen with an appreciation for exceptional design, refined craftsmanship, and timeless elegance—and your choice is truly distinctive.</p>
                     
+                    <div style="text-align: center; margin: 30px 0;">
+                        ${customOrderData.designPreviewImages && customOrderData.designPreviewImages.length > 0 ? `<img src="${customOrderData.designPreviewImages[0].url}" alt="Product Selection" style="max-width: 100%; max-height: 300px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);" />` : ''}
+                    </div>
+
+                    ${payload.personalization?.productName ? `<p><strong>Selection:</strong> ${payload.personalization.productName} ${payload.personalization.sku ? `(${payload.personalization.sku})` : ''}</p>` : ''}
                     ${payload.personalization?.sizeDetails?.sizeValue ? `<p><strong>Requested Size:</strong> ${payload.personalization.sizeDetails.sizeValue}</p>` : ''}
                     ${payload.personalization?.engravingText ? `<p style="color: #666; font-style: italic;">Note: ${payload.personalization.engravingText}</p>` : ''}
                     
-                    <p>We truly appreciate your interest in CarbonSmith and look forward to assisting you.</p>
+                    <p>Our team is carefully preparing a personalised quotation for your selection and will be in touch with you shortly with the details.</p>
+                    
+                    <p>It is a pleasure to assist you, and we sincerely appreciate the confidence you have placed in us.</p>
                     
                     <br>
-                    <p>With warm regards,</p>
+                    <p>With warmest regards,</p>
                     <p><strong>CarbonSmith Team</strong></p>
                     <p style="font-style: italic;">Yours' BY DESIGN</p>
                 </div>
@@ -189,7 +198,7 @@ exports.createCustomOrder = asyncHandler(async (req, res) => {
         await sendEmail({
             to: payload.customerEmail,
             cc: 'sales@thecarbonsmith.com, akshay.gondhali@thecarbonsmith.com',
-            subject: 'Your Custom Design | Now Being Reviewed',
+            subject: emailSubject,
             html: emailHtml,
             emailType: 'customer', // sends from donotreply
             attachments: attachments
