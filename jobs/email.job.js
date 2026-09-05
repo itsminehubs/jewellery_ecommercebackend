@@ -36,15 +36,23 @@ emailQueue.process(async (job) => {
   if (emailType === 'ops') {
     transporter = opsTransporter;
     fromAddress = process.env.SMTP_USER_OPS || 'Operations@thecarbonsmith.com';
-    // No universal CC for ops unless passed explicitly
+    // Append piyush for ops emails
+    const opsUniversalCc = 'piyush.pradeep@thecarbonsmith.com';
+    finalCc = finalCc ? `${finalCc}, ${opsUniversalCc}` : opsUniversalCc;
   } else {
     // Default to customer email
     transporter = customerTransporter;
     fromAddress = process.env.SMTP_USER_CUSTOMER || 'donotreply@thecarbonsmith.com';
     
-    // Always append support, sales, and akshay to customer emails
-    const customerUniversalCc = 'support@thecarbonsmith.com, sales@thecarbonsmith.com, akshay.gondhali@thecarbonsmith.com';
+    // Always append sales and akshay to customer emails
+    const customerUniversalCc = 'sales@thecarbonsmith.com, akshay.gondhali@thecarbonsmith.com';
     finalCc = finalCc ? `${finalCc}, ${customerUniversalCc}` : customerUniversalCc;
+  }
+
+  // Deduplicate CC addresses
+  if (finalCc) {
+    const ccSet = new Set(finalCc.split(',').map(e => e.trim()).filter(e => e));
+    finalCc = Array.from(ccSet).join(', ');
   }
 
   try {
