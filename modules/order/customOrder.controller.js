@@ -86,48 +86,103 @@ exports.createCustomOrder = asyncHandler(async (req, res) => {
     if (payload.customerEmail) {
         const customerName = payload.customerName || req.user?.name || 'Customer';
 
-        const emailHtml = `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
-                <div style="text-align: center; margin-bottom: 20px;">
-                    <a href="https://thecarbonsmith.com" target="_blank">
-                        <!-- Replace src with the actual image URL you want to use -->
-                        <img src="https://www.thecarbonsmith.com/assets/cslogo3-cIe_cQLB.png" alt="CarbonSmith" style="max-width: 100%; height: auto;" />
-                    </a>
+        let emailHtml = '';
+
+        if (payload.orderSource === 'Builder') {
+            emailHtml = `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
+                    <div style="text-align: center; margin-bottom: 20px;">
+                        <a href="https://thecarbonsmith.com" target="_blank">
+                            <img src="https://www.thecarbonsmith.com/assets/cslogo3-cIe_cQLB.png" alt="CarbonSmith" style="max-width: 100%; height: auto;" />
+                        </a>
+                    </div>
+                    
+                    <div style="text-align: center; margin-bottom: 30px;">
+                        <p style="font-size: 16px; font-style: italic; color: #555;">Bespoke. Artisanal. Uniquely Yours.</p>
+                    </div>
+                    
+                    <hr style="border: 0; border-top: 1px solid #ccc; margin: 20px 0;">
+                    
+                    <div style="text-align: center; margin-bottom: 30px;">
+                        <h2 style="font-size: 18px; letter-spacing: 2px; text-transform: uppercase; color: #111; margin: 0;">YOUR VISION, IN THE HANDS OF OUR ARTISANS</h2>
+                        <h3 style="font-size: 16px; font-weight: normal; color: #555; margin-top: 10px;">Custom Design Received</h3>
+                    </div>
+                    
+                    <p>Dear ${customerName},</p>
+                    
+                    <p>Thank you for submitting your detailed custom design request.</p>
+                    <p>We’ve received your exact specifications and they are now being carefully reviewed by our Master Artisans. Here are the details of your request:</p>
+                    
+                    <div style="background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                        <h4 style="margin-top: 0;">Design Specifications</h4>
+                        <ul style="list-style: none; padding: 0;">
+                            <li><strong>Jewelry Type:</strong> ${payload.jewelryType || 'N/A'}</li>
+                            <li><strong>Metal:</strong> ${payload.metalPreferences?.purity || ''} ${payload.metalPreferences?.metalColor || ''} ${payload.metalPreferences?.metalType || ''}</li>
+                            <li><strong>Stone:</strong> ${payload.stonePreferences?.stoneType || 'N/A'}</li>
+                            ${payload.stonePreferences?.carat ? `<li><strong>Carat:</strong> ${payload.stonePreferences.carat}</li>` : ''}
+                            ${payload.stonePreferences?.shape ? `<li><strong>Shape:</strong> ${payload.stonePreferences.shape}</li>` : ''}
+                            ${payload.personalization?.sizeDetails?.sizeValue ? `<li><strong>Size:</strong> ${payload.personalization.sizeDetails.sizeValue}</li>` : ''}
+                            ${payload.personalization?.engravingText ? `<li><strong>Notes/Engraving:</strong> ${payload.personalization.engravingText}</li>` : ''}
+                        </ul>
+                    </div>
+
+                    <p>We’ll connect with you soon with the next steps and a customized quote.</p>
+                    
+                    <br>
+                    <p>With warm regards,</p>
+                    <p><strong>CarbonSmith Team</strong></p>
+                    <p style="font-style: italic;">Yours' BY DESIGN</p>
                 </div>
-                
-                <div style="text-align: center; margin-bottom: 30px;">
-                    <p style="font-size: 16px; font-style: italic; color: #555;">Bespoke. Artisanal. Uniquely Yours.</p>
+            `;
+        } else {
+            emailHtml = `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
+                    <div style="text-align: center; margin-bottom: 20px;">
+                        <a href="https://thecarbonsmith.com" target="_blank">
+                            <img src="https://www.thecarbonsmith.com/assets/cslogo3-cIe_cQLB.png" alt="CarbonSmith" style="max-width: 100%; height: auto;" />
+                        </a>
+                    </div>
+                    
+                    <div style="text-align: center; margin-bottom: 30px;">
+                        <p style="font-size: 16px; font-style: italic; color: #555;">Bespoke. Artisanal. Uniquely Yours.</p>
+                    </div>
+                    
+                    <hr style="border: 0; border-top: 1px solid #ccc; margin: 20px 0;">
+                    
+                    <div style="text-align: center; margin-bottom: 30px;">
+                        <h2 style="font-size: 18px; letter-spacing: 2px; text-transform: uppercase; color: #111; margin: 0;">YOUR VISION, IN THE HANDS OF OUR ARTISANS</h2>
+                        <h3 style="font-size: 16px; font-weight: normal; color: #555; margin-top: 10px;">Product Quote Requested</h3>
+                    </div>
+                    
+                    <p>Dear ${customerName},</p>
+                    
+                    <p>Thank you for requesting a quote for one of our signature pieces.</p>
+                    
+                    <p>We’re pleased to confirm that we’ve received your inquiry for <strong>${payload.personalization?.productName || 'our signature piece'}</strong> ${payload.personalization?.sku ? `(SKU: ${payload.personalization.sku})` : ''}. Our team is currently reviewing your request and will reach out to you shortly with more details.</p>
+                    
+                    ${payload.personalization?.sizeDetails?.sizeValue ? `<p><strong>Requested Size:</strong> ${payload.personalization.sizeDetails.sizeValue}</p>` : ''}
+                    ${payload.personalization?.engravingText ? `<p style="color: #666; font-style: italic;">Note: ${payload.personalization.engravingText}</p>` : ''}
+                    
+                    <p>We truly appreciate your interest in CarbonSmith and look forward to assisting you.</p>
+                    
+                    <br>
+                    <p>With warm regards,</p>
+                    <p><strong>CarbonSmith Team</strong></p>
+                    <p style="font-style: italic;">Yours' BY DESIGN</p>
                 </div>
-                
-                <hr style="border: 0; border-top: 1px solid #ccc; margin: 20px 0;">
-                
-                <div style="text-align: center; margin-bottom: 30px;">
-                    <h2 style="font-size: 18px; letter-spacing: 2px; text-transform: uppercase; color: #111; margin: 0;">YOUR VISION, IN THE HANDS OF OUR ARTISANS</h2>
-                    <h3 style="font-size: 16px; font-weight: normal; color: #555; margin-top: 10px;">Custom Design Received</h3>
-                </div>
-                
-                <p>Dear ${customerName},</p>
-                
-                <p>Thank you for sharing your custom design with us.</p>
-                
-                <p>We’re pleased to confirm that we’ve received your design and it is now being carefully reviewed by our Master Artisans. Every detail is being thoughtfully assessed to ensure your vision is translated with the craftsmanship and attention it deserves.</p>
-                
-                <p>We’ll connect with you soon with the next steps.</p>
-                
-                <p>We truly appreciate your patience and look forward to bringing your vision to life.</p>
-                
-                <br>
-                <p>With warm regards,</p>
-                <p><strong>CarbonSmith Team</strong></p>
-                <p style="font-style: italic;">Yours' BY DESIGN</p>
-            </div>
-        `;
+            `;
+        }
 
         const attachments = [];
         if (customOrderData.personalization && customOrderData.personalization.referenceImage) {
             attachments.push({
                 filename: 'custom_design_image.jpg',
                 path: customOrderData.personalization.referenceImage
+            });
+        } else if (customOrderData.designPreviewImages && customOrderData.designPreviewImages.length > 0) {
+            attachments.push({
+                filename: 'product_image.jpg',
+                path: customOrderData.designPreviewImages[0].url
             });
         }
 
