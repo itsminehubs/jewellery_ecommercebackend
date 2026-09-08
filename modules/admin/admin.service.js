@@ -101,7 +101,7 @@ const getAllOrders = async (filters = {}, options = {}) => {
       where: posFilters,
       include: {
         customer: { select: { name: true, phone: true, email: true } },
-        items: { include: { product: true } },
+        items: { include: { product: { include: { images: true, metalDetails: true, stoneDetails: true } } } },
         store: true
       },
       orderBy: { createdAt: 'desc' },
@@ -123,7 +123,7 @@ const getAllOrders = async (filters = {}, options = {}) => {
       where: onlineFilters,
       include: { 
         user: { select: { name: true, phone: true, email: true } },
-        items: { include: { product: true } }
+        items: { include: { product: { include: { images: true, metalDetails: true, stoneDetails: true } } } }
       },
       orderBy: { createdAt: 'desc' },
       skip,
@@ -139,7 +139,7 @@ const getAllOrders = async (filters = {}, options = {}) => {
         where: onlineFilters,
         include: { 
           user: { select: { name: true, phone: true, email: true } },
-          items: { include: { product: true } }
+          items: { include: { product: { include: { images: true, metalDetails: true, stoneDetails: true } } } }
         },
         orderBy: { createdAt: 'desc' },
         take: fetchLimit
@@ -148,7 +148,7 @@ const getAllOrders = async (filters = {}, options = {}) => {
         where: posFilters,
         include: {
           customer: { select: { name: true, phone: true, email: true } },
-          items: { include: { product: true } },
+          items: { include: { product: { include: { images: true, metalDetails: true, stoneDetails: true } } } },
           store: true
         },
         orderBy: { createdAt: 'desc' },
