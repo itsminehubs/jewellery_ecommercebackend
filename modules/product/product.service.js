@@ -38,8 +38,8 @@ const getAllProducts = async (filters = {}, options = {}) => {
   if (status && status !== 'all') {
     where.status = status;
   } else if (Object.keys(filters).length === 0 && status !== 'all') {
-    // Default to active for public store if no specific status or override filters are provided
-    where.status = 'active';
+    // Default to active, out_of_stock, and sold for public store
+    where.status = { in: ['active', 'out_of_stock', 'sold'] };
   }
 
   if (sku) where.sku = sku;
@@ -502,7 +502,7 @@ const getProductsByCategory = async (categoryIdOrSlug, options = {}) => {
 
   const where = {
     categoryId: resolvedCategoryId,
-    status: 'active',
+    status: { in: ['active', 'out_of_stock', 'sold'] },
     deletedAt: null,
     carbonsmithworld: false
   };
@@ -551,7 +551,7 @@ const getFeaturedProducts = async (options = {}) => {
 
   const where = {
     featured: true,
-    status: 'active',
+    status: { in: ['active', 'out_of_stock', 'sold'] },
     deletedAt: null,
     carbonsmithworld: false
   };
@@ -577,7 +577,7 @@ const getTrendingProducts = async (options = {}) => {
 
   const where = {
     trending: true,
-    status: 'active',
+    status: { in: ['active', 'out_of_stock', 'sold'] },
     deletedAt: null,
     carbonsmithworld: false
   };
