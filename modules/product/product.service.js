@@ -87,7 +87,7 @@ const getAllProducts = async (filters = {}, options = {}) => {
 
   if (minDiscount) where.discount = { gte: Number(minDiscount) };
   if (forHer === 'true' || forHer === true) where.forHer = true;
-  
+
   if (carbonsmithworld === 'true' || carbonsmithworld === true) {
     where.carbonsmithworld = true;
   } else if (carbonsmithworld === 'all') {
@@ -212,10 +212,10 @@ const createProduct = async (productData, imagePaths = [], userId = null) => {
 
   const initialStock = baseProductData.stock || 0;
   baseProductData.stock = 0; // Initialize as 0, let inventoryService handle it
-  
+
   // Normalize unique fields to prevent Prisma constraint errors on empty strings
   if (baseProductData.huid === "") baseProductData.huid = null;
-  
+
   // Set initial status based on initial stock
   if (!baseProductData.status || baseProductData.status === 'active' || baseProductData.status === 'sold') {
     baseProductData.status = initialStock > 0 ? 'active' : 'sold';
@@ -349,12 +349,12 @@ const updateProduct = async (productId, updateData, imagePaths = [], imagesToDel
 
   const beforeStock = existingProduct.stock;
   const newStock = updateData.stock !== undefined ? updateData.stock : beforeStock;
-  
+
   if (baseProductData.stock !== undefined) {
-      delete baseProductData.stock; // Let inventoryService handle the stock update
+    delete baseProductData.stock; // Let inventoryService handle the stock update
   }
   if (baseProductData.imagesToDelete !== undefined) {
-      delete baseProductData.imagesToDelete; // Prevent Prisma unknown argument error
+    delete baseProductData.imagesToDelete; // Prevent Prisma unknown argument error
   }
 
   // Normalize unique fields
@@ -447,7 +447,7 @@ const deleteProduct = async (productId, userId = null) => {
     // P2003 is the Prisma error code for Foreign Key Constraint Failed
     if (error.code === 'P2003') {
       logger.info(`Product ${productId} has associated records (orders/inventory), falling back to soft delete.`);
-      await prisma.product.update({ 
+      await prisma.product.update({
         where: { id: productId },
         data: {
           status: 'archived',
@@ -468,13 +468,14 @@ const deleteProduct = async (productId, userId = null) => {
 };
 
 const getProductByScannedCode = async (scannedCode) => {
+  const cleanCode = scannedCode ? scannedCode.trim() : '';
   const product = await prisma.product.findFirst({
     where: {
       deletedAt: null,
       OR: [
-        { sku: scannedCode },
-        { tagId: scannedCode },
-        { huid: scannedCode }
+        { sku: { equals: cleanCode, mode: 'insensitive' } },
+        { tagId: { equals: cleanCode, mode: 'insensitive' } },
+        { huid: { equals: cleanCode, mode: 'insensitive' } }
       ]
     },
     include: { metalDetails: true, stoneDetails: true, images: true }
