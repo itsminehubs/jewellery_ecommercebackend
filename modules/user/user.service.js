@@ -212,7 +212,14 @@ const deleteAddress = async (userId, addressId) => {
 const getCart = async (userId) => {
   const cartItems = await prisma.cartItem.findMany({
     where: { userId },
-    include: { product: true }
+    include: { 
+      product: {
+        include: {
+          images: true,
+          metalDetails: true
+        }
+      } 
+    }
   });
   return cartItems;
 };
@@ -277,7 +284,14 @@ const clearCart = async (userId) => {
 const getWishlist = async (userId) => {
   const items = await prisma.wishlistItem.findMany({
     where: { userId },
-    include: { product: true }
+    include: { 
+      product: {
+        include: {
+          images: true,
+          metalDetails: true
+        }
+      } 
+    }
   });
   return items;
 };
