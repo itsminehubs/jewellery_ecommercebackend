@@ -37,17 +37,19 @@ const generateAndStoreOTP = async (key, expiration = CACHE_TTL.OTP, purpose = 'l
         message: messageTemplate
       });
 
-      try {
-        const response = await fetch(`https://apis.wappie.shop/v1/sms/messages?${params.toString()}`, { method: 'GET' });
-        if (!response.ok) {
-           const errorText = await response.text();
-           logger.error(`SMS API error for ${key}: ${response.status} ${errorText}`);
-        } else {
-           logger.info(`SMS sent successfully to ${key} for purpose: ${purpose}`);
-        }
-      } catch (smsError) {
-        logger.error(`Failed to send SMS to ${key}: ${smsError.message}`);
-      }
+      // try {
+      //   const response = await fetch(`https://apis.wappie.shop/v1/sms/messages?${params.toString()}`, { method: 'GET' });
+      //   if (!response.ok) {
+      //      const errorText = await response.text();
+      //      logger.error(`SMS API error for ${key}: ${response.status} ${errorText}`);
+      //   } else {
+      //      logger.info(`SMS sent successfully to ${key} for purpose: ${purpose}`);
+      //   }
+      // } catch (smsError) {
+      //   logger.error(`Failed to send SMS to ${key}: ${smsError.message}`);
+      // }
+      // SANDBOX MODE: Log the OTP to the console instead of sending SMS
+      logger.info(`[SANDBOX OTP] ${otp} for ${key}`);
     }
     
     return otp;

@@ -16,7 +16,8 @@ const sendOTP = async (phone, purpose = 'login') => {
 
     return {
       message: SUCCESS_MESSAGES.OTP_SENT,
-      phone
+      phone,
+      otp // SANDBOX MODE: Return OTP in response
     };
   } catch (error) {
     if (error instanceof ApiError) throw error;
