@@ -166,9 +166,16 @@ const cacheHelper = {
  */
 const disconnectRedis = async () => {
   if (redisClient) {
-    await redisClient.quit();
-    redisClient = null;
-    logger.info('Redis disconnected successfully');
+    try {
+      if (redisClient.status !== 'end') {
+        await redisClient.quit();
+      }
+    } catch (error) {
+      logger.warn(`Error disconnecting Redis: ${error.message}`);
+    } finally {
+      redisClient = null;
+      logger.info('Redis disconnected successfully');
+    }
   }
 };
 
