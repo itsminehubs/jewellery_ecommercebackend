@@ -12,7 +12,12 @@ const { generateEmployeeWelcomeEmail } = require('../../utils/emailTemplates');
 const getDashboardStats = async (shopId = null) => {
   const filter = {}; // Order model doesn't have storeId, so global stats only
   const totalUsers = await prisma.user.count({ where: { role: 'user' } });
-  const totalProducts = await prisma.product.count({ where: { deletedAt: null } });
+  const totalProducts = await prisma.product.count({ 
+    where: { 
+      deletedAt: null,
+      carbonsmithworld: false // Exclude Carbonsmith World products
+    } 
+  });
   const totalOrders = await prisma.order.count({ where: filter });
   const pendingOrders = await prisma.order.count({ where: { ...filter, orderStatus: 'pending' } });
 
@@ -450,16 +455,27 @@ const deleteUser = async (userId, requesterRole) => {
 
 const getStockAnalytics = async () => {
   const stats = await prisma.product.aggregate({
-    where: { deletedAt: null },
+    where: { 
+      deletedAt: null,
+      carbonsmithworld: false // Exclude Carbonsmith World
+    },
     _sum: { stock: true }
   });
   
   // For total value, we need db.$queryRaw because it's stock * price
-  const queryResult = await prisma.$queryRaw`SELECT SUM(stock * "finalPrice") as "totalValue" FROM "Product" WHERE "deletedAt" IS NULL`;
+  const queryResult = await prisma.$queryRaw`
+    SELECT SUM(p.stock * p."finalPrice") as "totalValue" 
+    FROM "Product" p
+    WHERE p."deletedAt" IS NULL AND p.carbonsmithworld = false
+  `;
   const totalValue = queryResult[0]?.totalValue || 0;
   
   const lowStockCount = await prisma.product.count({
-    where: { stock: { lt: 5 }, deletedAt: null }
+    where: { 
+      stock: { lt: 5 }, 
+      deletedAt: null,
+      carbonsmithworld: false
+    }
   });
 
   const dispatchedOrders = await prisma.order.count({
@@ -474,7 +490,7 @@ const getStockAnalytics = async () => {
       SUM(p.stock * p."finalPrice") as value
     FROM "Product" p
     LEFT JOIN "Category" c ON p."categoryId" = c.id
-    WHERE p."deletedAt" IS NULL
+    WHERE p."deletedAt" IS NULL AND p.carbonsmithworld = false
     GROUP BY c.id, c.name
   `;
 
@@ -530,7 +546,7 @@ const getStockList = async (options = {}) => {
   const { page = 1, limit = 20, search, category, status } = options;
   const skip = (page - 1) * limit;
 
-  const where = { deletedAt: null };
+  const where = { deletedAt: null, carbonsmithworld: false };
 
   if (search) {
     where.OR = [
