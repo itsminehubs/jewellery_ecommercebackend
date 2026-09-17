@@ -12,11 +12,11 @@ const { generateEmployeeWelcomeEmail } = require('../../utils/emailTemplates');
 const getDashboardStats = async (shopId = null) => {
   const filter = {}; // Order model doesn't have storeId, so global stats only
   const totalUsers = await prisma.user.count({ where: { role: 'user' } });
-  const totalProducts = await prisma.product.count({ 
-    where: { 
+  const totalProducts = await prisma.product.count({
+    where: {
       deletedAt: null,
       carbonsmithworld: false // Exclude Carbonsmith World products
-    } 
+    }
   });
   const totalOrders = await prisma.order.count({ where: filter });
   const pendingOrders = await prisma.order.count({ where: { ...filter, orderStatus: 'pending' } });
@@ -66,7 +66,7 @@ const adjustLoyaltyPoints = async (userId, points, reason = 'Admin Adjustment') 
   if (!user) throw ApiError.notFound('User not found');
 
   const newPoints = (user.loyaltyPoints || 0) + Number(points);
-  
+
   const updatedUser = await prisma.user.update({
     where: { id: userId },
     data: { loyaltyPoints: newPoints }
@@ -82,23 +82,23 @@ const getAllOrders = async (filters = {}, options = {}) => {
 
   // Extract source from filters
   const { source, ...prismaFilters } = filters;
-  
+
   let finalOrders = [];
   let total = 0;
 
   const onlineFilters = { ...prismaFilters };
   const posFilters = { ...prismaFilters };
-  
+
   if (prismaFilters.orderStatus) {
-      posFilters.status = prismaFilters.orderStatus;
-      delete posFilters.orderStatus;
+    posFilters.status = prismaFilters.orderStatus;
+    delete posFilters.orderStatus;
   }
   if (posFilters.shop_id) {
-      posFilters.storeId = posFilters.shop_id;
-      delete posFilters.shop_id;
+    posFilters.storeId = posFilters.shop_id;
+    delete posFilters.shop_id;
   }
   if (onlineFilters.shop_id) {
-      delete onlineFilters.shop_id;
+    delete onlineFilters.shop_id;
   }
 
   if (source === 'pos') {
@@ -114,19 +114,19 @@ const getAllOrders = async (filters = {}, options = {}) => {
       take: Number(limit)
     });
     total = await prisma.pOSOrder.count({ where: posFilters });
-    
+
     finalOrders = posOrders.map(po => ({
-        ...po,
-        source: 'pos',
-        orderStatus: po.status,
-        paymentStatus: 'paid', // POS orders are fully paid at checkout
-        user: po.customer,
-        shop_id: po.store?.name || po.storeId
+      ...po,
+      source: 'pos',
+      orderStatus: po.status,
+      paymentStatus: 'paid', // POS orders are fully paid at checkout
+      user: po.customer,
+      shop_id: po.store?.name || po.storeId
     }));
   } else if (source === 'online') {
     const orders = await prisma.order.findMany({
       where: onlineFilters,
-      include: { 
+      include: {
         user: { select: { name: true, phone: true, email: true } },
         items: { include: { product: { include: { images: true, metalDetails: true, stoneDetails: true } } } }
       },
@@ -135,14 +135,14 @@ const getAllOrders = async (filters = {}, options = {}) => {
       take: Number(limit)
     });
     total = await prisma.order.count({ where: onlineFilters });
-    
+
     finalOrders = orders.map(o => ({ ...o, source: 'online' }));
   } else {
     const fetchLimit = skip + Number(limit);
     const [onlineOrders, posOrdersRaw] = await Promise.all([
       prisma.order.findMany({
         where: onlineFilters,
-        include: { 
+        include: {
           user: { select: { name: true, phone: true, email: true } },
           items: { include: { product: { include: { images: true, metalDetails: true, stoneDetails: true } } } }
         },
@@ -160,23 +160,23 @@ const getAllOrders = async (filters = {}, options = {}) => {
         take: fetchLimit
       })
     ]);
-    
+
     const mappedOnline = onlineOrders.map(o => ({ ...o, source: 'online' }));
     const mappedPos = posOrdersRaw.map(po => ({
-        ...po,
-        source: 'pos',
-        orderStatus: po.status,
-        paymentStatus: 'paid', // POS orders are fully paid at checkout
-        user: po.customer,
-        shop_id: po.store?.name || po.storeId
+      ...po,
+      source: 'pos',
+      orderStatus: po.status,
+      paymentStatus: 'paid', // POS orders are fully paid at checkout
+      user: po.customer,
+      shop_id: po.store?.name || po.storeId
     }));
-    
+
     const combined = [...mappedOnline, ...mappedPos].sort((a, b) => b.createdAt - a.createdAt);
     finalOrders = combined.slice(skip, skip + Number(limit));
-    
+
     const [onlineCount, posCount] = await Promise.all([
-        prisma.order.count({ where: onlineFilters }),
-        prisma.pOSOrder.count({ where: posFilters })
+      prisma.order.count({ where: onlineFilters }),
+      prisma.pOSOrder.count({ where: posFilters })
     ]);
     total = onlineCount + posCount;
   }
@@ -187,39 +187,39 @@ const getAllOrders = async (filters = {}, options = {}) => {
 const updateOrderStatus = async (orderId, status, note = '') => {
   let order = await prisma.order.findUnique({ where: { id: orderId } });
   if (order) {
-      const updateData = { orderStatus: status };
-      if (status === 'DELIVERED' || status === 'delivered') updateData.deliveredAt = new Date();
-    
-      const updatedOrder = await prisma.order.update({
-        where: { id: orderId },
-        data: updateData
-      });
-      logger.info(`Admin updated order ${orderId} to ${status}`);
-      return updatedOrder;
+    const updateData = { orderStatus: status };
+    if (status === 'DELIVERED' || status === 'delivered') updateData.deliveredAt = new Date();
+
+    const updatedOrder = await prisma.order.update({
+      where: { id: orderId },
+      data: updateData
+    });
+    logger.info(`Admin updated order ${orderId} to ${status}`);
+    return updatedOrder;
   }
-  
+
   let posOrder = await prisma.pOSOrder.findUnique({ where: { id: orderId } });
   if (posOrder) {
-      const updatedPosOrder = await prisma.pOSOrder.update({
-          where: { id: orderId },
-          data: { status: status.toLowerCase(), notes: note || posOrder.notes }
-      });
-      
-      if (['cancelled', 'refunded'].includes(status.toLowerCase()) && !['cancelled', 'refunded'].includes(posOrder.status.toLowerCase())) {
-         const inventoryService = require('../product/inventory.service');
-         const posItems = await prisma.pOSOrderItem.findMany({ where: { posOrderId: orderId } });
-         for (const item of posItems) {
-            await inventoryService.updateStock(item.productId, item.quantity, {
-                type: 'refund',
-                action: 'POS_RETURN',
-                referenceId: orderId,
-                performedBy: 'ADMIN',
-                notes: `POS Order ${status}`
-            });
-         }
+    const updatedPosOrder = await prisma.pOSOrder.update({
+      where: { id: orderId },
+      data: { status: status.toLowerCase(), notes: note || posOrder.notes }
+    });
+
+    if (['cancelled', 'refunded'].includes(status.toLowerCase()) && !['cancelled', 'refunded'].includes(posOrder.status.toLowerCase())) {
+      const inventoryService = require('../product/inventory.service');
+      const posItems = await prisma.pOSOrderItem.findMany({ where: { posOrderId: orderId } });
+      for (const item of posItems) {
+        await inventoryService.updateStock(item.productId, item.quantity, {
+          type: 'refund',
+          action: 'POS_RETURN',
+          referenceId: orderId,
+          performedBy: 'ADMIN',
+          notes: `POS Order ${status}`
+        });
       }
-      logger.info(`Admin updated POS order ${orderId} to ${status}`);
-      return { ...updatedPosOrder, source: 'pos', orderStatus: updatedPosOrder.status };
+    }
+    logger.info(`Admin updated POS order ${orderId} to ${status}`);
+    return { ...updatedPosOrder, source: 'pos', orderStatus: updatedPosOrder.status };
   }
   throw ApiError.notFound('Order not found');
 };
@@ -233,8 +233,8 @@ const getAllUsers = async (filters = {}, options = {}) => {
   const users = await prisma.user.findMany({
     where: filters,
     select: {
-      id: true, name: true, phone: true, email: true, role: true, 
-      isActive: true, isPhoneVerified: true, isEmailVerified: true, 
+      id: true, name: true, phone: true, email: true, role: true,
+      isActive: true, isPhoneVerified: true, isEmailVerified: true,
       createdAt: true, lastLogin: true
     },
     orderBy: { createdAt: 'desc' },
@@ -265,7 +265,7 @@ const getUserDetails = async (userId) => {
 
   const totalOrders = orders.length;
   const totalSpent = orders.reduce((acc, order) => acc + Number(order.grandTotal || 0), 0);
-  
+
   const sortedOrders = [...orders].sort((a, b) => b.createdAt - a.createdAt);
   const lastOrder = sortedOrders.length > 0 ? sortedOrders[0].createdAt : null;
 
@@ -331,7 +331,7 @@ const createEmployee = async (employeeData, requesterRole) => {
 
   const loginUrl = process.env.POS_URL || 'https://pos.thecarbonsmith.com';
   const emailContent = generateEmployeeWelcomeEmail(employee, password, loginUrl);
-  
+
   if (employee.email) {
     await sendEmail({
       to: employee.email,
@@ -376,10 +376,10 @@ const updateEmployee = async (userId, updateData, requesterRole) => {
 
   if (name) updateFields.name = name;
   if (role) updateFields.role = role;
-  
+
   if (password) {
-      const bcrypt = require('bcryptjs');
-      updateFields.password = await bcrypt.hash(password, 10);
+    const bcrypt = require('bcryptjs');
+    updateFields.password = await bcrypt.hash(password, 10);
   }
 
   const updatedUser = await prisma.user.update({
@@ -455,13 +455,13 @@ const deleteUser = async (userId, requesterRole) => {
 
 const getStockAnalytics = async () => {
   const stats = await prisma.product.aggregate({
-    where: { 
+    where: {
       deletedAt: null,
       carbonsmithworld: false // Exclude Carbonsmith World
     },
     _sum: { stock: true }
   });
-  
+
   // For total value, we need db.$queryRaw because it's stock * price
   const queryResult = await prisma.$queryRaw`
     SELECT SUM(p.stock * p."finalPrice") as "totalValue" 
@@ -469,10 +469,10 @@ const getStockAnalytics = async () => {
     WHERE p."deletedAt" IS NULL AND p.carbonsmithworld = false
   `;
   const totalValue = queryResult[0]?.totalValue || 0;
-  
+
   const lowStockCount = await prisma.product.count({
-    where: { 
-      stock: { lt: 5 }, 
+    where: {
+      stock: { lt: 5 },
       deletedAt: null,
       carbonsmithworld: false
     }
@@ -495,10 +495,10 @@ const getStockAnalytics = async () => {
   `;
 
   const categoryStock = categoryStockRaw.map(c => ({
-      categoryId: c.categoryId,
-      name: c.name || 'Unknown',
-      count: Number(c.count || 0),
-      value: Number(c.value || 0)
+    categoryId: c.categoryId,
+    name: c.name || 'Unknown',
+    count: Number(c.count || 0),
+    value: Number(c.value || 0)
   }));
 
   return {
@@ -511,17 +511,17 @@ const getStockAnalytics = async () => {
 };
 
 const getSalesReports = async (period, shopId = null) => {
-    // Requires raw SQL for date truncations in Prisma
-    let truncFormat = 'day';
-    let interval = '30 days';
+  // Requires raw SQL for date truncations in Prisma
+  let truncFormat = 'day';
+  let interval = '30 days';
 
-    if (period === 'weekly') { truncFormat = 'week'; interval = '90 days'; }
-    else if (period === 'monthly') { truncFormat = 'month'; interval = '1 year'; }
-    else if (period === 'yearly') { truncFormat = 'year'; interval = '10 years'; }
+  if (period === 'weekly') { truncFormat = 'week'; interval = '90 days'; }
+  else if (period === 'monthly') { truncFormat = 'month'; interval = '1 year'; }
+  else if (period === 'yearly') { truncFormat = 'year'; interval = '10 years'; }
 
-    const storeFilter = shopId ? `AND "storeId" = '${shopId}'` : '';
-    
-    const query = `
+  const storeFilter = shopId ? `AND "storeId" = '${shopId}'` : '';
+
+  const query = `
       SELECT DATE_TRUNC('${truncFormat}', "createdAt") as "_id", 
              SUM("grandTotal") as "totalSales", 
              COUNT(id) as "orderCount"
@@ -533,13 +533,13 @@ const getSalesReports = async (period, shopId = null) => {
       ORDER BY "_id" ASC
     `;
 
-    const result = await prisma.$queryRawUnsafe(query);
-    
-    return result.map(r => ({
-        _id: r.id,
-        totalSales: Number(r.totalSales),
-        orderCount: Number(r.orderCount)
-    }));
+  const result = await prisma.$queryRawUnsafe(query);
+
+  return result.map(r => ({
+    _id: r.id,
+    totalSales: Number(r.totalSales),
+    orderCount: Number(r.orderCount)
+  }));
 };
 
 const getStockList = async (options = {}) => {
@@ -557,7 +557,7 @@ const getStockList = async (options = {}) => {
   }
 
   if (category) {
-      where.category = { slug: category };
+    where.category = { slug: category };
   }
 
   if (status) {
@@ -641,13 +641,13 @@ const importProductsFromCSV = async (filePath) => {
             };
 
             if (sku && sku.trim() !== '') {
-                const existing = await prisma.product.findUnique({ where: { sku: sku.trim() } });
-                if (existing) {
-                    await prisma.product.update({ where: { sku: sku.trim() }, data: productData });
-                    summary.updated++;
-                    continue;
-                }
-                productData.sku = sku.trim();
+              const existing = await prisma.product.findUnique({ where: { sku: sku.trim() } });
+              if (existing) {
+                await prisma.product.update({ where: { sku: sku.trim() }, data: productData });
+                summary.updated++;
+                continue;
+              }
+              productData.sku = sku.trim();
             }
 
             await prisma.product.create({ data: productData });
@@ -676,55 +676,55 @@ const adjustStock = async (productId, quantityChange, userId, notes) => {
 
 const deleteOrder = async (orderId, adminId) => {
   const inventoryService = require('../product/inventory.service');
-  
+
   let order = await prisma.order.findUnique({
-      where: { id: orderId },
-      include: { items: true }
+    where: { id: orderId },
+    include: { items: true }
   });
   if (order) {
-      for (const item of order.items) {
-          if (item.productId) {
-              try {
-                  await inventoryService.updateStock(item.productId, item.quantity, {
-                      type: 'adjustment',
-                      action: 'ADMIN_DELETE_ORDER',
-                      performedBy: adminId,
-                      notes: 'Restored stock from deleted order'
-                  });
-              } catch (e) {
-                  console.warn('Could not restore stock:', e.message);
-              }
-          }
+    for (const item of order.items) {
+      if (item.productId) {
+        try {
+          await inventoryService.updateStock(item.productId, item.quantity, {
+            type: 'adjustment',
+            action: 'ADMIN_DELETE_ORDER',
+            performedBy: adminId,
+            notes: 'Restored stock from deleted order'
+          });
+        } catch (e) {
+          console.warn('Could not restore stock:', e.message);
+        }
       }
-      await prisma.orderItem.deleteMany({ where: { orderId: orderId } });
-      await prisma.order.delete({ where: { id: orderId } });
-      logger.info(`Admin ${adminId} deleted order ${orderId}`);
-      return true;
+    }
+    await prisma.orderItem.deleteMany({ where: { orderId: orderId } });
+    await prisma.order.delete({ where: { id: orderId } });
+    logger.info(`Admin ${adminId} deleted order ${orderId}`);
+    return true;
   }
-  
+
   let posOrder = await prisma.pOSOrder.findUnique({
-      where: { id: orderId },
-      include: { items: true }
+    where: { id: orderId },
+    include: { items: true }
   });
   if (posOrder) {
-      for (const item of posOrder.items) {
-          if (item.productId) {
-              try {
-                  await inventoryService.updateStock(item.productId, item.quantity, {
-                      type: 'adjustment',
-                      action: 'ADMIN_DELETE_POS_ORDER',
-                      performedBy: adminId,
-                      notes: 'Restored stock from deleted POS bill'
-                  });
-              } catch (e) {
-                  console.warn('Could not restore stock:', e.message);
-              }
-          }
+    for (const item of posOrder.items) {
+      if (item.productId) {
+        try {
+          await inventoryService.updateStock(item.productId, item.quantity, {
+            type: 'adjustment',
+            action: 'ADMIN_DELETE_POS_ORDER',
+            performedBy: adminId,
+            notes: 'Restored stock from deleted POS bill'
+          });
+        } catch (e) {
+          console.warn('Could not restore stock:', e.message);
+        }
       }
-      await prisma.pOSOrderItem.deleteMany({ where: { posOrderId: orderId } });
-      await prisma.pOSOrder.delete({ where: { id: orderId } });
-      logger.info(`Admin ${adminId} deleted POS order ${orderId}`);
-      return true;
+    }
+    await prisma.pOSOrderItem.deleteMany({ where: { posOrderId: orderId } });
+    await prisma.pOSOrder.delete({ where: { id: orderId } });
+    logger.info(`Admin ${adminId} deleted POS order ${orderId}`);
+    return true;
   }
   throw ApiError.notFound('Order not found');
 };
@@ -732,30 +732,30 @@ const deleteOrder = async (orderId, adminId) => {
 const updateOrderDetails = async (orderId, updateData) => {
   let order = await prisma.order.findUnique({ where: { id: orderId } });
   if (order) {
-      const data = {};
-      if (updateData.paymentStatus) data.paymentStatus = updateData.paymentStatus;
-      if (updateData.orderNumber) data.orderNumber = updateData.orderNumber;
-      if (updateData.shippingAddress) {
-          data.shippingAddress = updateData.shippingAddress;
-      }
-      const updatedOrder = await prisma.order.update({
-          where: { id: orderId },
-          data
-      });
-      logger.info(`Admin updated order details for ${orderId}`);
-      return updatedOrder;
+    const data = {};
+    if (updateData.paymentStatus) data.paymentStatus = updateData.paymentStatus;
+    if (updateData.orderNumber) data.orderNumber = updateData.orderNumber;
+    if (updateData.shippingAddress) {
+      data.shippingAddress = updateData.shippingAddress;
+    }
+    const updatedOrder = await prisma.order.update({
+      where: { id: orderId },
+      data
+    });
+    logger.info(`Admin updated order details for ${orderId}`);
+    return updatedOrder;
   }
-  
+
   let posOrder = await prisma.pOSOrder.findUnique({ where: { id: orderId } });
   if (posOrder) {
-      const data = {};
-      if (updateData.orderNumber) data.orderNumber = updateData.orderNumber;
-      const updatedPosOrder = await prisma.pOSOrder.update({
-          where: { id: orderId },
-          data
-      });
-      logger.info(`Admin updated POS order details for ${orderId}`);
-      return { ...updatedPosOrder, source: 'pos' };
+    const data = {};
+    if (updateData.orderNumber) data.orderNumber = updateData.orderNumber;
+    const updatedPosOrder = await prisma.pOSOrder.update({
+      where: { id: orderId },
+      data
+    });
+    logger.info(`Admin updated POS order details for ${orderId}`);
+    return { ...updatedPosOrder, source: 'pos' };
   }
 
   throw ApiError.notFound('Order not found');
