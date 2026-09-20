@@ -71,6 +71,8 @@ model User {
 
   imitationOrdersAsCustomer ImitationSale[] @relation("ImitationCustomer")
   imitationOrdersAsStaff    ImitationSale[] @relation("ImitationStaff")
+  goldBarSales              GoldBarSale[]   @relation("CustomerGoldBarSales")
+  goldBarSalesHandled       GoldBarSale[]   @relation("StaffGoldBarSales")
 
   repairs           Repair[]
   billedRepairs     Repair[]  @relation("BilledRepairs")
@@ -352,6 +354,33 @@ model ImitationSale {
   staff       User     @relation("ImitationStaff", fields: [staffId], references: [id])
 }
 
+model GoldBarSale {
+  id          String   @id @default(uuid())
+  orderNumber String   @unique
+  customerId  String?
+  staffId     String
+
+  // Sale Details
+  purity      String   // 99.9%, 99.5%, etc.
+  quantity    Int      @default(1)
+  netWeight   Decimal  @db.Decimal(10, 3)
+  grossWeight Decimal  @db.Decimal(10, 3)
+  metalRate   Decimal  @db.Decimal(20, 2)
+  gstAmount   Decimal  @default(0) @db.Decimal(20, 2)
+  grandTotal  Decimal  @db.Decimal(20, 2)
+  paymentMode String   @default("cash") // cash, card, upi, cheque
+
+  customerPan String
+
+  status      String   @default("completed") // completed, cancelled
+  notes       String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  customer    User?    @relation("CustomerGoldBarSales", fields: [customerId], references: [id])
+  staff       User     @relation("StaffGoldBarSales", fields: [staffId], references: [id])
+}
 model POSOrderItem {
     id         String  @id @default(uuid())
     posOrderId String
