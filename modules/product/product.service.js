@@ -380,8 +380,22 @@ const updateProduct = async (productId, updateData, imagePaths = [], imagesToDel
             create: (() => { const { id, productId, ...rest } = pricingResults.metalDetails || {}; return rest; })(),
             update: (() => { const { id, productId, ...rest } = pricingResults.metalDetails || {}; return rest; })()
           }
+        } : undefined,
+        stoneDetails: stoneDetails ? {
+          deleteMany: {},
+          create: pricingResults.stoneDetails.map(s => ({
+            stoneType: s.stoneType,
+            synthetic: s.synthetic,
+            shape: s.shape,
+            netWeight: s.netWeight || 0,
+            color: s.color,
+            clarity: s.clarity,
+            carat: s.carat,
+            cut: s.cut,
+            certification: s.certification,
+            rate: s.rate
+          }))
         } : undefined
-        // For stone details, it's safer to delete and recreate if passed, or manage individually
       },
       include: { images: true, metalDetails: true, stoneDetails: true }
     });
