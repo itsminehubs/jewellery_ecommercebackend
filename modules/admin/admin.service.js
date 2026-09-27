@@ -681,7 +681,34 @@ const deleteOrder = async (orderId, adminId) => {
     where: { id: orderId },
     include: { items: true }
   });
+
+  const restoreCreditMemos = async (notes) => {
+    if (notes && notes.includes('PAYMENT_REF:credit_memo:')) {
+      const notesArray = notes.split('||');
+      for (const note of notesArray) {
+        if (note.startsWith('PAYMENT_REF:credit_memo:')) {
+          const parts = note.split(':');
+          if (parts.length >= 4) {
+            const memoId = parts[2];
+            const amount = Number(parts[3]);
+            if (memoId && !isNaN(amount)) {
+              const memo = await prisma.creditMemo.findFirst({ where: { memoId } });
+              if (memo) {
+                await prisma.creditMemo.update({
+                  where: { id: memo.id },
+                  data: { balance: Number(memo.balance) + amount, status: 'active' }
+                });
+                logger.info(`Restored ₹${amount} to Credit Memo ${memoId} from deleted order ${orderId}`);
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+
   if (order) {
+    await restoreCreditMemos(order.notes);
     for (const item of order.items) {
       if (item.productId) {
         try {
@@ -707,6 +734,7 @@ const deleteOrder = async (orderId, adminId) => {
     include: { items: true }
   });
   if (posOrder) {
+    await restoreCreditMemos(posOrder.notes);
     for (const item of posOrder.items) {
       if (item.productId) {
         try {
