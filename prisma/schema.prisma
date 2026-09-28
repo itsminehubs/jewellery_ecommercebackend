@@ -437,6 +437,11 @@ model CreditMemo {
   customerPan       String?
   customerGst       String?
 
+  lockedGoldRate    Decimal? @db.Decimal(20, 2)
+  isRateLocked      Boolean  @default(false)
+  exchangePurity    String?
+  exchangeWeight    Decimal? @db.Decimal(20, 3)
+
   expiresAt DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

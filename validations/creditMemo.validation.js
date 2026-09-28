@@ -6,14 +6,15 @@ const createCreditMemoSchema = {
             'any.required': 'Customer ID is required',
             'string.empty': 'Customer ID cannot be empty'
         }),
-        originalAmount: Joi.number().min(1).required().messages({
-            'any.required': 'Original amount is required',
-            'number.min': 'Original amount must be greater than 0'
-        }),
-        paymentMethod: Joi.string().valid('cash', 'card', 'upi', 'bank_transfer', 'exchange').required().messages({
+        originalAmount: Joi.number().min(0).optional(),
+        paymentMethod: Joi.string().valid('cash', 'card', 'upi', 'bank_transfer', 'exchange', 'gold_exchange').required().messages({
             'any.required': 'Payment method is required',
             'any.only': 'Invalid payment method'
         }),
+        isRateLocked: Joi.boolean().optional(),
+        lockedGoldRate: Joi.number().min(1).optional(),
+        exchangePurity: Joi.string().optional(),
+        exchangeWeight: Joi.number().min(0.001).optional(),
         notes: Joi.string().allow('').optional(),
         linkedItems: Joi.array().items(
             Joi.object({
