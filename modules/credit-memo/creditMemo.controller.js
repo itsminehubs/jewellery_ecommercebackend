@@ -114,10 +114,19 @@ const searchActiveMemos = asyncHandler(async (req, res) => {
 
 // Create new Credit Memo
 const createCreditMemo = asyncHandler(async (req, res) => {
-    const { customer, originalAmount, paymentMethod, notes, shop_id, linkedItems } = req.body;
+    const { customer, originalAmount, paymentMethod, notes, shop_id, linkedItems, isRateLocked, lockedGoldRate, exchangePurity, exchangeWeight } = req.body;
 
-    if (!customer || !originalAmount || !paymentMethod) {
-        return ApiResponse.error('Customer ID, originalAmount, and paymentMethod are required', 400).send(res);
+    if (!customer || !paymentMethod) {
+        return ApiResponse.error('Customer ID and paymentMethod are required', 400).send(res);
+    }
+
+    let finalAmount = Number(originalAmount) || 0;
+    if (paymentMethod === 'gold_exchange' && exchangeWeight && lockedGoldRate && finalAmount === 0) {
+        finalAmount = Number(exchangeWeight) * Number(lockedGoldRate);
+    }
+
+    if (finalAmount <= 0) {
+        return ApiResponse.error('Credit Memo amount must be greater than 0', 400).send(res);
     }
 
     const validLinkedItems = linkedItems ? linkedItems.filter(item => item.product) : [];
@@ -161,13 +170,17 @@ const createCreditMemo = asyncHandler(async (req, res) => {
             data: {
                 memoId,
                 customerId: customer,
-                originalAmount: Number(originalAmount),
-                balance: Number(originalAmount),
+                originalAmount: finalAmount,
+                balance: finalAmount,
                 paymentMethod,
                 notes,
                 linkedItems: validLinkedItems,
                 shopId: shop_id || 'MAIN',
-                createdById: req.user.id
+                createdById: req.user.id,
+                isRateLocked: isRateLocked || (paymentMethod === 'gold_exchange'),
+                lockedGoldRate: lockedGoldRate ? Number(lockedGoldRate) : null,
+                exchangePurity: exchangePurity || null,
+                exchangeWeight: exchangeWeight ? Number(exchangeWeight) : null
             }
         });
 
@@ -175,7 +188,7 @@ const createCreditMemo = asyncHandler(async (req, res) => {
             await recordTransactionPrisma({
                 customerId: customer,
                 type: 'credit',
-                amount: Number(originalAmount),
+                amount: finalAmount,
                 transactionType: 'advance_payment',
                 referenceId: creditMemo.id,
                 referenceModel: 'CreditMemo',
