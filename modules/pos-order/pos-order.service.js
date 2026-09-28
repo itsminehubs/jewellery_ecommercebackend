@@ -15,7 +15,7 @@ const roundTo3 = (num) => Math.round((num + Number.EPSILON) * 1000) / 1000;
 /**
  * Calculate the exact price of a POS cart based on live rates
  */
-const calculateCartPrice = async (items, storeId) => {
+const calculateCartPrice = async (items, storeId, lockedGoldRate = null) => {
     let cartSubtotal = 0;
     let cartGst = 0;
     let cartTotal = 0;
@@ -93,8 +93,10 @@ const calculateCartPrice = async (items, storeId) => {
 
         let metalValue = 0;
         let rateUsed = 0;
-        // 3. Fetch latest metal rate
-        if (metalDetails && metalDetails.metalType && metalDetails.purity) {
+        // 3. Fetch latest metal rate or use locked rate
+        if (lockedGoldRate) {
+            rateUsed = Number(lockedGoldRate);
+        } else if (metalDetails && metalDetails.metalType && metalDetails.purity) {
             const latestRate = await prisma.goldRate.findFirst({
                 where: {
                     metal: metalDetails.metalType.toLowerCase(),

@@ -61,13 +61,13 @@ const processReturn = asyncHandler(async (req, res) => {
 });
 
 const calculateCart = asyncHandler(async (req, res) => {
-    const { items, storeId } = req.body;
+    const { items, storeId, lockedGoldRate } = req.body;
     
     if (!items || !Array.isArray(items)) {
         throw new ApiError(400, 'Items array is required');
     }
 
-    const calculatedCart = await posOrderService.calculateCartPrice(items, storeId);
+    const calculatedCart = await posOrderService.calculateCartPrice(items, storeId, lockedGoldRate);
     ApiResponse.success(calculatedCart, 'Cart calculated successfully').send(res);
 });
 
