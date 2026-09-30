@@ -181,6 +181,9 @@ const createCreditMemo = asyncHandler(async (req, res) => {
                 lockedGoldRate: lockedGoldRate ? Number(lockedGoldRate) : null,
                 exchangePurity: exchangePurity || null,
                 exchangeWeight: exchangeWeight ? Number(exchangeWeight) : null
+            },
+            include: {
+                createdBy: { select: { id: true, name: true } }
             }
         });
 
