@@ -5,8 +5,11 @@ const creategoldBarSale = async (req, res) => {
     const { customerId, purity, quantity, netWeight, grossWeight, metalRate, gstAmount, grandTotal, paymentMode, customerPan, notes } = req.body;
     const staffId = req.user.id; // From auth middleware
 
-    if (!customerPan) {
-      return res.status(400).json({ success: false, message: 'Customer PAN is mandatory for Gold Bar sales' });
+    if (grandTotal > 200000 && !customerPan) {
+      return res.status(400).json({ success: false, message: 'Customer PAN is mandatory for Gold Bar sales above ₹2 Lakhs' });
+    }
+    if (customerPan && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(customerPan)) {
+      return res.status(400).json({ success: false, message: 'Invalid Customer PAN format (e.g. ABCDE1234F)' });
     }
 
     const orderNumber = `CS-GLD-${Date.now()}`;
