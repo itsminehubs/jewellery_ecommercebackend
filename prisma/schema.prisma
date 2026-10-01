@@ -157,8 +157,9 @@ model Product {
   gstRate Decimal @default(3) @db.Decimal(5, 2)
 
   // Inventory & Status
-  stock  Int    @default(0)
-  status String @default("active") // active, out_of_stock, archived
+  stock         Int    @default(0)
+  status        String @default("active") // active, out_of_stock, archived
+  internalState String @default("AVAILABLE") // AVAILABLE, IN_REPAIR, IN_TRANSIT
 
   // Analytics
   rating           Decimal @default(0) @db.Decimal(3, 2)

@@ -111,6 +111,7 @@ const updateProduct = {
         discount: Joi.number().min(0).max(100),
         stock: Joi.number().integer().min(0),
         status: Joi.string().valid(...Object.values(PRODUCT_STATUS)),
+        internalState: Joi.string().valid('AVAILABLE', 'IN_REPAIR', 'IN_TRANSIT').optional(),
         featured: Joi.boolean(),
         trending: Joi.boolean(),
         forHer: Joi.boolean(),
