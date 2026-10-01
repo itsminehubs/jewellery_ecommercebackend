@@ -28,13 +28,27 @@ const logStockChange = async (data, tx = null) => {
 };
 
 const getProductAudits = async (productId) => {
-  return await prisma.audit.findMany({
+  const rawLogs = await prisma.audit.findMany({
       where: { 
           entityType: 'Product',
           entityId: productId 
       },
       orderBy: { createdAt: 'desc' },
-      include: { performedBy: { select: { name: true } } }
+      include: { performedBy: { select: { name: true, role: true } } }
+  });
+  
+  return rawLogs.map(log => {
+      const changes = log.changes || {};
+      return {
+          ...log,
+          type: changes.type,
+          beforeQuantity: changes.beforeQuantity,
+          afterQuantity: changes.afterQuantity,
+          quantityChanged: changes.quantityChanged,
+          costImpact: changes.costImpact,
+          referenceId: changes.referenceId,
+          notes: changes.notes
+      };
   });
 };
 
@@ -48,15 +62,40 @@ const getGlobalAudits = async (filters = {}, options = {}) => {
       prismaFilters.entityId = filters.productId;
   }
   
-  const logs = await prisma.audit.findMany({
+  const rawLogs = await prisma.audit.findMany({
       where: prismaFilters,
       orderBy: { createdAt: 'desc' },
       skip,
       take: Number(limit),
       include: { 
-          performedBy: { select: { name: true } }
+          performedBy: { select: { name: true, role: true } }
       }
   });
+  
+  // Frontend expects these directly on the object instead of inside a `changes` JSON field
+  const logs = await Promise.all(rawLogs.map(async (log) => {
+      let product = null;
+      if (log.entityType === 'Product') {
+          product = await prisma.product.findUnique({
+              where: { id: log.entityId },
+              select: { name: true, sku: true }
+          });
+      }
+      
+      const changes = log.changes || {};
+      
+      return {
+          ...log,
+          product,
+          type: changes.type,
+          beforeQuantity: changes.beforeQuantity,
+          afterQuantity: changes.afterQuantity,
+          quantityChanged: changes.quantityChanged,
+          costImpact: changes.costImpact,
+          referenceId: changes.referenceId,
+          notes: changes.notes
+      };
+  }));
     
   const total = await prisma.audit.count({ where: prismaFilters });
   
