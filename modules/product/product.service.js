@@ -26,7 +26,8 @@ const getAllProducts = async (filters = {}, options = {}) => {
     forHer,
     carbonsmithworld,
     status,
-    exclude
+    exclude,
+    productType
   } = options;
 
   const where = { ...filters, deletedAt: null };
@@ -64,8 +65,35 @@ const getAllProducts = async (filters = {}, options = {}) => {
     if (maxPrice) where.finalPrice.lte = Number(maxPrice);
   }
 
+  if (productType) {
+    const types = productType.split(',').map(t => t.trim().toLowerCase());
+    const conditions = [];
+
+    if (types.includes('diamond')) {
+      conditions.push({
+        metalDetails: { metalType: { in: ['Gold', 'gold', 'Platinum', 'platinum'] } },
+        stoneDetails: { some: {} }
+      });
+    }
+    if (types.includes('gold')) {
+      conditions.push({
+        metalDetails: { metalType: { in: ['Gold', 'gold'] } },
+        stoneDetails: { none: {} }
+      });
+    }
+    if (types.includes('silver')) {
+      conditions.push({
+        metalDetails: { metalType: { in: ['Silver', 'silver'] } }
+      });
+    }
+
+    if (conditions.length > 0) {
+      where.AND = [...(where.AND || []), { OR: conditions }];
+    }
+  }
+
   if (metalType || purity) {
-    where.metalDetails = {};
+    if (!where.metalDetails) where.metalDetails = {};
     if (metalType) {
       where.metalDetails.metalType = { in: metalType.split(',').map(m => m.trim()) };
     }
