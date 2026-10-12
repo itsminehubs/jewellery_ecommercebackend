@@ -2,6 +2,8 @@ const prisma = require('../../config/prisma');
 const { recordTransactionPrisma } = require('../accounting/customer-ledger.service');
 const ApiResponse = require('../../utils/ApiResponse');
 const { asyncHandler } = require('../../middlewares/error.middleware');
+const { validateAndCheckDuplicateUtr, isNeftOrBankTransfer } = require('../../utils/utrValidator');
+const { generateCreditMemoNumber } = require('../../utils/invoiceNumberGenerator');
 
 // Get all Credit Memos (Admin)
 const getAllCreditMemos = asyncHandler(async (req, res) => {
@@ -129,6 +131,13 @@ const createCreditMemo = asyncHandler(async (req, res) => {
         return ApiResponse.error('Credit Memo amount must be greater than 0', 400).send(res);
     }
 
+    let finalNotes = notes || '';
+    if (isNeftOrBankTransfer(paymentMethod)) {
+        const rawUtr = req.body.utrNumber || (notes && notes.match(/UTR:([A-Za-z0-9_-]+)/)?.[1]);
+        const cleanUtr = await validateAndCheckDuplicateUtr(prisma, rawUtr, paymentMethod.toUpperCase());
+        finalNotes = (finalNotes ? finalNotes + '\n' : '') + `UTR:${cleanUtr}`;
+    }
+
     const validLinkedItems = linkedItems ? linkedItems.filter(item => item.product) : [];
 
     // Create using transaction
@@ -151,20 +160,8 @@ const createCreditMemo = asyncHandler(async (req, res) => {
         const today = new Date();
         const startOfDay = new Date(today.setHours(0, 0, 0, 0));
 
-        const count = await tx.creditMemo.count({
-            where: { createdAt: { gte: startOfDay } }
-        }) + 1;
-
-        let isUnique = false;
-        let memoId = '';
-        while (!isUnique) {
-            const randomNum = Math.floor(10000 + Math.random() * 90000);
-            memoId = `CS-CRED-${randomNum}-${count.toString().padStart(4, '0')}`;
-            const exists = await tx.creditMemo.findUnique({ where: { memoId } });
-            if (!exists) {
-                isUnique = true;
-            }
-        }
+        // Generate Memo ID (Format: CS-CM-001)
+        const memoId = await generateCreditMemoNumber(tx);
 
         const creditMemo = await tx.creditMemo.create({
             data: {
@@ -173,7 +170,7 @@ const createCreditMemo = asyncHandler(async (req, res) => {
                 originalAmount: finalAmount,
                 balance: finalAmount,
                 paymentMethod,
-                notes,
+                notes: finalNotes,
                 linkedItems: validLinkedItems,
                 shopId: shop_id || 'MAIN',
                 createdById: req.user.id,
@@ -263,10 +260,108 @@ const deleteCreditMemo = asyncHandler(async (req, res) => {
     ApiResponse.success({}, 'Credit Memo deleted and ledger reversed successfully').send(res);
 });
 
+// Request OTP to authorize Credit Memo redemption (Security Verification)
+const sendRedemptionOtp = asyncHandler(async (req, res) => {
+    const { memoId } = req.params;
+    const memo = await prisma.creditMemo.findFirst({
+        where: { memoId: memoId.trim() },
+        include: {
+            customer: { select: { id: true, name: true, phone: true } }
+        }
+    });
+
+    if (!memo) {
+        return ApiResponse.error(`Credit Memo #${memoId} not found`, 404).send(res);
+    }
+
+    if (memo.status !== 'active' || Number(memo.balance) <= 0) {
+        return ApiResponse.error(`Credit Memo #${memoId} is not active or has zero balance (Status: ${memo.status}, Balance: ₹${memo.balance})`, 400).send(res);
+    }
+
+    const customerPhone = memo.customer?.phone;
+    if (!customerPhone) {
+        return ApiResponse.error(`Customer associated with Credit Memo #${memoId} has no registered phone number`, 400).send(res);
+    }
+
+    const otpService = require('../../utils/otpService');
+    const otpKey = `credit_memo_otp_${memo.memoId}`;
+    const otp = await otpService.generateAndStoreOTP(otpKey, 300, 'credit_memo_redemption');
+
+    // Also send SMS to the customer's phone
+    try {
+        await otpService.generateAndStoreOTP(customerPhone, 300, 'credit_memo_redemption');
+    } catch (e) {
+        // Non-fatal if SMS dispatch fails in sandbox
+    }
+
+    const responseData = {
+        memoId: memo.memoId,
+        customerName: memo.customer.name,
+        phoneEnding: customerPhone.slice(-4),
+        balance: memo.balance,
+        message: `Security OTP sent to customer phone ending in ${customerPhone.slice(-4)}`
+    };
+
+    if (process.env.IS_SANDBOX === 'true' || process.env.NODE_ENV !== 'production') {
+        responseData.otp = otp;
+    }
+
+    ApiResponse.success(responseData, 'Redemption authorization OTP sent successfully').send(res);
+});
+
+// Verify OTP for Credit Memo redemption
+const verifyRedemptionOtp = asyncHandler(async (req, res) => {
+    const { memoId } = req.params;
+    const { otp } = req.body;
+
+    if (!otp) {
+        return ApiResponse.error('OTP is required', 400).send(res);
+    }
+
+    const memo = await prisma.creditMemo.findFirst({
+        where: { memoId: memoId.trim() },
+        include: { customer: { select: { phone: true } } }
+    });
+
+    if (!memo) {
+        return ApiResponse.error(`Credit Memo #${memoId} not found`, 404).send(res);
+    }
+
+    const otpService = require('../../utils/otpService');
+    const otpKey = `credit_memo_otp_${memo.memoId}`;
+
+    let isValid = false;
+    try {
+        await otpService.verifyOTP(otpKey, String(otp).trim(), false); // verify against memoKey
+        isValid = true;
+    } catch (e) {
+        // Fallback: check customer phone key
+        if (memo.customer?.phone) {
+            try {
+                await otpService.verifyOTP(memo.customer.phone, String(otp).trim(), false);
+                isValid = true;
+            } catch (e2) {}
+        }
+    }
+
+    if (!isValid) {
+        return ApiResponse.error('Invalid or expired OTP. Please enter the correct verification code.', 400).send(res);
+    }
+
+    ApiResponse.success({
+        memoId: memo.memoId,
+        verified: true,
+        message: 'Credit Memo redemption successfully authorized'
+    }, 'OTP verified successfully').send(res);
+});
+
 module.exports = {
     getAllCreditMemos,
     searchActiveMemos,
     createCreditMemo,
     updateCreditMemo,
-    deleteCreditMemo
+    deleteCreditMemo,
+    sendRedemptionOtp,
+    verifyRedemptionOtp
 };
+

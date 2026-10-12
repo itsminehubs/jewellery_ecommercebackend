@@ -86,6 +86,15 @@ const updateOrder = asyncHandler(async (req, res) => {
     ApiResponse.success(order, 'Order updated successfully').send(res);
 });
 
+const checkUtr = asyncHandler(async (req, res) => {
+    const { utr } = req.query;
+    if (!utr) {
+        throw new ApiError(400, 'UTR parameter is required');
+    }
+    const result = await posOrderService.checkUtrAvailability(utr);
+    ApiResponse.success(result, 'UTR verification result').send(res);
+});
+
 module.exports = {
     createOrder,
     updateOrder,
@@ -93,6 +102,7 @@ module.exports = {
     getOrderById,
     getStoreAnalytics,
     processReturn,
-    calculateCart
+    calculateCart,
+    checkUtr
 };
 

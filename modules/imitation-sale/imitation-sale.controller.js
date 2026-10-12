@@ -1,13 +1,28 @@
 const prisma = require('../../config/prisma');
-// trigger nodemon restart
+const { validateAndCheckDuplicateUtr } = require('../../utils/utrValidator');
+const { generateImitationOrderNumber } = require('../../utils/invoiceNumberGenerator');
 
 const createImitationSale = async (req, res) => {
   try {
-    const { customerId, productName, unitPrice, discount, gstAmount, grandTotal, paymentMode, notes } = req.body;
+    const { customerId, productName, unitPrice, discount, gstAmount, grandTotal, paymentMode, utrNumber, notes } = req.body;
     const staffId = req.user.id; // From auth middleware
 
-    const productFirstName = productName ? productName.split(' ')[0].toUpperCase().replace(/[^A-Z0-9]/g, '') : 'ITEM';
-    const orderNumber = `CS-IMI-${productFirstName}-${Date.now()}`;
+    let finalNotes = notes || '';
+    let validatedUtr = null;
+
+    if (paymentMode === 'neft' || paymentMode === 'rtgs' || paymentMode === 'neft_rtgs' || paymentMode === 'bank_transfer') {
+      try {
+        validatedUtr = await validateAndCheckDuplicateUtr(prisma, utrNumber, paymentMode.toUpperCase());
+      } catch (utrErr) {
+        return res.status(400).json({ success: false, message: utrErr.message });
+      }
+
+      const specificMethod = paymentMode === 'rtgs' ? 'rtgs' : 'neft';
+      finalNotes = (finalNotes ? finalNotes + '||' : '') + `PAYMENT_REF:${specificMethod}:UTR:${validatedUtr}:${grandTotal}`;
+    }
+
+    // Generate Order Number (Format: CS-IMU-001)
+    const orderNumber = await generateImitationOrderNumber(prisma);
 
     const sale = await prisma.imitationSale.create({
       data: {
@@ -20,7 +35,7 @@ const createImitationSale = async (req, res) => {
         gstAmount: gstAmount || 0,
         grandTotal,
         paymentMode: paymentMode || 'cash',
-        notes
+        notes: finalNotes
       }
     });
 

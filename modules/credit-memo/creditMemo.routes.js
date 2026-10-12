@@ -12,6 +12,8 @@ router.use(authenticate);
 router.get('/', hasRole([USER_ROLES.SUPER_ADMIN, USER_ROLES.ADMIN, USER_ROLES.STORE_MANAGER]), creditMemoController.getAllCreditMemos);
 router.post('/', hasRole([USER_ROLES.SUPER_ADMIN, USER_ROLES.ADMIN, USER_ROLES.STORE_MANAGER, USER_ROLES.SALES_STAFF]), validate(createCreditMemoSchema), creditMemoController.createCreditMemo);
 router.get('/search/:term', hasRole([USER_ROLES.SUPER_ADMIN, USER_ROLES.ADMIN, USER_ROLES.STORE_MANAGER, USER_ROLES.SALES_STAFF]), creditMemoController.searchActiveMemos);
+router.post('/:memoId/send-otp', hasRole([USER_ROLES.SUPER_ADMIN, USER_ROLES.ADMIN, USER_ROLES.STORE_MANAGER, USER_ROLES.SALES_STAFF]), creditMemoController.sendRedemptionOtp);
+router.post('/:memoId/verify-otp', hasRole([USER_ROLES.SUPER_ADMIN, USER_ROLES.ADMIN, USER_ROLES.STORE_MANAGER, USER_ROLES.SALES_STAFF]), creditMemoController.verifyRedemptionOtp);
 router.put('/:id', hasRole([USER_ROLES.SUPER_ADMIN, USER_ROLES.ADMIN]), creditMemoController.updateCreditMemo);
 router.delete('/:id', hasRole([USER_ROLES.SUPER_ADMIN, USER_ROLES.ADMIN]), creditMemoController.deleteCreditMemo);
 

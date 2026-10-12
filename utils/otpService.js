@@ -24,6 +24,10 @@ const generateAndStoreOTP = async (key, expiration = CACHE_TTL.OTP, purpose = 'l
       let messageTemplate = '';
       if (purpose === 'reset_password') {
         messageTemplate = `The OTP to reset your CarbonSmith account password is ${otp}. Do not share this code with anyone.`;
+      } else if (purpose === 'credit_memo_redemption') {
+        messageTemplate = `${otp} is your one-time verification code to authorize redemption of your Credit Memo / Advance Voucher at CarbonSmith. Valid for ${minutes} mins. Do not share it with anyone.`;
+      } else if (purpose === 'scheme_closure') {
+        messageTemplate = `${otp} is your verification code to authorize closure and redemption of your Savings Scheme at CarbonSmith. Valid for ${minutes} mins.`;
       } else {
         messageTemplate = `${otp} is your OTP to log in to your CarbonSmith account. Valid for ${minutes} mins. Do not share it with anyone.`;
       }
