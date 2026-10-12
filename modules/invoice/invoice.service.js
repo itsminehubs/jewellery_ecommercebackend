@@ -58,7 +58,7 @@ const generateInvoice = async (orderId, adminId) => {
         if (!isNaN(lastNum)) {
             nextNumber = lastNum + 1;
         }
-    } else if (!lastInvoice) {
+    } else {
         const count = await prisma.invoice.count({ where: { createdAt: { gte: fyStartDate } } });
         nextNumber = count + 1;
     }

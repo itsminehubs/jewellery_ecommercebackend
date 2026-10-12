@@ -7,10 +7,11 @@ const createCreditMemoSchema = {
             'string.empty': 'Customer ID cannot be empty'
         }),
         originalAmount: Joi.number().min(0).optional(),
-        paymentMethod: Joi.string().valid('cash', 'card', 'upi', 'bank_transfer', 'exchange', 'gold_exchange').required().messages({
+        paymentMethod: Joi.string().valid('cash', 'card', 'upi', 'neft', 'rtgs', 'bank_transfer', 'neft_rtgs', 'exchange', 'gold_exchange').required().messages({
             'any.required': 'Payment method is required',
             'any.only': 'Invalid payment method'
         }),
+        utrNumber: Joi.string().allow('', null).optional(),
         isRateLocked: Joi.boolean().optional(),
         lockedGoldRate: Joi.number().min(1).optional(),
         exchangePurity: Joi.string().optional(),
