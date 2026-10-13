@@ -2,15 +2,10 @@ const prisma = require('../../config/prisma');
 const ApiError = require('../../utils/ApiError');
 const { asyncHandler } = require('../../middlewares/error.middleware');
 const ApiResponse = require('../../utils/ApiResponse');
+const { generateRepairVoucherNumber } = require('../../utils/invoiceNumberGenerator');
 
 const generateVoucher = async () => {
-    const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
-    const count = await prisma.repair.count({
-        where: {
-            receiptVoucher: { startsWith: `REP-${dateStr}` }
-        }
-    });
-    return `REP-${dateStr}-${(count + 1).toString().padStart(3, '0')}`;
+    return await generateRepairVoucherNumber(prisma);
 };
 
 exports.createRepair = asyncHandler(async (req, res, next) => {

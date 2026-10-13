@@ -6,6 +6,7 @@ const couponService = require('../coupon/coupon.service');
 const inventoryService = require('../product/inventory.service');
 const ApiError = require('../../utils/ApiError');
 const logger = require('../../utils/logger');
+const { generateInvoiceNumber } = require('../../utils/invoiceNumberGenerator');
 
 const createOrder = async (userId, orderData) => {
     return await prisma.$transaction(async (tx) => {
@@ -92,9 +93,8 @@ const createOrder = async (userId, orderData) => {
             throw ApiError.badRequest('Invalid PAN card format. It should be like ABCDE1234F');
         }
 
-        // Generate Order Number
-        const count = await tx.order.count() + 1;
-        const orderNumber = `ORD-${new Date().getFullYear()}-${count.toString().padStart(5, '0')}`;
+        // Generate Order Number (Format: CS-INV-001)
+        const orderNumber = await generateInvoiceNumber(tx);
 
         const order = await tx.order.create({
             data: {

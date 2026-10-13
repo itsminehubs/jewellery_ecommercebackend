@@ -28,10 +28,33 @@ const deleteRate = asyncHandler(async (req, res) => {
     ApiResponse.success(null, 'Gold rate deleted successfully').send(res);
 });
 
+// Scheme Rate Controllers
+const updateSchemeRate = asyncHandler(async (req, res) => {
+    const rateData = {
+        ...req.body,
+        updatedBy: req.user.id
+    };
+    const rate = await goldRateService.updateSchemeRate(rateData);
+    ApiResponse.created(rate, 'Scheme gold rate updated successfully').send(res);
+});
+
+const getSchemeCurrentRates = asyncHandler(async (req, res) => {
+    const rates = await goldRateService.getSchemeCurrentRates();
+    ApiResponse.success(rates, 'Current scheme gold rates fetched').send(res);
+});
+
+const deleteSchemeRate = asyncHandler(async (req, res) => {
+    const { metal, purity } = req.params;
+    await goldRateService.deleteSchemeRate(metal, purity);
+    ApiResponse.success(null, 'Scheme gold rate deleted successfully').send(res);
+});
+
 module.exports = {
     updateRate,
     getCurrentRates,
     getLatestRate,
     deleteRate,
+    updateSchemeRate,
+    getSchemeCurrentRates,
+    deleteSchemeRate
 };
-

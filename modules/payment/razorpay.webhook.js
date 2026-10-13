@@ -37,6 +37,20 @@ const handleWebhook = async (req, res) => {
 const handlePaymentCaptured = async (payload) => {
   const order = await prisma.order.findUnique({ where: { razorpayOrderId: payload.order_id } });
   if (order) {
+    if (order.paymentStatus === 'completed' || order.paymentStatus === 'COMPLETED') {
+      logger.info(`Order ${order.id} is already marked as completed. Ignoring webhook.`);
+      return;
+    }
+    
+    if (order.orderStatus === 'cancelled' || order.orderStatus === 'CANCELLED') {
+      logger.error(`Payment captured for CANCELLED order: ${order.id}. Manual refund may be required.`);
+      await prisma.order.update({
+          where: { id: order.id },
+          data: { paymentStatus: 'completed' }
+      });
+      return;
+    }
+
     await prisma.order.update({
         where: { id: order.id },
         data: { paymentStatus: 'completed', orderStatus: 'processing' }
@@ -48,6 +62,11 @@ const handlePaymentCaptured = async (payload) => {
 const handlePaymentFailed = async (payload) => {
   const order = await prisma.order.findUnique({ where: { razorpayOrderId: payload.order_id } });
   if (order) {
+    if (order.paymentStatus === 'completed' || order.paymentStatus === 'COMPLETED') {
+      logger.warn(`Payment failed webhook received for already COMPLETED order: ${order.id}. Ignoring.`);
+      return;
+    }
+    
     await prisma.order.update({
         where: { id: order.id },
         data: { paymentStatus: 'failed' }

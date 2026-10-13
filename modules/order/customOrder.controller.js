@@ -3,6 +3,7 @@ const ApiError = require('../../utils/ApiError');
 const { asyncHandler } = require('../../middlewares/error.middleware');
 const { uploadImage } = require('../../config/s3');
 const { sendEmail } = require('../../jobs/email.job');
+const { generateInvoiceNumber } = require('../../utils/invoiceNumberGenerator');
 
 /**
  * @desc    Create a new Custom Jewelry Draft/Order
@@ -50,29 +51,8 @@ exports.createCustomOrder = asyncHandler(async (req, res) => {
     const calculatedTotal = (Number(totalMetalCost) || 0) + (Number(totalStoneCost) || 0) + (Number(makingCharges) || 0) + (Number(taxAmount) || 0);
     customOrderData.pricingBreakdown.finalTotal = customOrderData.pricingBreakdown.finalTotal || calculatedTotal;
 
-    const year = new Date().getFullYear();
-    const lastOrder = await prisma.customOrder.findFirst({
-        where: {
-            orderNumber: {
-                startsWith: `CS-${year}-`
-            }
-        },
-        orderBy: {
-            createdAt: 'desc'
-        }
-    });
-
-    let nextNumber = 1;
-    if (lastOrder && lastOrder.orderNumber) {
-        const parts = lastOrder.orderNumber.split('-');
-        if (parts.length === 3) {
-            const lastNum = parseInt(parts[2], 10);
-            if (!isNaN(lastNum)) {
-                nextNumber = lastNum + 1;
-            }
-        }
-    }
-    const orderNumber = `CS-${year}-${nextNumber.toString().padStart(5, '0')}`;
+    // Generate Order Number (Format: CS-INV-001)
+    const orderNumber = await generateInvoiceNumber(prisma);
 
     const customOrder = await prisma.customOrder.create({
         data: {

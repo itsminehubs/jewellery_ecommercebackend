@@ -478,6 +478,14 @@ const getStockAnalytics = async () => {
     }
   });
 
+  const repairCount = await prisma.product.count({
+    where: {
+      internalState: 'IN_REPAIR',
+      deletedAt: null,
+      carbonsmithworld: false
+    }
+  });
+
   const dispatchedOrders = await prisma.order.count({
     where: { orderStatus: { in: ['shipped', 'delivered'] } }
   });
@@ -505,6 +513,7 @@ const getStockAnalytics = async () => {
     totalStock: stats._sum.stock || 0,
     totalValue: Number(totalValue),
     lowStockCount,
+    repairCount,
     dispatchedOrders,
     categoryStock
   };
@@ -536,7 +545,7 @@ const getSalesReports = async (period, shopId = null) => {
   const result = await prisma.$queryRawUnsafe(query);
 
   return result.map(r => ({
-    _id: r.id,
+    _id: r._id,
     totalSales: Number(r.totalSales),
     orderCount: Number(r.orderCount)
   }));
@@ -564,11 +573,12 @@ const getStockList = async (options = {}) => {
     if (status === 'low_stock') where.stock = { lte: 5, gt: 0 };
     else if (status === 'out_of_stock') where.stock = 0;
     else if (status === 'in_stock') where.stock = { gt: 5 };
+    else if (status === 'in_repair') where.internalState = 'IN_REPAIR';
   }
 
   const products = await prisma.product.findMany({
     where,
-    select: { id: true, name: true, sku: true, categoryId: true, metalDetails: true, stock: true, price: true, purchasePrice: true, finalPrice: true, status: true, images: true },
+    select: { id: true, name: true, sku: true, categoryId: true, metalDetails: true, stock: true, price: true, purchasePrice: true, finalPrice: true, status: true, internalState: true, images: true },
     orderBy: status === 'low_stock' ? { stock: 'asc' } : { updatedAt: 'desc' },
     skip,
     take: Number(limit)
@@ -681,7 +691,34 @@ const deleteOrder = async (orderId, adminId) => {
     where: { id: orderId },
     include: { items: true }
   });
+
+  const restoreCreditMemos = async (notes) => {
+    if (notes && notes.includes('PAYMENT_REF:credit_memo:')) {
+      const notesArray = notes.split('||');
+      for (const note of notesArray) {
+        if (note.startsWith('PAYMENT_REF:credit_memo:')) {
+          const parts = note.split(':');
+          if (parts.length >= 4) {
+            const memoId = parts[2];
+            const amount = Number(parts[3]);
+            if (memoId && !isNaN(amount)) {
+              const memo = await prisma.creditMemo.findFirst({ where: { memoId } });
+              if (memo) {
+                await prisma.creditMemo.update({
+                  where: { id: memo.id },
+                  data: { balance: Number(memo.balance) + amount, status: 'active' }
+                });
+                logger.info(`Restored ₹${amount} to Credit Memo ${memoId} from deleted order ${orderId}`);
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+
   if (order) {
+    await restoreCreditMemos(order.notes);
     for (const item of order.items) {
       if (item.productId) {
         try {
@@ -707,6 +744,7 @@ const deleteOrder = async (orderId, adminId) => {
     include: { items: true }
   });
   if (posOrder) {
+    await restoreCreditMemos(posOrder.notes);
     for (const item of posOrder.items) {
       if (item.productId) {
         try {

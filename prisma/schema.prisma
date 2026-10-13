@@ -56,6 +56,7 @@ model User {
   updatedDiamondRates   DiamondRate[]
   schemes               Scheme[]
   installmentsCollected SchemeInstallment[]
+  schemeActivityLogs    SchemeActivityLog[] @relation("SchemeActivityLogUser")
   createdCreditMemos    CreditMemo[]        @relation("CreditMemoCreator")
 
   posOrders        POSOrder[]       @relation("POSCustomer")
@@ -157,8 +158,9 @@ model Product {
   gstRate Decimal @default(3) @db.Decimal(5, 2)
 
   // Inventory & Status
-  stock  Int    @default(0)
-  status String @default("active") // active, out_of_stock, archived
+  stock         Int    @default(0)
+  status        String @default("active") // active, out_of_stock, archived
+  internalState String @default("AVAILABLE") // AVAILABLE, IN_REPAIR, IN_TRANSIT
 
   // Analytics
   rating           Decimal @default(0) @db.Decimal(3, 2)
@@ -436,6 +438,11 @@ model CreditMemo {
 
   customerPan       String?
   customerGst       String?
+
+  lockedGoldRate    Decimal? @db.Decimal(20, 2)
+  isRateLocked      Boolean  @default(false)
+  exchangePurity    String?
+  exchangeWeight    Decimal? @db.Decimal(20, 3)
 
   expiresAt DateTime?
   createdAt DateTime  @default(now())
@@ -727,6 +734,16 @@ model GoldRate {
   createdAt DateTime @default(now())
 }
 
+model SchemeGoldRate {
+  id            String   @id @default(uuid())
+  metal         String   @default("gold") // gold, silver, platinum
+  purity        String // 24K, 22K, 18K
+  ratePerGram   Decimal  @db.Decimal(20, 2)
+  effectiveDate DateTime @default(now())
+
+  createdAt DateTime @default(now())
+}
+
 model DiamondRate {
   id            String   @id @default(uuid())
   cut           String   @default("All")
@@ -746,6 +763,11 @@ model Scheme {
   schemeId     String   @unique
   shopId       String
   customerId   String
+  
+  schemeType   String   @default("GOLD") // GOLD or DIAMOND
+  purity       String?  // 24K, 22K, 18K (Only for GOLD)
+  accumulatedGrams Decimal @default(0) @db.Decimal(20, 3)
+  
   startDate    DateTime @default(now())
   maturityDate DateTime
 
@@ -767,6 +789,7 @@ model Scheme {
   customer        User                @relation(fields: [customerId], references: [id])
   redemptionOrder POSOrder?           @relation(fields: [redemptionOrderId], references: [id])
   installments    SchemeInstallment[]
+  activityLogs    SchemeActivityLog[]
 
   @@index([shopId])
 }
@@ -776,6 +799,8 @@ model SchemeInstallment {
   schemeId      String
   date          DateTime @default(now())
   amount        Decimal  @db.Decimal(20, 2)
+  goldRateApplied Decimal? @db.Decimal(20, 2)
+  gramsCredited   Decimal? @db.Decimal(20, 3)
   method        String // cash, card, upi, bank_transfer
   transactionId String?
   notes         String?
@@ -785,6 +810,20 @@ model SchemeInstallment {
 
   scheme      Scheme @relation(fields: [schemeId], references: [id], onDelete: Cascade)
   collectedBy User   @relation(fields: [collectedById], references: [id])
+}
+
+model SchemeActivityLog {
+  id            String   @id @default(uuid())
+  schemeId      String
+  action        String // ENROLLMENT, INSTALLMENT, REDEMPTION, PREMATURE_CLOSURE
+  description   String
+  details       Json?    // Snapshot of rates, amounts, transaction details
+  performedById String?
+
+  createdAt     DateTime @default(now())
+
+  scheme        Scheme   @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+  performedBy   User?    @relation("SchemeActivityLogUser", fields: [performedById], references: [id])
 }
 
 // ---------------------------------------------------------

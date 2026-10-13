@@ -6,6 +6,8 @@ const ledgerService = require('../accounting/customer-ledger.service');
 const { sendEmail } = require('../../jobs/email.job');
 const { generatePOSBillEmail } = require('../../utils/emailTemplates');
 const pricingService = require('../product/pricing.service');
+const { validateAndCheckDuplicateUtr, findDuplicateUtr } = require('../../utils/utrValidator');
+const { generateInvoiceNumber } = require('../../utils/invoiceNumberGenerator');
 
 const MAX_RETRIES = 3;
 
@@ -15,7 +17,7 @@ const roundTo3 = (num) => Math.round((num + Number.EPSILON) * 1000) / 1000;
 /**
  * Calculate the exact price of a POS cart based on live rates
  */
-const calculateCartPrice = async (items, storeId) => {
+const calculateCartPrice = async (items, storeId, lockedGoldRate = null) => {
     let cartSubtotal = 0;
     let cartGst = 0;
     let cartTotal = 0;
@@ -93,8 +95,10 @@ const calculateCartPrice = async (items, storeId) => {
 
         let metalValue = 0;
         let rateUsed = 0;
-        // 3. Fetch latest metal rate
-        if (metalDetails && metalDetails.metalType && metalDetails.purity) {
+        // 3. Fetch latest metal rate or use locked rate
+        if (lockedGoldRate) {
+            rateUsed = Number(lockedGoldRate);
+        } else if (metalDetails && metalDetails.metalType && metalDetails.purity) {
             const latestRate = await prisma.goldRate.findFirst({
                 where: {
                     metal: metalDetails.metalType.toLowerCase(),
@@ -103,7 +107,10 @@ const calculateCartPrice = async (items, storeId) => {
                         mode: 'insensitive'
                     }
                 },
-                orderBy: { effectiveDate: 'desc' }
+                orderBy: [
+                    { effectiveDate: 'desc' },
+                    { createdAt: 'desc' }
+                ]
             });
 
             if (latestRate) {
@@ -185,19 +192,8 @@ const createOrder = async (orderData) => {
         if (!store) throw new Error(`Store not found for shop_id: ${orderData.shop_id}`);
         const storeId = store.id;
 
-        // 1. Generate Order Number
-        const startOfDay = new Date();
-        startOfDay.setHours(0, 0, 0, 0);
-        const endOfDay = new Date();
-        endOfDay.setHours(23, 59, 59, 999);
-        const dateStr = `${new Date().getFullYear()}${(new Date().getMonth() + 1).toString().padStart(2, '0')}${new Date().getDate().toString().padStart(2, '0')}`;
-        const count = await tx.pOSOrder.count({
-            where: {
-                createdAt: { gte: startOfDay, lte: endOfDay }
-            }
-        }) + 1;
-        const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
-        const orderNumber = `CS-INV-${dateStr}-${randomSuffix}-${count.toString().padStart(4, '0')}`;
+        // 1. Generate Order Number (Format: CS-INV-001)
+        const orderNumber = await generateInvoiceNumber(tx);
 
         // Validate PAN for large transactions
         if (orderData.grandTotal > 200000 && !orderData.customerPan) {
@@ -216,28 +212,95 @@ const createOrder = async (orderData) => {
 
         for (const payment of orderData.payments || []) {
             const amt = Number(payment.amount) || 0;
-            if (payment.method === 'cash') totalCash += amt;
-            else if (payment.method === 'upi' || payment.method === 'card' || payment.method === 'bank_transfer') totalOnline += amt;
-            else if (payment.method === 'credit') totalCredit += amt;
-            else if (payment.method === 'scheme_redemption') totalSchemeRedemption += amt;
-            else if (payment.method === 'credit_memo') totalCreditMemo += amt;
+            if (payment.method === 'cash') {
+                totalCash += amt;
+            } else if (payment.method === 'upi' || payment.method === 'card') {
+                totalOnline += amt;
+            } else if (['neft', 'rtgs', 'neft_rtgs', 'bank_transfer'].includes(payment.method)) {
+                totalOnline += amt;
+                const specificMethod = payment.method === 'rtgs' ? 'rtgs' : 'neft';
+                const rawUtr = payment.utrNumber || payment.referenceId || payment.transactionId;
+                const cleanUtr = await validateAndCheckDuplicateUtr(tx, rawUtr, payment.method.toUpperCase());
+                // Attach clean UTR back to payment object for downstream use
+                payment.utrNumber = cleanUtr;
+                payment.referenceId = cleanUtr;
+                // Append UTR tag to order notes so duplicate detection and printable invoices can parse it
+                orderData.notes = (orderData.notes ? orderData.notes + '||' : '') + `PAYMENT_REF:${specificMethod}:UTR:${cleanUtr}:${amt}`;
+            } else if (payment.method === 'credit') {
+                totalCredit += amt;
+            } else if (payment.method === 'scheme_redemption') {
+                totalSchemeRedemption += amt;
+            } else if (payment.method === 'credit_memo') {
+                totalCreditMemo += amt;
+            }
         }
 
-        // 2. Handle Scheme Redemption (with SECURITY VALIDATION)
+        // 2. Handle Scheme Redemption (with SECURITY VALIDATION & 27 RULES)
         let redeemedSchemeId = null;
         if (totalSchemeRedemption > 0) {
             if (!orderData.redeemedSchemeId) throw new Error('Scheme ID is required for scheme redemption');
             if (!orderData.customerId) throw new Error('Customer ID is required to redeem a scheme');
 
-            const scheme = await tx.scheme.findUnique({ where: { id: orderData.redeemedSchemeId } });
+            const scheme = await tx.scheme.findUnique({ 
+                where: { id: orderData.redeemedSchemeId },
+                include: { customer: true, installments: true }
+            });
             if (!scheme) throw new Error('Scheme not found');
 
-            // Security Check
+            // Rule 10: Only the person in whose name the scheme is registered can redeem it
             if (scheme.customerId !== orderData.customerId) {
-                throw new Error('SECURITY ALERT: Unauthorized scheme redemption attempt. Scheme does not belong to this customer.');
+                throw new Error('SECURITY ALERT: Unauthorized scheme redemption attempt. Scheme does not belong to this customer (Rule 10).');
             }
 
             if (scheme.status === 'redeemed' || scheme.status === 'closed') throw new Error('Scheme is already redeemed or closed');
+
+            // Rule 5: Jewellery can be purchased after completion of 330 days from enrollment
+            const enrollmentDate = new Date(scheme.startDate || scheme.createdAt);
+            const daysSinceEnrollment = Math.floor((new Date() - enrollmentDate) / (1000 * 60 * 60 * 24));
+            if (daysSinceEnrollment < 330 && !orderData.override330DaysLock) {
+                throw new Error(`Rule 5 Restriction: Jewellery can only be purchased after completion of 330 days from scheme enrollment date (Current: ${daysSinceEnrollment} days elapsed).`);
+            }
+
+            // Rule 9: PAN card mandatory for purchases exceeding ₹2,00,000
+            const customerPan = scheme.customer?.panNumber || orderData.customerPan;
+            if (totalOrderAmount > 200000 && !customerPan) {
+                throw new Error('Rule 9 Mandatory Requirement: PAN card is required for jewellery purchases exceeding ₹2,00,000.');
+            }
+
+            // Rule 18 & 19: No additional offers or vouchers can be combined with scheme benefit
+            if (orderData.couponCode || orderData.voucherCode || (orderData.discount && Number(orderData.discount) > 0)) {
+                // Rule 18 & 19
+                throw new Error('Rule 18 & 19 Restriction: Additional offers or vouchers cannot be combined with scheme benefit redemption.');
+            }
+
+            // Check items against Admin Configured Applicable Purities
+            let applicablePurities = ['22K', '18K', '14K'];
+            try {
+                if (scheme.notes && scheme.notes.trim().startsWith('{')) {
+                    const parsed = JSON.parse(scheme.notes);
+                    if (parsed.applicablePurities && Array.isArray(parsed.applicablePurities)) {
+                        applicablePurities = parsed.applicablePurities.map(p => String(p).toUpperCase());
+                    }
+                }
+            } catch (e) {}
+
+            for (const item of orderData.items) {
+                const product = await tx.product.findUnique({ where: { id: item.productId } });
+                if (product) {
+                    const category = (product.category || '').toLowerCase();
+                    const title = (product.title || product.name || '').toLowerCase();
+                    const purity = (product.purity || '').toUpperCase();
+
+                    // If product is coin/bar or purity is not in admin's applicable purities
+                    if (category.includes('coin') || category.includes('bar') || title.includes('coin') || title.includes('gold bar')) {
+                        throw new Error(`Bullion Restriction: Scheme is not applicable to coins or bars (${product.title || product.name}). Applicable to jewellery.`);
+                    }
+
+                    if (purity && applicablePurities.length > 0 && !applicablePurities.includes(purity)) {
+                        throw new Error(`Purity Restriction: Scheme is applicable to [${applicablePurities.join(', ')}] jewellery. Selected product is ${purity} (${product.title || product.name}).`);
+                    }
+                }
+            }
 
             // Update scheme status (we will link order ID after order creation)
             await tx.scheme.update({
@@ -248,6 +311,23 @@ const createOrder = async (orderData) => {
                     redemptionValue: totalSchemeRedemption
                 }
             });
+
+            // Activity Log for Scheme Redemption
+            await tx.schemeActivityLog.create({
+                data: {
+                    schemeId: scheme.id,
+                    action: 'REDEMPTION',
+                    description: `Scheme redeemed for invoice amount ₹${totalOrderAmount.toLocaleString('en-IN')}. Redeemed value applied: ₹${totalSchemeRedemption.toLocaleString('en-IN')}.`,
+                    details: {
+                        totalOrderAmount,
+                        totalSchemeRedemption,
+                        daysSinceEnrollment,
+                        customerPan: customerPan ? `****${customerPan.slice(-4)}` : null
+                    },
+                    performedById: orderData.billedBy
+                }
+            });
+
             redeemedSchemeId = scheme.id;
         }
 
@@ -261,12 +341,38 @@ const createOrder = async (orderData) => {
                     const memo = await tx.creditMemo.findFirst({
                         where: {
                             memoId: payment.referenceId.trim()
-                        }
+                        },
+                        include: { customer: { select: { phone: true } } }
                     });
 
                     if (!memo) throw new Error(`Credit Memo ${payment.referenceId} not found.`);
                     if (Number(memo.balance) < parsedAmount) {
                         throw new Error(`Credit Memo ${payment.referenceId} has insufficient balance. (Available: ₹${memo.balance}, Required: ₹${parsedAmount})`);
+                    }
+
+                    // Security: Verify OTP if provided or require redemption authorization
+                    const otp = payment.otp || payment.redemptionOtp;
+                    if (!payment.skipOtp && !orderData.skipCreditMemoOtp) {
+                        if (!otp) {
+                            throw new Error(`Security Requirement: Customer OTP verification is required to redeem Credit Memo #${memo.memoId}.`);
+                        }
+                        const otpService = require('../../utils/otpService');
+                        const otpKey = `credit_memo_otp_${memo.memoId}`;
+                        let otpVerified = false;
+                        try {
+                            await otpService.verifyOTP(otpKey, String(otp).trim(), true);
+                            otpVerified = true;
+                        } catch (e1) {
+                            if (memo.customer?.phone) {
+                                try {
+                                    await otpService.verifyOTP(memo.customer.phone, String(otp).trim(), true);
+                                    otpVerified = true;
+                                } catch (e2) {}
+                            }
+                        }
+                        if (!otpVerified) {
+                            throw new Error(`Invalid or expired OTP for Credit Memo #${memo.memoId}. Redemption denied for security.`);
+                        }
                     }
 
                     const newBalance = Number(memo.balance) - parsedAmount;
@@ -736,7 +842,7 @@ const updateOrder = async (orderId, orderData) => {
 
         for (const payment of orderData.payments || []) {
             if (payment.method === 'cash') totalCash += payment.amount;
-            else if (['card', 'upi', 'online', 'bank_transfer'].includes(payment.method)) totalOnline += payment.amount;
+            else if (['card', 'upi', 'online', 'bank_transfer', 'neft_rtgs', 'neft', 'rtgs'].includes(payment.method)) totalOnline += payment.amount;
             else if (payment.method === 'credit' || payment.method === 'udhar') totalCredit += payment.amount;
         }
 
@@ -821,6 +927,14 @@ const updateOrder = async (orderId, orderData) => {
     }, { maxWait: 10000, timeout: 30000 });
 };
 
+const checkUtrAvailability = async (utr) => {
+    const dup = await findDuplicateUtr(prisma, utr);
+    if (dup && dup.isDuplicate) {
+        return { isAvailable: false, message: dup.message, details: dup };
+    }
+    return { isAvailable: true, message: 'UTR number is available and valid.' };
+};
+
 module.exports = {
     createOrder,
     updateOrder,
@@ -828,5 +942,6 @@ module.exports = {
     getOrderById,
     getStoreAnalytics,
     processReturn,
-    calculateCartPrice
+    calculateCartPrice,
+    checkUtrAvailability
 };

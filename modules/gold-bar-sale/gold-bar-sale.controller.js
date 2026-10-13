@@ -1,15 +1,44 @@
 const prisma = require('../../config/prisma');
+const { validateAndCheckDuplicateUtr } = require('../../utils/utrValidator');
+const { generateInvoiceNumber } = require('../../utils/invoiceNumberGenerator');
 
 const creategoldBarSale = async (req, res) => {
   try {
-    const { customerId, purity, quantity, netWeight, grossWeight, metalRate, gstAmount, grandTotal, paymentMode, customerPan, notes } = req.body;
+    const { customerId, purity, quantity, netWeight, grossWeight, metalRate, gstAmount, grandTotal, paymentMode, customerPan, utrNumber, notes } = req.body;
     const staffId = req.user.id; // From auth middleware
 
-    if (!customerPan) {
-      return res.status(400).json({ success: false, message: 'Customer PAN is mandatory for Gold Bar sales' });
+    if (grandTotal > 200000 && !customerPan) {
+      return res.status(400).json({ success: false, message: 'Customer PAN is mandatory for Gold Bar sales above ₹2 Lakhs' });
+    }
+    if (customerPan && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(customerPan)) {
+      return res.status(400).json({ success: false, message: 'Invalid Customer PAN format (e.g. ABCDE1234F)' });
     }
 
-    const orderNumber = `CS-GLD-${Date.now()}`;
+    let finalNotes = notes || '';
+    let validatedUtr = null;
+
+    if (paymentMode === 'neft' || paymentMode === 'rtgs' || paymentMode === 'neft_rtgs' || paymentMode === 'bank_transfer') {
+      try {
+        validatedUtr = await validateAndCheckDuplicateUtr(prisma, utrNumber, paymentMode.toUpperCase());
+      } catch (utrErr) {
+        return res.status(400).json({ success: false, message: utrErr.message });
+      }
+
+      const specificMethod = paymentMode === 'rtgs' ? 'rtgs' : 'neft';
+      // Merge UTR into notes
+      try {
+        const parsed = finalNotes ? JSON.parse(finalNotes) : {};
+        parsed.utrNumber = validatedUtr;
+        parsed.paymentMode = specificMethod;
+        parsed.paymentRef = `PAYMENT_REF:${specificMethod}:UTR:${validatedUtr}:${grandTotal}`;
+        finalNotes = JSON.stringify(parsed);
+      } catch (e) {
+        finalNotes = (finalNotes ? finalNotes + '||' : '') + `PAYMENT_REF:${specificMethod}:UTR:${validatedUtr}:${grandTotal}`;
+      }
+    }
+
+    // Generate Order Number (Format: CS-INV-001)
+    const orderNumber = await generateInvoiceNumber(prisma);
 
     const sale = await prisma.goldBarSale.create({
       data: {
@@ -25,7 +54,7 @@ const creategoldBarSale = async (req, res) => {
         grandTotal,
         paymentMode: paymentMode || 'cash',
         customerPan,
-        notes
+        notes: finalNotes
       }
     });
 
