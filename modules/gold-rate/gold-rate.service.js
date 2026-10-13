@@ -9,13 +9,13 @@ const roundCurrency = (num) => {
 
 /**
  * Calculate derived purities based on 22K gold base rate:
- * Formula: (22K base / 22) * Karat
- * Multiplication is evaluated BEFORE division to prevent any floating-point truncation.
- * 24K:  (baseRate * 24) / 22
- * 99.9: (baseRate * 24) / 22 (24K bullion standard 999 fineness)
- * 99.5: (24K * 995) / 999 = (baseRate * 24 * 995) / (22 * 999)
- * 18K:  (baseRate * 18) / 22
- * 14K:  (baseRate * 14) / 22
+ * 1. Karat-based (out of 24 parts):
+ *    - 24K: (baseRate * 24) / 22 = 14,918.18
+ *    - 18K: (baseRate * 18) / 22 = 11,188.64
+ *    - 14K: (baseRate * 14) / 22 = 8,702.27
+ * 2. Percentage Purity of 24K:
+ *    - 99.9 (99.9% fine gold): 24K * 0.999 = 14,903.26 (~14,903)
+ *    - 99.5 (99.5% fine gold): 24K * 0.995 = 14,843.59 (~14,843)
  */
 const calculateDerivedPurities = (baseRate, effectiveDate) => {
     const b = Number(baseRate);
@@ -23,11 +23,12 @@ const calculateDerivedPurities = (baseRate, effectiveDate) => {
         throw new Error('Invalid base rate for 22K gold calculation');
     }
 
-    const rate24k = roundCurrency((b * 24) / 22);
+    const rate24kNum = (b * 24) / 22;
+    const rate24k = roundCurrency(rate24kNum);
     const rate18k = roundCurrency((b * 18) / 22);
     const rate14k = roundCurrency((b * 14) / 22);
-    const rate999 = rate24k;
-    const rate995 = roundCurrency((b * 24 * 995) / (22 * 999));
+    const rate999 = roundCurrency(rate24kNum * 0.999);
+    const rate995 = roundCurrency(rate24kNum * 0.995);
 
     return [
         { metal: 'gold', purity: '24K', ratePerGram: rate24k, effectiveDate },
@@ -60,7 +61,7 @@ const sortRatesPriority = (a, b) => {
 };
 
 /**
- * Update gold rate with strict normalization and clean-up of legacy variants
+ * Update gold rate with strict normalization and auto-generation of derived purities
  */
 const updateRate = async (rateData) => {
     const metal = normalizeMetal(rateData.metal);
@@ -161,7 +162,6 @@ const getLatestRate = async (metal, purity) => {
 /**
  * Get all current rates:
  * Guarantees exactly ONE record per (metal, purity) combination.
- * Output is normalized to uppercase purity and formatted to 2 decimals.
  */
 const getCurrentRates = async () => {
     const allRates = await prisma.goldRate.findMany({
