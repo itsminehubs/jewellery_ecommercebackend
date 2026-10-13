@@ -107,7 +107,10 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null) => {
                         mode: 'insensitive'
                     }
                 },
-                orderBy: { effectiveDate: 'desc' }
+                orderBy: [
+                    { effectiveDate: 'desc' },
+                    { createdAt: 'desc' }
+                ]
             });
 
             if (latestRate) {

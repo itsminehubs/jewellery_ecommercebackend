@@ -245,20 +245,27 @@ const recordInstallment = async (schemeId, paymentData, performedBy) => {
 
         // Rule 6 & 8: Frozen gold rate at time of each installment payment for 22K/18K/14K
         if (scheme.schemeType === 'GOLD' && scheme.purity) {
+            const normPurity = String(scheme.purity).trim().toUpperCase();
             let rateRecord = await tx.schemeGoldRate.findFirst({
-                where: { metal: 'gold', purity: scheme.purity },
-                orderBy: { createdAt: 'desc' }
+                where: {
+                    metal: { equals: 'gold', mode: 'insensitive' },
+                    purity: { equals: normPurity, mode: 'insensitive' }
+                },
+                orderBy: [{ effectiveDate: 'desc' }, { createdAt: 'desc' }]
             });
             if (!rateRecord) {
                 // Seamless fallback to store standard gold rate if scheme gold rate not yet set separately
                 rateRecord = await tx.goldRate.findFirst({
-                    where: { metal: 'gold', purity: scheme.purity },
-                    orderBy: { createdAt: 'desc' }
+                    where: {
+                        metal: { equals: 'gold', mode: 'insensitive' },
+                        purity: { equals: normPurity, mode: 'insensitive' }
+                    },
+                    orderBy: [{ effectiveDate: 'desc' }, { createdAt: 'desc' }]
                 });
             }
             if (!rateRecord) throw new Error(`Gold Rate not set for ${scheme.purity}. Please configure current gold rate first.`);
             
-            goldRateApplied = Number(rateRecord.ratePerGram);
+            goldRateApplied = Number(Number(rateRecord.ratePerGram).toFixed(2));
             gramsCredited = Number((amount / goldRateApplied).toFixed(3));
         }
 
