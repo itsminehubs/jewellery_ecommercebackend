@@ -138,7 +138,27 @@ const getCurrentRates = async () => {
         })
     );
 
-    return currentRates.filter(r => r !== null);
+    const filtered = currentRates.filter(r => r !== null);
+    return filtered.sort((a, b) => {
+        const isA22K = (a.metal || '').toLowerCase() === 'gold' && (a.purity || '').toUpperCase() === '22K';
+        const isB22K = (b.metal || '').toLowerCase() === 'gold' && (b.purity || '').toUpperCase() === '22K';
+        if (isA22K && !isB22K) return -1;
+        if (!isA22K && isB22K) return 1;
+
+        const isAGold = (a.metal || '').toLowerCase() === 'gold';
+        const isBGold = (b.metal || '').toLowerCase() === 'gold';
+        if (isAGold && !isBGold) return -1;
+        if (!isAGold && isBGold) return 1;
+
+        if (isAGold && isBGold) {
+            const order = { '22K': 1, '24K': 2, '99.9': 3, '99.5': 4, '18K': 5, '14K': 6 };
+            const orderA = order[(a.purity || '').toUpperCase()] || 99;
+            const orderB = order[(b.purity || '').toUpperCase()] || 99;
+            return orderA - orderB;
+        }
+
+        return (a.metal || '').localeCompare(b.metal || '');
+    });
 };
 
 /**
@@ -190,6 +210,26 @@ const updateSchemeRate = async (rateData) => {
  * Get all current Scheme rates
  */
 const getSchemeCurrentRates = async () => {
+    if (!prisma.schemeGoldRate) {
+        // Fallback to regular goldRate if schemeGoldRate model isn't available yet in memory
+        if (!prisma.goldRate) return [];
+        const uniqueGroups = await prisma.goldRate.groupBy({
+            by: ['metal', 'purity'],
+        });
+        const currentRates = await Promise.all(
+            uniqueGroups.map(async (group) => {
+                return await prisma.goldRate.findFirst({
+                    where: { metal: group.metal, purity: group.purity },
+                    orderBy: [
+                        { effectiveDate: 'desc' },
+                        { createdAt: 'desc' }
+                    ]
+                });
+            })
+        );
+        return currentRates.filter(r => r !== null);
+    }
+
     const uniqueGroups = await prisma.schemeGoldRate.groupBy({
         by: ['metal', 'purity'],
     });
@@ -206,7 +246,27 @@ const getSchemeCurrentRates = async () => {
         })
     );
 
-    return currentRates.filter(r => r !== null);
+    const filtered = currentRates.filter(r => r !== null);
+    return filtered.sort((a, b) => {
+        const isA22K = (a.metal || '').toLowerCase() === 'gold' && (a.purity || '').toUpperCase() === '22K';
+        const isB22K = (b.metal || '').toLowerCase() === 'gold' && (b.purity || '').toUpperCase() === '22K';
+        if (isA22K && !isB22K) return -1;
+        if (!isA22K && isB22K) return 1;
+
+        const isAGold = (a.metal || '').toLowerCase() === 'gold';
+        const isBGold = (b.metal || '').toLowerCase() === 'gold';
+        if (isAGold && !isBGold) return -1;
+        if (!isAGold && isBGold) return 1;
+
+        if (isAGold && isBGold) {
+            const order = { '22K': 1, '24K': 2, '99.9': 3, '99.5': 4, '18K': 5, '14K': 6 };
+            const orderA = order[(a.purity || '').toUpperCase()] || 99;
+            const orderB = order[(b.purity || '').toUpperCase()] || 99;
+            return orderA - orderB;
+        }
+
+        return (a.metal || '').localeCompare(b.metal || '');
+    });
 };
 
 const deleteSchemeRate = async (metal, purity) => {

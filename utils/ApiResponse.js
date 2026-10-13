@@ -37,6 +37,17 @@ class ApiResponse {
   }
 
   /**
+   * Create error response
+   * @param {string} message - Error message
+   * @param {number} statusCode - HTTP status code (default: 400)
+   * @param {any} data - Error details / data
+   * @returns {ApiResponse}
+   */
+  static error(message = 'Error', statusCode = 400, data = null) {
+    return new ApiResponse(statusCode, data, message);
+  }
+
+  /**
    * Create no content response (204)
    * @param {string} message - Success message
    * @returns {ApiResponse}
