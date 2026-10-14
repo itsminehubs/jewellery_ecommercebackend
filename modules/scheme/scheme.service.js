@@ -23,12 +23,35 @@ const parseSchemeDetails = (scheme) => {
         applicablePurities = applicablePurities.split(',').map(p => p.trim());
     }
 
+    const accumulatedGrams = Number(Number(scheme.accumulatedGrams || 0).toFixed(4));
+    const redeemedGrams = Number(Number(scheme.redeemedGrams || 0).toFixed(4));
+    const remainingGrams = Number(Math.max(0, accumulatedGrams - redeemedGrams).toFixed(4));
+    const totalPaid = Number(scheme.totalPaid || 0);
+
+    // Weighted average purchase rate from ledger lots: Total Paid / Total Accumulated Grams
+    const weightedAverageRate = accumulatedGrams > 0 
+        ? Number((totalPaid / accumulatedGrams).toFixed(2)) 
+        : 0;
+
     const kycType = (metadata.panNumber || scheme.customer?.panNumber) && metadata.aadhaarNumber 
         ? 'PAN & AADHAAR' 
         : ((metadata.panNumber || scheme.customer?.panNumber) ? 'PAN' : (metadata.aadhaarNumber ? 'AADHAAR' : 'KYC_VERIFIED'));
 
+    // Format installments with 4-decimal precision for gramsCredited
+    const installments = (scheme.installments || []).map(inst => ({
+        ...inst,
+        gramsCredited: inst.gramsCredited != null ? Number(Number(inst.gramsCredited).toFixed(4)) : null,
+        goldRateApplied: inst.goldRateApplied != null ? Number(Number(inst.goldRateApplied).toFixed(2)) : null
+    }));
+
     return {
         ...scheme,
+        accumulatedGrams,
+        redeemedGrams,
+        remainingGrams,
+        totalPaid,
+        weightedAverageRate,
+        installments,
         minMonthlyInstallment,
         applicablePurities,
         applicablePuritiesText: Array.isArray(applicablePurities) ? applicablePurities.join(', ') : String(applicablePurities),
@@ -122,14 +145,15 @@ const enrollCustomer = async (data) => {
 
     // Auto-generate Scheme ID
     const dateStr = new Date().toISOString().slice(0, 7).replace(/-/g, ''); // YYYYMM
+    const shopTag = String(data.shop_id || 'ONLINE').trim().toUpperCase();
     const count = await prisma.scheme.count({
         where: {
-            shopId: data.shop_id,
+            shopId: data.shop_id || 'ONLINE',
             createdAt: { gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) }
         }
     }) + 1;
     
-    const schemeId = `SCH-${data.shop_id}-${dateStr}-${count.toString().padStart(4, '0')}`;
+    const schemeId = `SCH-${shopTag}-${dateStr}-${count.toString().padStart(4, '0')}`;
 
     // Bank details are optional (especially if paying via Razorpay)
     const metadata = {
@@ -151,7 +175,7 @@ const enrollCustomer = async (data) => {
     const scheme = await prisma.scheme.create({
         data: {
             schemeId,
-            shopId: data.shop_id,
+            shopId: data.shop_id || 'ONLINE',
             customerId: data.customerId,
             schemeType,
             purity,
@@ -244,9 +268,10 @@ const recordInstallment = async (schemeId, paymentData, performedBy) => {
         let gramsCredited = null;
 
         // Rule 6 & 8: Frozen gold rate at time of each installment payment for 22K/18K/14K
+        // Strictly uses dedicated Scheme Gold Rate table (tx.schemeGoldRate)
         if (scheme.schemeType === 'GOLD' && scheme.purity) {
             const normPurity = String(scheme.purity).trim().toUpperCase();
-            let rateRecord = await tx.schemeGoldRate.findFirst({
+            const rateRecord = await tx.schemeGoldRate.findFirst({
                 where: {
                     metal: { equals: 'gold', mode: 'insensitive' },
                     purity: { equals: normPurity, mode: 'insensitive' }
@@ -254,19 +279,11 @@ const recordInstallment = async (schemeId, paymentData, performedBy) => {
                 orderBy: [{ effectiveDate: 'desc' }, { createdAt: 'desc' }]
             });
             if (!rateRecord) {
-                // Seamless fallback to store standard gold rate if scheme gold rate not yet set separately
-                rateRecord = await tx.goldRate.findFirst({
-                    where: {
-                        metal: { equals: 'gold', mode: 'insensitive' },
-                        purity: { equals: normPurity, mode: 'insensitive' }
-                    },
-                    orderBy: [{ effectiveDate: 'desc' }, { createdAt: 'desc' }]
-                });
+                throw new Error(`Dedicated Scheme Gold Rate not set for ${scheme.purity}. Please configure the Scheme Gold Rate in Scheme Gold Rates management.`);
             }
-            if (!rateRecord) throw new Error(`Gold Rate not set for ${scheme.purity}. Please configure current gold rate first.`);
             
             goldRateApplied = Number(Number(rateRecord.ratePerGram).toFixed(2));
-            gramsCredited = Number((amount / goldRateApplied).toFixed(3));
+            gramsCredited = Number((amount / goldRateApplied).toFixed(4));
         }
 
         const newInstallment = await tx.schemeInstallment.create({
@@ -291,7 +308,7 @@ const recordInstallment = async (schemeId, paymentData, performedBy) => {
         }
 
         const newAccumulatedGrams = scheme.schemeType === 'GOLD' 
-            ? Number(scheme.accumulatedGrams) + (gramsCredited || 0)
+            ? Number((Number(scheme.accumulatedGrams) + (gramsCredited || 0)).toFixed(4))
             : 0;
 
         const updatedScheme = await tx.scheme.update({
@@ -342,7 +359,20 @@ const recordInstallment = async (schemeId, paymentData, performedBy) => {
 };
 
 const getStoreSchemes = async (shopId, filter = {}) => {
-    const where = { shopId, ...filter };
+    const { shop_id, page, limit, search, ...cleanFilter } = filter;
+    const where = {
+        ...(shopId ? { shopId } : {}),
+        ...cleanFilter
+    };
+
+    if (search && String(search).trim()) {
+        const term = String(search).trim();
+        where.OR = [
+            { schemeId: { contains: term, mode: 'insensitive' } },
+            { customer: { name: { contains: term, mode: 'insensitive' } } },
+            { customer: { phone: { contains: term, mode: 'insensitive' } } }
+        ];
+    }
 
     const schemes = await prisma.scheme.findMany({
         where,
@@ -536,9 +566,13 @@ const calculateRedemptionValue = (schemeRaw) => {
         const fullMakingChargeDiscount = 20; // 20% standard discount on making charges
         const makingChargeDiscount = fullMakingChargeDiscount * benefitRatio;
 
+        const remainingGrams = scheme.remainingGrams != null 
+            ? scheme.remainingGrams 
+            : Number((accumulatedGrams - (Number(scheme.redeemedGrams) || 0)).toFixed(4));
+
         const standardBonusGramPercentage = Number(scheme.bonusPercentage || 0) > 0 ? 5 : 0;
-        const bonusWeightGrams = Number(((accumulatedGrams * (standardBonusGramPercentage / 100)) * benefitRatio).toFixed(3));
-        const totalEligibleGrams = Number((accumulatedGrams + bonusWeightGrams).toFixed(3));
+        const bonusWeightGrams = Number(((remainingGrams * (standardBonusGramPercentage / 100)) * benefitRatio).toFixed(4));
+        const totalEligibleGrams = Number((remainingGrams + bonusWeightGrams).toFixed(4));
 
         return {
             schemeId: scheme.schemeId,
@@ -559,6 +593,9 @@ const calculateRedemptionValue = (schemeRaw) => {
             benefitPercentageText: `${benefitRatio * 100}%`,
             totalPaid,
             accumulatedGrams,
+            redeemedGrams: scheme.redeemedGrams || 0,
+            remainingGrams,
+            weightedAverageRate: scheme.weightedAverageRate || 0,
             bonusWeightGrams,
             totalEligibleGrams,
             makingChargeDiscount,
@@ -649,7 +686,21 @@ const getSchemeTerms = () => {
 const getRedemptionQuote = async (schemeId) => {
     const scheme = await getSchemeById(schemeId);
     if (!scheme) throw new Error('Scheme not found');
-    return calculateRedemptionValue(scheme);
+    const quote = calculateRedemptionValue(scheme);
+
+    // Attach current Scheme Gold Rate strictly from dedicated schemeGoldRate table
+    if (scheme.schemeType === 'GOLD' && scheme.purity) {
+        const normPurity = String(scheme.purity).trim().toUpperCase();
+        const schemeRate = await prisma.schemeGoldRate.findFirst({
+            where: {
+                metal: { equals: 'gold', mode: 'insensitive' },
+                purity: { equals: normPurity, mode: 'insensitive' }
+            },
+            orderBy: [{ effectiveDate: 'desc' }, { createdAt: 'desc' }]
+        });
+        quote.currentGoldRate = schemeRate ? Number(Number(schemeRate.ratePerGram).toFixed(2)) : null;
+    }
+    return quote;
 };
 
 const requestClosureOTP = async (schemeId, performedBy) => {
@@ -729,7 +780,73 @@ const closeSchemeWithOTP = async (schemeId, otp, closureData, performedBy) => {
     return { scheme: updated, quote };
 };
 
+const verifyClosureOTP = async (schemeId, otp) => {
+    const scheme = await prisma.scheme.findUnique({
+        where: { id: schemeId },
+        include: { customer: true }
+    });
+    if (!scheme) throw new Error('Scheme not found');
+    const otpService = require('../../utils/otpService');
+    await otpService.verifyOTP(scheme.customer.phone, otp);
+    return { verified: true, message: 'Customer OTP successfully verified' };
+};
+
+/**
+ * Rule 22: Background Auto-Closure for schemes > 365 days
+ * Automatically closes scheme without benefits and generates refund notes for bank transfer.
+ */
+const processExpiredSchemes = async (shopId) => {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - 365);
+
+    const expiredSchemes = await prisma.scheme.findMany({
+        where: {
+            ...(shopId ? { shopId } : {}),
+            status: { in: ['active', 'matured'] },
+            createdAt: { lte: cutoffDate }
+        },
+        include: { customer: true }
+    });
+
+    const results = [];
+    for (const scheme of expiredSchemes) {
+        let metadata = {};
+        try {
+            if (scheme.notes && scheme.notes.trim().startsWith('{')) {
+                metadata = JSON.parse(scheme.notes);
+            }
+        } catch (e) {}
+
+        const updated = await prisma.scheme.update({
+            where: { id: scheme.id },
+            data: {
+                status: 'closed',
+                redemptionDate: new Date(),
+                redemptionValue: scheme.totalPaid,
+                notes: `${scheme.notes || ''} | AUTO-CLOSED after 365 days (Rule 22). Zero scheme benefits. Principal ₹${Number(scheme.totalPaid).toLocaleString('en-IN')} refundable to registered bank: ${metadata.bankAccount || 'Direct Bank NEFT/RTGS'}.`
+            }
+        });
+
+        await prisma.schemeActivityLog.create({
+            data: {
+                schemeId: scheme.id,
+                action: 'AUTO_CLOSURE_EXPIRED',
+                description: `Scheme automatically closed on 365th day without scheme benefits as per Rule 22. Principal ₹${Number(scheme.totalPaid).toLocaleString('en-IN')} pending refund.`,
+                details: {
+                    totalPaid: Number(scheme.totalPaid),
+                    accumulatedGrams: Number(scheme.accumulatedGrams),
+                    bankAccount: metadata.bankAccount,
+                    ifscCode: metadata.ifscCode
+                }
+            }
+        });
+        results.push(updated);
+    }
+    return results;
+};
+
 module.exports = {
+    parseSchemeDetails,
     enrollCustomer,
     recordInstallment,
     getStoreSchemes,
@@ -741,5 +858,7 @@ module.exports = {
     getSchemeTerms,
     getRedemptionQuote,
     requestClosureOTP,
-    closeSchemeWithOTP
+    closeSchemeWithOTP,
+    verifyClosureOTP,
+    processExpiredSchemes
 };
