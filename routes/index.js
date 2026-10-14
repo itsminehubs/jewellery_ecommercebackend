@@ -50,6 +50,7 @@ router.use('/procurement', vendorPurchaseRoutes);
 router.use('/audit', require('../modules/audit/audit.routes'));
 router.use('/accounting', require('../modules/accounting/accounting.routes'));
 router.use('/schemes', require('../modules/scheme/scheme.routes'));
+router.use('/scheme', require('../modules/scheme/scheme.routes'));
 router.use('/reports', require('../modules/reports/reports.routes'));
 router.use('/repairs', repairRoutes);
 router.use('/imitation-sales', imitationSaleRoutes);

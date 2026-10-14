@@ -766,7 +766,8 @@ model Scheme {
   
   schemeType   String   @default("GOLD") // GOLD or DIAMOND
   purity       String?  // 24K, 22K, 18K (Only for GOLD)
-  accumulatedGrams Decimal @default(0) @db.Decimal(20, 3)
+  accumulatedGrams Decimal @default(0) @db.Decimal(20, 4)
+  redeemedGrams    Decimal @default(0) @db.Decimal(20, 4)
   
   startDate    DateTime @default(now())
   maturityDate DateTime
@@ -800,7 +801,7 @@ model SchemeInstallment {
   date          DateTime @default(now())
   amount        Decimal  @db.Decimal(20, 2)
   goldRateApplied Decimal? @db.Decimal(20, 2)
-  gramsCredited   Decimal? @db.Decimal(20, 3)
+  gramsCredited   Decimal? @db.Decimal(20, 4)
   method        String // cash, card, upi, bank_transfer
   transactionId String?
   notes         String?

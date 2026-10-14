@@ -3,24 +3,44 @@ const ApiResponse = require('../../utils/ApiResponse');
 const { asyncHandler } = require('../../middlewares/error.middleware');
 const prisma = require('../../config/prisma');
 
+/**
+ * Helper to dynamically resolve shop_id:
+ * - If provided in headers, query, or body (from POS terminal or admin dropdown), use it.
+ * - If not provided and caller is an online customer, default to 'ONLINE'.
+ * - If a physical store is needed for store settings, dynamically find the primary store from DB.
+ */
+const resolveShopId = async (req, fallbackToOnline = false) => {
+    let shopId = req.headers['x-shop-id'] || req.query?.shop_id || req.body?.shop_id;
+    if (!shopId) {
+        if (fallbackToOnline) {
+            return 'ONLINE';
+        }
+        const primaryStore = await prisma.store.findFirst({ 
+            orderBy: { createdAt: 'asc' }, 
+            select: { shop_id: true } 
+        });
+        shopId = primaryStore?.shop_id || 'ONLINE';
+    }
+    return shopId;
+};
+
 const enrollCustomer = asyncHandler(async (req, res) => {
+    const isStaff = req.user.role === 'super_admin' || req.user.role === 'admin' || req.user.role === 'staff';
+    
+    // For customers self-enrolling online, automatically assign 'ONLINE' (no store required)
+    // For staff enrolling in-store, use passed store or primary store
+    const shopId = await resolveShopId(req, !isStaff);
+
+    // If staff provided customerId, use it; otherwise, the authenticated user is enrolling themselves
+    const customerId = (isStaff && req.body.customerId) ? req.body.customerId : req.user.id;
+
     const schemeData = {
         ...req.body,
-        shop_id: req.headers['x-shop-id'] || req.body.shop_id
+        shop_id: shopId,
+        customerId,
+        enrolledByRole: isStaff ? req.user.role : 'customer',
+        performedBy: req.user.id
     };
-
-    if (req.user.role !== 'super_admin' && req.user.role !== 'admin') {
-        return ApiResponse.error('Only super_admin can enroll customers in schemes', 403).send(res);
-    }
-
-    if (!schemeData.shop_id) {
-        return ApiResponse.error('Shop ID is required', 400).send(res);
-    }
-    if (!schemeData.customerId) {
-        return ApiResponse.error('Customer ID is required', 400).send(res);
-    }
-
-    schemeData.performedBy = req.user.id;
 
     const scheme = await schemeService.enrollCustomer(schemeData);
     ApiResponse.created(scheme, 'Customer enrolled in scheme successfully').send(res);
@@ -39,10 +59,10 @@ const recordInstallment = asyncHandler(async (req, res) => {
 });
 
 const getStoreSchemes = asyncHandler(async (req, res) => {
-    const shop_id = req.headers['x-shop-id'] || req.query.shop_id;
-    if (!shop_id) {
-        return ApiResponse.error('Shop ID is required', 400).send(res);
-    }
+    // If shop_id filter is passed (from dropdown or POS), filter by that store.
+    // If not passed, query ALL schemes across all stores and online!
+    const shop_id = req.headers['x-shop-id'] || req.query.shop_id || null;
+
     const schemes = await schemeService.getStoreSchemes(shop_id, req.query);
     ApiResponse.success(schemes, 'Schemes fetched successfully').send(res);
 });
@@ -106,6 +126,22 @@ const closeSchemeWithOTP = asyncHandler(async (req, res) => {
     ApiResponse.success(result, 'Scheme closed successfully').send(res);
 });
 
+const verifyClosureOTP = asyncHandler(async (req, res) => {
+    const schemeId = req.params.id;
+    const { otp } = req.body;
+    if (!otp) {
+        return ApiResponse.error('OTP is required', 400).send(res);
+    }
+    const result = await schemeService.verifyClosureOTP(schemeId, otp);
+    ApiResponse.success(result, 'Customer OTP verified successfully').send(res);
+});
+
+const processExpiredSchemes = asyncHandler(async (req, res) => {
+    const shop_id = await resolveShopId(req);
+    const results = await schemeService.processExpiredSchemes(shop_id);
+    ApiResponse.success(results, `Processed ${results.length} expired schemes`).send(res);
+});
+
 /**
  * GET /schemes/settings  – returns scheme configuration defaults for this shop
  * These are set by admin/superadmin and consumed by:
@@ -113,17 +149,15 @@ const closeSchemeWithOTP = asyncHandler(async (req, res) => {
  *   - Installment validation (server-side min check)
  */
 const getSchemeSettings = asyncHandler(async (req, res) => {
-    const shop_id = req.headers['x-shop-id'] || req.query.shop_id;
-    if (!shop_id) return ApiResponse.error('Shop ID is required', 400).send(res);
+    const shop_id = await resolveShopId(req);
 
-    const store = await prisma.store.findUnique({ where: { shop_id } });
-    if (!store) return ApiResponse.error('Store not found', 404).send(res);
-
-    const meta = (store.metadata && typeof store.metadata === 'object') ? store.metadata : {};
+    const store = await prisma.store.findUnique({ where: { shop_id } }) || await prisma.store.findFirst();
+    const meta = (store?.metadata && typeof store.metadata === 'object') ? store.metadata : {};
     const settings = meta.schemeSettings || {};
 
     // Return with sensible defaults if admin hasn't configured yet
     ApiResponse.success({
+        shop_id: store?.shop_id || shop_id,
         minMonthlyInstallment: settings.minMonthlyInstallment ?? 1000,
         applicablePurities: settings.applicablePurities ?? ['22K', '18K', '14K'],
         totalMonths: settings.totalMonths ?? 11,
@@ -142,8 +176,7 @@ const updateSchemeSettings = asyncHandler(async (req, res) => {
         return ApiResponse.error('Only admin/super_admin can update scheme settings', 403).send(res);
     }
 
-    const shop_id = req.headers['x-shop-id'] || req.body.shop_id;
-    if (!shop_id) return ApiResponse.error('Shop ID is required', 400).send(res);
+    let shop_id = await resolveShopId(req);
 
     const { minMonthlyInstallment, applicablePurities, totalMonths, bonusPercentage, maxInstallmentsPerTx } = req.body;
 
@@ -160,8 +193,14 @@ const updateSchemeSettings = asyncHandler(async (req, res) => {
         }
     }
 
-    const store = await prisma.store.findUnique({ where: { shop_id } });
-    if (!store) return ApiResponse.error('Store not found', 404).send(res);
+    let store = await prisma.store.findUnique({ where: { shop_id } });
+    if (!store) {
+        store = await prisma.store.findFirst({ orderBy: { createdAt: 'asc' } });
+        if (store) shop_id = store.shop_id;
+    }
+    if (!store) {
+        return ApiResponse.error('No store found. Please configure a store in Store Management first.', 404).send(res);
+    }
 
     const currentMeta = (store.metadata && typeof store.metadata === 'object') ? store.metadata : {};
     const currentSettings = currentMeta.schemeSettings || {};
@@ -182,11 +221,11 @@ const updateSchemeSettings = asyncHandler(async (req, res) => {
     };
 
     await prisma.store.update({
-        where: { shop_id },
+        where: { id: store.id },
         data: { metadata: { ...currentMeta, schemeSettings: newSettings } }
     });
 
-    ApiResponse.success(newSettings, 'Scheme settings updated successfully').send(res);
+    ApiResponse.success({ shop_id: store.shop_id, ...newSettings }, 'Scheme settings updated successfully').send(res);
 });
 
 module.exports = {
@@ -201,6 +240,8 @@ module.exports = {
     getRedemptionQuote,
     requestClosureOTP,
     closeSchemeWithOTP,
+    verifyClosureOTP,
+    processExpiredSchemes,
     getSchemeSettings,
     updateSchemeSettings
 };
