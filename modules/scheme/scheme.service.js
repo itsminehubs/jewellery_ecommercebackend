@@ -1,5 +1,6 @@
 const prisma = require('../../config/prisma');
 const { validateAndCheckDuplicateUtr } = require('../../utils/utrValidator');
+const { generateSchemeNumber } = require('../../utils/invoiceNumberGenerator');
 
 const parseSchemeDetails = (scheme) => {
     if (!scheme) return null;
@@ -143,17 +144,8 @@ const enrollCustomer = async (data) => {
     const maturityDate = new Date();
     maturityDate.setMonth(maturityDate.getMonth() + totalMonths);
 
-    // Auto-generate Scheme ID
-    const dateStr = new Date().toISOString().slice(0, 7).replace(/-/g, ''); // YYYYMM
-    const shopTag = String(data.shop_id || 'ONLINE').trim().toUpperCase();
-    const count = await prisma.scheme.count({
-        where: {
-            shopId: data.shop_id || 'ONLINE',
-            createdAt: { gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) }
-        }
-    }) + 1;
-    
-    const schemeId = `SCH-${shopTag}-${dateStr}-${count.toString().padStart(4, '0')}`;
+    // Auto-generate Scheme Invoice Number (Format: CS-SCH-001, CS-SCH-002, etc.)
+    const schemeId = await generateSchemeNumber(prisma);
 
     // Bank details are optional (especially if paying via Razorpay)
     const metadata = {
