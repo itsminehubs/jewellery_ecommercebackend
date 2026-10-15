@@ -8,6 +8,7 @@ const { generatePOSBillEmail } = require('../../utils/emailTemplates');
 const pricingService = require('../product/pricing.service');
 const { validateAndCheckDuplicateUtr, findDuplicateUtr } = require('../../utils/utrValidator');
 const { generateInvoiceNumber } = require('../../utils/invoiceNumberGenerator');
+const ApiError = require('../../utils/ApiError');
 
 const MAX_RETRIES = 3;
 
@@ -114,13 +115,15 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null) => {
             });
 
             if (latestRate) {
-                const ratePerGram = Number(latestRate.ratePerGram);
-                rateUsed = ratePerGram;
-                const wastagePercent = productData.wastage ? Number(productData.wastage) : 0;
-                const wastageWeight = netWeight * (wastagePercent / 100);
-                const finalGoldWeight = netWeight + wastageWeight;
-                metalValue = roundTo2(finalGoldWeight * ratePerGram);
+                rateUsed = Number(latestRate.ratePerGram);
             }
+        }
+
+        if (rateUsed > 0) {
+            const wastagePercent = productData.wastage ? Number(productData.wastage) : 0;
+            const wastageWeight = netWeight * (wastagePercent / 100);
+            const finalGoldWeight = netWeight + wastageWeight;
+            metalValue = roundTo2(finalGoldWeight * rateUsed);
         }
 
         // 5. Calculate Making Charges & Apply Discount
@@ -147,18 +150,20 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null) => {
         const gst = roundTo2(subtotal * (gstRate / 100));
 
         // 8. Totals
-        const finalTotal = Math.round(subtotal + gst);
+        const finalTotal = roundTo2(subtotal + gst);
 
-        cartSubtotal += subtotal;
-        cartGst += gst;
-        cartTotal += finalTotal;
+        const qty = Number(item.quantity) || 1;
+        cartSubtotal = roundTo2(cartSubtotal + (subtotal * qty));
+        cartGst = roundTo2(cartGst + (gst * qty));
+        cartTotal = roundTo2(cartTotal + (finalTotal * qty));
 
         calculatedItems.push({
             ...productData,
             calculatedPrice: {
                 metalValue,
-                makingCharge: discountedMakingValue,
+                makingCharge: makingValue,
                 originalMakingCharge: makingValue,
+                discountedMakingValue: discountedMakingValue,
                 stoneValue,
                 discountAmount,
                 subtotal,
@@ -166,7 +171,7 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null) => {
                 finalTotal,
                 rateUsed
             },
-            quantity: item.quantity || 1
+            quantity: qty
         });
     }
 
@@ -175,7 +180,7 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null) => {
         summary: {
             subtotal: roundTo2(cartSubtotal),
             gst: roundTo2(cartGst),
-            total: Math.round(cartTotal)
+            total: roundTo2(cartSubtotal + cartGst)
         }
     };
 };
@@ -235,13 +240,18 @@ const createOrder = async (orderData) => {
             }
         }
 
+        // Preserve manual round-off deduction in order notes for invoice reprint/download
+        if (orderData.roundOff && Number(orderData.roundOff) !== 0) {
+            orderData.notes = (orderData.notes ? orderData.notes + '||' : '') + `ROUND_OFF:${orderData.roundOff}`;
+        }
+
         // 2. Handle Scheme Redemption (with SECURITY VALIDATION & 27 RULES)
         let redeemedSchemeId = null;
         let schemeRedemptionAudit = null;
         if (totalSchemeRedemption > 0) {
             const totalOrderAmount = Number(orderData.grandTotal || 0);
-            if (!orderData.redeemedSchemeId) throw new Error('Scheme ID is required for scheme redemption');
-            if (!orderData.customerId) throw new Error('Customer ID is required to redeem a scheme');
+            if (!orderData.redeemedSchemeId) throw new ApiError(400, 'Scheme ID is required for scheme redemption');
+            if (!orderData.customerId) throw new ApiError(400, 'Customer ID is required to redeem a scheme');
 
             const scheme = await tx.scheme.findUnique({ 
                 where: { id: orderData.redeemedSchemeId },
@@ -466,7 +476,9 @@ const createOrder = async (orderData) => {
         if (totalCreditMemo > 0) {
             for (const payment of orderData.payments) {
                 if (payment.method === 'credit_memo') {
-                    if (!payment.referenceId) throw new Error('Reference ID (Credit Memo ID) is required for credit_memo payment');
+                    if (!payment.referenceId || !payment.referenceId.trim()) {
+                        throw new ApiError(400, 'Reference ID (Credit Memo ID) is required for credit_memo payment. Please select a valid Credit Memo.');
+                    }
 
                     const parsedAmount = Number(payment.amount);
                     const memo = await tx.creditMemo.findFirst({
@@ -476,16 +488,16 @@ const createOrder = async (orderData) => {
                         include: { customer: { select: { phone: true } } }
                     });
 
-                    if (!memo) throw new Error(`Credit Memo ${payment.referenceId} not found.`);
+                    if (!memo) throw new ApiError(404, `Credit Memo #${payment.referenceId} not found.`);
                     if (Number(memo.balance) < parsedAmount) {
-                        throw new Error(`Credit Memo ${payment.referenceId} has insufficient balance. (Available: ₹${memo.balance}, Required: ₹${parsedAmount})`);
+                        throw new ApiError(400, `Credit Memo #${payment.referenceId} has insufficient balance. (Available: ₹${memo.balance}, Required: ₹${parsedAmount})`);
                     }
 
                     // Security: Verify OTP if provided or require redemption authorization
                     const otp = payment.otp || payment.redemptionOtp;
                     if (!payment.skipOtp && !orderData.skipCreditMemoOtp) {
                         if (!otp) {
-                            throw new Error(`Security Requirement: Customer OTP verification is required to redeem Credit Memo #${memo.memoId}.`);
+                            throw new ApiError(400, `Security Requirement: Customer OTP verification is required to redeem Credit Memo #${memo.memoId}.`);
                         }
                         const otpService = require('../../utils/otpService');
                         const otpKey = `credit_memo_otp_${memo.memoId}`;
@@ -502,7 +514,7 @@ const createOrder = async (orderData) => {
                             }
                         }
                         if (!otpVerified) {
-                            throw new Error(`Invalid or expired OTP for Credit Memo #${memo.memoId}. Redemption denied for security.`);
+                            throw new ApiError(400, `Invalid or expired OTP for Credit Memo #${memo.memoId}. Redemption denied for security.`);
                         }
                     }
 
@@ -543,7 +555,7 @@ const createOrder = async (orderData) => {
                 items: {
                     create: orderData.items.map(item => ({
                         productId: item.product,
-                        quantity: 1, // Usually 1 for jewelry
+                        quantity: Number(item.quantity) || 1,
                         unitPrice: item.price || 0,
                         metalRate: item.goldRateAtTime || item.metalRate || orderData.metalRate || orderData.currentRate || 0,
                         discount: item.discount || 0,

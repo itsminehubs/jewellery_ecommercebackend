@@ -11,15 +11,68 @@ const ApiError = require('./ApiError');
  * @param {string} purpose - 'login' or 'reset_password'
  * @returns {Promise<string>} Generated OTP
  */
-const generateAndStoreOTP = async (key, expiration = CACHE_TTL.OTP, purpose = 'login') => {
+/**
+ * Send real SMS via Wappie SMS Gateway
+ * @param {string} phone - 10-digit mobile number
+ * @param {string} message - Message body
+ */
+const sendSMS = async (phone, message) => {
+  const cleanPhone = String(phone || '').replace(/\D/g, '').slice(-10);
+  if (cleanPhone.length !== 10) {
+    logger.warn(`[SMS] Invalid 10-digit phone number: ${phone}`);
+    return false;
+  }
+
+  const params = new URLSearchParams({
+    access_token: 'de9ba8ce66886140238eeeade03c8310',
+    to: cleanPhone,
+    country_code: '+91',
+    sender: 'CRBNSM',
+    service: 'SI',
+    message: message
+  });
+
+  try {
+    const response = await fetch(`https://apis.wappie.shop/v1/sms/messages?${params.toString()}`, { method: 'GET' });
+    const responseText = await response.text();
+    if (!response.ok) {
+      logger.error(`[SMS] Wappie API error for ${cleanPhone}: ${response.status} ${responseText}`);
+      return false;
+    }
+    logger.info(`[SMS] Successfully delivered to ${cleanPhone}: ${responseText}`);
+    return true;
+  } catch (smsError) {
+    logger.error(`[SMS] Failed to send SMS to ${cleanPhone}: ${smsError.message}`);
+    return false;
+  }
+};
+
+/**
+ * Generate and store OTP for a given key (phone/email/memoId)
+ * @param {string} key - Unique identifier (phone or custom key)
+ * @param {number} expiration - Expiration in seconds (default: 300)
+ * @param {string} purpose - 'login', 'reset_password', 'credit_memo_redemption', 'scheme_closure'
+ * @param {string} targetPhone - Optional phone number if key is not a phone number
+ * @returns {Promise<string>} Generated OTP
+ */
+const generateAndStoreOTP = async (key, expiration = CACHE_TTL.OTP, purpose = 'login', targetPhone = null) => {
   try {
     const otp = generateOTP(6);
     const otpKey = `${CACHE_KEYS.OTP}${key}`;
     
     await cacheHelper.set(otpKey, otp, expiration);
     
-    // Check if key is a phone number (10 digits)
-    if (/^\d{10}$/.test(key)) {
+    // Check if key or targetPhone has a valid 10-digit phone number
+    const candidatePhone = targetPhone || key;
+    const cleanPhone = String(candidatePhone || '').replace(/\D/g, '').slice(-10);
+    
+    if (cleanPhone.length === 10) {
+      // Also cache under the clean phone number if key is different (e.g. key is memoId)
+      if (key !== cleanPhone) {
+        const phoneKey = `${CACHE_KEYS.OTP}${cleanPhone}`;
+        await cacheHelper.set(phoneKey, otp, expiration);
+      }
+
       const minutes = Math.floor(expiration / 60);
       let messageTemplate = '';
       if (purpose === 'reset_password') {
@@ -32,29 +85,11 @@ const generateAndStoreOTP = async (key, expiration = CACHE_TTL.OTP, purpose = 'l
         messageTemplate = `${otp} is your OTP to log in to your CarbonSmith account. Valid for ${minutes} mins. Do not share it with anyone.`;
       }
       
-      const params = new URLSearchParams({
-        access_token: 'de9ba8ce66886140238eeeade03c8310',
-        to: key,
-        country_code: '+91',
-        sender: 'CRBNSM',
-        service: 'SI',
-        message: messageTemplate
-      });
-
       if (process.env.IS_SANDBOX === 'true' || process.env.NODE_ENV !== 'production') {
-        logger.info(`[SANDBOX OTP] ${otp} for ${key}`);
+        logger.info(`[SANDBOX OTP] ${otp} for ${cleanPhone} (purpose: ${purpose})`);
+        console.log(`\n🔐 [SANDBOX OTP] ${otp} for ${cleanPhone} (purpose: ${purpose})\n`);
       } else {
-        try {
-          const response = await fetch(`https://apis.wappie.shop/v1/sms/messages?${params.toString()}`, { method: 'GET' });
-          if (!response.ok) {
-             const errorText = await response.text();
-             logger.error(`SMS API error for ${key}: ${response.status} ${errorText}`);
-          } else {
-             logger.info(`SMS sent successfully to ${key} for purpose: ${purpose}`);
-          }
-        } catch (smsError) {
-          logger.error(`Failed to send SMS to ${key}: ${smsError.message}`);
-        }
+        await sendSMS(cleanPhone, messageTemplate);
       }
     }
     
