@@ -65,10 +65,10 @@
             <!-- Header Row -->
             <div class="flex justify-between px-2 py-1 border-b-invoice">
                 <div>Invoice Number : <span class="font-semibold">
-                        <%= order.orderNumber || invoice.invoiceNumber %>
+                        <%= (typeof order !== 'undefined' && order && order.orderNumber) ? order.orderNumber : ((typeof invoice !== 'undefined' && invoice) ? invoice.invoiceNumber : '') %>
                     </span></div>
                 <div>Date & Time : <span class="font-semibold">
-                        <%= new Date(invoice.createdAt || invoice.issueDate).toLocaleString('en-IN') %>
+                        <%= new Date(((typeof invoice !== 'undefined' && invoice) ? (invoice.createdAt || invoice.issueDate) : null) || ((typeof order !== 'undefined' && order) ? order.createdAt : null) || Date.now()).toLocaleString('en-IN') %>
                     </span></div>
             </div>
 
@@ -89,7 +89,7 @@
                             <tr>
                                 <td class="py-0.5 w-1/3">Sales Executive:</td>
                                 <td class="py-0.5 font-semibold">
-                                    <%= adminName || 'Admin' %>
+                                    <%= (typeof adminName !== 'undefined' && adminName) ? adminName : ((typeof staff !== 'undefined' && staff) ? staff.name : 'Admin') %>
                                 </td>
                             </tr>
                             <tr>
@@ -128,38 +128,39 @@
 
                 <!-- Customer Details -->
                 <div class="w-1/3 border-r-invoice p-2">
+                    <% const shipAddr = (typeof shippingAddress !== 'undefined' && shippingAddress) ? shippingAddress : ((order && order.shippingAddress) ? order.shippingAddress : {}); %>
                     <h2 class="font-bold text-xs uppercase mb-1">Customer Details</h2>
                     <table class="w-full">
                         <tbody>
                             <tr>
                                 <td class="py-0.5 w-1/3">Name:</td>
                                 <td class="py-0.5 font-semibold">
-                                    <%= order.user ? order.user.name : (shippingAddress.name || 'Guest' ) %>
+                                    <%= (order.user && order.user.name) || (order.customer && order.customer.name) || shipAddr.name || 'Walk-in Customer' %>
                                 </td>
                             </tr>
                             <tr>
                                 <td class="py-0.5 align-top">Address:</td>
                                 <td class="py-0.5">
-                                    <%= shippingAddress.addressLine1 || 'Not Provided' %>
-                                        <%= shippingAddress.city ? ', ' + shippingAddress.city : '' %>
+                                    <%= (order.customer && order.customer.address) || shipAddr.addressLine1 || 'Not Provided' %>
+                                        <%= shipAddr.city ? ', ' + shipAddr.city : '' %>
                                 </td>
                             </tr>
                             <tr>
                                 <td class="py-0.5">Customer ID:</td>
                                 <td class="py-0.5">
-                                    <%= order.user ? order.user.id.slice(-6).toUpperCase() : 'N/A' %>
+                                    <%= (order.user && order.user.id) ? order.user.id.slice(-6).toUpperCase() : (order.customerId ? String(order.customerId).slice(-6).toUpperCase() : 'N/A') %>
                                 </td>
                             </tr>
                             <tr>
                                 <td class="py-0.5">Contact No:</td>
                                 <td class="py-0.5">
-                                    <%= order.user ? order.user.phone : (shippingAddress.phone || 'N/A' ) %>
+                                    <%= (order.user && order.user.phone) || (order.customer && order.customer.phone) || shipAddr.phone || 'N/A' %>
                                 </td>
                             </tr>
                             <tr>
                                 <td class="py-0.5">Email ID:</td>
                                 <td class="py-0.5">
-                                    <%= order.user ? order.user.email : 'N/A' %>
+                                    <%= (order.user && order.user.email) || (order.customer && order.customer.email) || 'N/A' %>
                                 </td>
                             </tr>
                             <tr>
@@ -247,32 +248,72 @@
                     <tbody>
                         <% let totalGrossWt=0; let totalMetalWt=0; let totalStoneWt=0; let totalMetalValue=0; let
                             totalStoneValue=0; let totalMaking=0; let totalGrossAmount=0; let totalDiscount=0; let
-                            taxableValue=0; if (order && order.items) { order.items.forEach(function(item) { const
-                            product=item.product || {}; const metalDetails=product.metalDetails || {}; const
-                            stoneDetailsArray=product.stoneDetails || []; const netWeight=Number(metalDetails.netWeight
-                            || 0); const grossWeight=Number(metalDetails.grossWeight || 0); const
-                            stoneWeight=Number(stoneDetailsArray[0]?.netWeight || 0); const
-                            baseMakingCharge=Number(product.makingCharges || 0); const
-                            stoneCharge=Number(product.stoneCharges || 0); const itemDiscountAmount=Number(item.discount
-                            || 0); const makingCharge=Math.max(0, baseMakingCharge - itemDiscountAmount); const
-                            itemTotal=Number(item.totalPrice || product.price || 0) * item.quantity; const
-                            preTaxItemTotal=itemTotal / 1.03; const metalVal=itemTotal> 0 ? (preTaxItemTotal -
-                            baseMakingCharge - stoneCharge) : (product.calculatedPrice?.goldValue ||
-                            ((item.goldRateAtTime || 0) * netWeight));
+                            taxableValue=0; if (order && order.items) { order.items.forEach(function(item) {
+                            const product = item.product || {};
+                            const metalDetails = product.metalDetails || {};
+                            const netWeight = Number(metalDetails.netWeight || product.netWeight || item.netWeight || item.weight || 0);
+                            const grossWeight = Number(metalDetails.grossWeight || product.grossWeight || item.grossWeight || 0);
+                            
+                            let stoneWeight = 0;
+                            let unitStoneCharge = 0;
+                            const stonesList = product.stoneDetails || product.stones || [];
+                            if (stonesList && Array.isArray(stonesList) && stonesList.length > 0) {
+                                stonesList.forEach(function(stone) {
+                                    const caratVal = Number(stone.carat || 0);
+                                    const weightVal = Number(stone.netWeight || stone.weight || 0);
+                                    const calculationUnit = caratVal > 0 ? caratVal : weightVal;
+                                    stoneWeight += calculationUnit;
+                                    unitStoneCharge += (calculationUnit * Number(stone.rate || 0));
+                                });
+                            } else {
+                                stoneWeight = Number(product.stoneDetails?.stoneWeight || product.stoneWeight || item.stoneWeight || 0);
+                                unitStoneCharge = Number(product.stoneCharges || product.stoneDetails?.stoneCharges || item.stoneCharges || 0);
+                            }
+                            if (item.calculatedPrice && (item.calculatedPrice.stoneValue !== undefined && item.calculatedPrice.stoneValue !== null)) {
+                                unitStoneCharge = Number(item.calculatedPrice.stoneValue);
+                            }
 
+                            let unitMakingCharge = 0;
+                            if (product.makingChargeType === 'per_gram') {
+                                unitMakingCharge = netWeight * Number(product.makingCharges || product.makingCharge || 0);
+                            } else {
+                                unitMakingCharge = Number(product.makingCharges || product.makingCharge || 0);
+                            }
+                            if (item.calculatedPrice && (item.calculatedPrice.originalMakingCharge || item.calculatedPrice.makingCharge)) {
+                                unitMakingCharge = Number(item.calculatedPrice.originalMakingCharge || item.calculatedPrice.makingCharge);
+                            } else if (item.makingCharge) {
+                                unitMakingCharge = Number(item.makingCharge);
+                            }
+
+                            const qty = Number(item.quantity || 1);
+
+                            const itemTotal = Number(item.totalPrice || product.price || 0) * qty;
+                            const preTaxItemTotal = itemTotal / 1.03;
+
+                            const unitMetalVal = (item.calculatedPrice?.metalValue !== undefined && item.calculatedPrice?.metalValue !== null)
+                                ? Number(item.calculatedPrice.metalValue)
+                                : (item.calculatedPrice?.goldValue !== undefined && item.calculatedPrice?.goldValue !== null)
+                                    ? Number(item.calculatedPrice.goldValue)
+                                    : (item.metalValue !== undefined && item.metalValue !== null)
+                                        ? Number(item.metalValue)
+                                        : (itemTotal > 0)
+                                            ? ((preTaxItemTotal / qty) - unitMakingCharge - unitStoneCharge)
+                                            : ((item.metalRate || item.goldRateAtTime || 0) * netWeight);
+
+                            const metalVal = unitMetalVal * qty;
+                            const stoneCharge = unitStoneCharge * qty;
+                            const makingCharge = unitMakingCharge * qty;
                             const grossAmt = metalVal + makingCharge + stoneCharge;
                             const productVal = grossAmt;
-                            const computedMetalRate = item.metalRate ? Number(item.metalRate) : (netWeight > 0 ?
-                            (metalVal / netWeight) : 0);
+                            const computedMetalRate = item.metalRate ? Number(item.metalRate) : (netWeight > 0 ? (unitMetalVal / netWeight) : 0);
 
-                            totalGrossWt += grossWeight;
-                            totalMetalWt += netWeight;
-                            totalStoneWt += stoneWeight;
+                            totalGrossWt += grossWeight * qty;
+                            totalMetalWt += netWeight * qty;
+                            totalStoneWt += stoneWeight * qty;
                             totalMetalValue += metalVal;
                             totalStoneValue += stoneCharge;
                             totalMaking += makingCharge;
                             totalGrossAmount += grossAmt;
-                            totalDiscount += itemDiscount;
                             taxableValue += productVal;
                             %>
                             <tr class="border-b-invoice">
@@ -287,16 +328,16 @@
                                     <%= computedMetalRate.toFixed(2) %>
                                 </td>
                                 <td class="border-r-invoice">
-                                    <%= item.quantity || 1 %>
+                                    <%= qty %>
                                 </td>
                                 <td class="border-r-invoice">
-                                    <%= grossWeight.toFixed(3) %>
+                                    <%= (grossWeight * qty).toFixed(3) %>
                                 </td>
                                 <td class="border-r-invoice">
-                                    <%= netWeight.toFixed(3) %>
+                                    <%= (netWeight * qty).toFixed(3) %>
                                 </td>
                                 <td class="border-r-invoice">
-                                    <%= stoneWeight.toFixed(3) %>
+                                    <%= (stoneWeight * qty).toFixed(3) %>
                                 </td>
                                 <td class="border-r-invoice">
                                     <%= metalVal.toFixed(2) %>
@@ -320,13 +361,17 @@
                                 <tr class="font-bold bg-gray-50">
                                     <td class="border-r-invoice text-right pr-4" colspan="3">Total</td>
                                     <td class="border-r-invoice">
-                                        <%= order.items ? order.items.length : 0 %>
+                                        <%= order.items ? order.items.reduce((sum, item) => sum + (Number(item.quantity) || 1), 0) : 0 %>
                                     </td>
                                     <td class="border-r-invoice">
                                         <%= totalGrossWt.toFixed(3) %>
                                     </td>
-                                    <td class="border-r-invoice"></td>
-                                    <td class="border-r-invoice"></td>
+                                    <td class="border-r-invoice">
+                                        <%= totalMetalWt.toFixed(3) %>
+                                    </td>
+                                    <td class="border-r-invoice">
+                                        <%= totalStoneWt.toFixed(3) %>
+                                    </td>
                                     <td class="border-r-invoice">
                                         <%= totalMetalValue.toFixed(2) %>
                                     </td>
@@ -340,16 +385,89 @@
                                         <%= totalGrossAmount.toFixed(2) %>
                                     </td>
                                     <td class="">
-                                        <%= taxableValue.toFixed(2) %>
+                                        <%= totalGrossAmount.toFixed(2) %>
                                     </td>
                                 </tr>
                     </tbody>
                 </table>
             </div>
 
-            <% const finalTaxable=Number(order.subTotal || taxableValue); const cgst=Number(order.taxTotal || 0) / 2;
-                const sgst=Number(order.taxTotal || 0) / 2; const invoiceValue=finalTaxable + cgst + sgst; const
-                roundOff=Math.round(invoiceValue) - invoiceValue; const netPayable=Math.round(invoiceValue); %>
+            <% 
+                const totalGross = totalGrossAmount;
+                const orderDiscount = Number(order.discountTotal || order.discount || 0);
+                const finalTaxable = Math.max(0, totalGross - orderDiscount);
+                const cgst = Number((finalTaxable * 0.015).toFixed(2));
+                const sgst = Number((finalTaxable * 0.015).toFixed(2));
+                const totalGST = Number((cgst + sgst).toFixed(2));
+
+                // Round Off (manual adjustment if applied by employee)
+                let roundOff = Number(order.roundOff || 0);
+                if (!roundOff && order.notes && order.notes.includes('ROUND_OFF:')) {
+                    const match = order.notes.match(/ROUND_OFF:([-0-9.]+)/);
+                    if (match) roundOff = Number(match[1]);
+                }
+
+                const invoiceValue = Number((finalTaxable + totalGST + roundOff).toFixed(2));
+                const netPayable = invoiceValue;
+
+                // Fallback to reconstruct payments if order.payments is missing
+                const displayPayments = (order.payments && order.payments.length > 0) ? order.payments : [];
+                if (displayPayments.length === 0 && order) {
+                    if (Number(order.cashPaid) > 0) displayPayments.push({ method: 'cash', amount: Number(order.cashPaid) });
+                    if (Number(order.cardPaid) > 0) displayPayments.push({ method: 'card', amount: Number(order.cardPaid) });
+                    if (Number(order.upiPaid) > 0) displayPayments.push({ method: 'upi', amount: Number(order.upiPaid) });
+
+                    let parsedCreditMemos = [];
+                    if (order.notes && order.notes.includes('PAYMENT_REF:credit_memo:')) {
+                        const parts = order.notes.split('||');
+                        for (const part of parts) {
+                            if (part.startsWith('PAYMENT_REF:credit_memo:')) {
+                                const subParts = part.split(':');
+                                parsedCreditMemos.push({ method: 'credit_memo', referenceId: subParts[2], amount: Number(subParts[3] || 0) });
+                            }
+                        }
+                    }
+
+                    let parsedNeftPayments = [];
+                    if (order.notes && (order.notes.includes('PAYMENT_REF:neft:') || order.notes.includes('PAYMENT_REF:rtgs:') || order.notes.includes('PAYMENT_REF:neft_rtgs:'))) {
+                        const parts = order.notes.split('||');
+                        for (const part of parts) {
+                            if (part.startsWith('PAYMENT_REF:neft:') || part.startsWith('PAYMENT_REF:rtgs:') || part.startsWith('PAYMENT_REF:neft_rtgs:')) {
+                                const subParts = part.split(':');
+                                const method = part.startsWith('PAYMENT_REF:rtgs:') ? 'rtgs' : 'neft';
+                                const utrNo = subParts[3] || subParts[2];
+                                const amt = Number(subParts[4] || subParts[3] || 0);
+                                parsedNeftPayments.push({ method, referenceId: utrNo, utrNumber: utrNo, amount: amt });
+                            }
+                        }
+                    }
+
+                    if (parsedCreditMemos.length > 0) {
+                        displayPayments.push(...parsedCreditMemos);
+                    } else if (Number(order.creditUsed) > 0) {
+                        displayPayments.push({ method: 'credit_memo', amount: Number(order.creditUsed) });
+                    }
+
+                    if (parsedNeftPayments.length > 0) {
+                        displayPayments.push(...parsedNeftPayments);
+                    }
+                }
+
+                if (displayPayments.length === 0) {
+                    displayPayments.push({
+                        method: order.paymentMethod || 'Online',
+                        referenceId: order.razorpayPaymentId || order.razorpayOrderId || '---',
+                        amount: netPayable
+                    });
+                }
+
+                const totalAdvanceAdjusted = Number(order.creditUsed || 0) > 0
+                    ? Number(order.creditUsed)
+                    : displayPayments
+                        .filter(p => p.method === 'credit_memo')
+                        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+                const balancePayable = Math.max(0, netPayable - totalAdvanceAdjusted);
+            %>
 
                 <!-- Bottom Split Section -->
                 <div class="flex border-b-invoice">
@@ -364,23 +482,25 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr>
-                                    <td class="border-r-invoice">
-                                        <%= (order.paymentMethod || 'Online' ).toUpperCase() %>
-                                    </td>
-                                    <td class="border-r-invoice">
-                                        <%= order.razorpayPaymentId || order.razorpayOrderId || '---' %>
-                                    </td>
-                                    <td class="text-right">
-                                        <%= netPayable.toFixed(2) %>
-                                    </td>
-                                </tr>
+                                <% displayPayments.forEach(function(p) { %>
+                                    <tr>
+                                        <td class="border-r-invoice">
+                                            <%= p.method === 'neft' ? 'NEFT (Bank Transfer)' : p.method === 'rtgs' ? 'RTGS (Bank Transfer)' : (p.method === 'neft_rtgs' || p.method === 'bank_transfer') ? 'NEFT / RTGS (Bank Transfer)' : p.method === 'credit_memo' ? 'Advance / Credit Note' : p.method.toUpperCase() %>
+                                        </td>
+                                        <td class="border-r-invoice">
+                                            <%= p.utrNumber || p.referenceId || p.transactionId || '---' %>
+                                        </td>
+                                        <td class="text-right">
+                                            <%= Number(p.amount || 0).toFixed(2) %>
+                                        </td>
+                                    </tr>
+                                <% }); %>
                             </tbody>
                         </table>
                         <table class="w-full text-xs mt-4 border-t-invoice">
                             <thead class="border-b-invoice bg-gray-50">
                                 <tr>
-                                    <th class="text-left font-normal border-r-invoice">Discount Breakup</th>
+                                    <th class="text-left font-normal border-r-invoice">Discounts & Adjustments</th>
                                     <th class="text-right font-normal">Amount</th>
                                 </tr>
                             </thead>
@@ -388,13 +508,21 @@
                                 <tr>
                                     <td class="border-r-invoice">Store Offer</td>
                                     <td class="text-right">
-                                        <%= totalDiscount.toFixed(2) %>
+                                        <%= orderDiscount.toFixed(2) %>
                                     </td>
                                 </tr>
+                                <% if (totalAdvanceAdjusted > 0) { %>
+                                    <tr>
+                                        <td class="border-r-invoice text-red-600">Credit Amount</td>
+                                        <td class="text-right text-red-600">
+                                            <%= totalAdvanceAdjusted.toFixed(2) %>
+                                        </td>
+                                    </tr>
+                                <% } %>
                                 <tr class="border-t-invoice font-bold">
                                     <td class="border-r-invoice text-center">Total</td>
                                     <td class="text-right">
-                                        <%= totalDiscount.toFixed(2) %>
+                                        <%= (orderDiscount + totalAdvanceAdjusted).toFixed(2) %>
                                     </td>
                                 </tr>
                             </tbody>
@@ -406,8 +534,20 @@
                         <table class="w-full text-xs">
                             <tbody>
                                 <tr>
-                                    <td class="py-1 px-2 border-b-invoice border-r-invoice">Taxable Value:</td>
+                                    <td class="py-1 px-2 border-b-invoice border-r-invoice">Gross Amount:</td>
                                     <td class="py-1 px-2 border-b-invoice text-right">
+                                        <%= totalGross.toFixed(2) %>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="py-1 px-2 border-b-invoice border-r-invoice text-red-600">Total Discount:</td>
+                                    <td class="py-1 px-2 border-b-invoice text-right text-red-600">
+                                        -<%= orderDiscount.toFixed(2) %>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="py-1 px-2 border-b-invoice border-r-invoice font-semibold">Taxable Value:</td>
+                                    <td class="py-1 px-2 border-b-invoice text-right font-semibold">
                                         <%= finalTaxable.toFixed(2) %>
                                     </td>
                                 </tr>
@@ -424,27 +564,45 @@
                                     </td>
                                 </tr>
                                 <tr>
-                                    <td class="py-1 px-2 border-b-invoice border-r-invoice">Total Invoice Value:</td>
+                                    <td class="py-1 px-2 border-b-invoice border-r-invoice">Total GST (3%):</td>
                                     <td class="py-1 px-2 border-b-invoice text-right">
-                                        <%= invoiceValue.toFixed(2) %>
+                                        <%= totalGST.toFixed(2) %>
                                     </td>
                                 </tr>
+                                <% if (roundOff !== 0) { %>
                                 <tr>
-                                    <td class="py-1 px-2 border-b-invoice border-r-invoice">Round off:</td>
+                                    <td class="py-1 px-2 border-b-invoice border-r-invoice">
+                                        Round off:
+                                    </td>
                                     <td class="py-1 px-2 border-b-invoice text-right">
-                                        <%= roundOff.toFixed(2) %>
+                                        <%= roundOff < 0 ? '-' + Math.abs(roundOff).toFixed(2) : '+' + roundOff.toFixed(2) %>
                                     </td>
                                 </tr>
+                                <% } %>
                                 <tr class="font-bold bg-gray-50">
-                                    <td class="py-2 px-2 border-b-invoice border-r-invoice">Net Payable:</td>
+                                    <td class="py-2 px-2 border-b-invoice border-r-invoice">Invoice Total:</td>
                                     <td class="py-2 px-2 border-b-invoice text-right text-sm">
                                         <%= netPayable.toFixed(2) %>
                                     </td>
                                 </tr>
+                                <% if (totalAdvanceAdjusted > 0) { %>
+                                    <tr class="text-red-600">
+                                        <td class="py-1 px-2 border-b-invoice border-r-invoice font-semibold">Credit Amount Applied:</td>
+                                        <td class="py-1 px-2 border-b-invoice text-right font-semibold">
+                                            -<%= totalAdvanceAdjusted.toFixed(2) %>
+                                        </td>
+                                    </tr>
+                                    <tr class="font-black bg-gray-100">
+                                        <td class="py-2 px-2 border-b-invoice border-r-invoice">Net Payable:</td>
+                                        <td class="py-2 px-2 border-b-invoice text-right text-sm">
+                                            <%= balancePayable.toFixed(2) %>
+                                        </td>
+                                    </tr>
+                                <% } %>
                                 <tr>
                                     <td colspan="2" class="py-2 px-2 text-right italic">
                                         <span class="float-left not-italic">Amount In Words</span>
-                                        <%= amountInWords %>
+                                        <%= typeof amountInWords !== 'undefined' ? amountInWords : '' %>
                                     </td>
                                 </tr>
                             </tbody>
