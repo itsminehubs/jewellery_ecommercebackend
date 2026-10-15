@@ -19,10 +19,6 @@ const sendOTP = async (phone, purpose = 'login') => {
       phone
     };
 
-    if (process.env.IS_SANDBOX === 'true' || process.env.NODE_ENV !== 'production') {
-      response.otp = otp; // SANDBOX MODE: Return OTP in response
-    }
-
     return response;
   } catch (error) {
     if (error instanceof ApiError) throw error;

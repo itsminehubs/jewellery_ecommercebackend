@@ -163,6 +163,26 @@ const createCreditMemo = asyncHandler(async (req, res) => {
         // Generate Memo ID (Format: CS-CM-001)
         const memoId = await generateCreditMemoNumber(tx);
 
+        let effectiveLockedRate = lockedGoldRate ? Number(lockedGoldRate) : null;
+        const purityToUse = exchangePurity || '22K';
+
+        if (!effectiveLockedRate) {
+            // Auto fetch current live rate for the purity so it is ALWAYS locked regardless of payment method
+            const latestGoldRate = await tx.goldRate.findFirst({
+                where: {
+                    metal: 'gold',
+                    purity: { equals: purityToUse, mode: 'insensitive' }
+                },
+                orderBy: [
+                    { effectiveDate: 'desc' },
+                    { createdAt: 'desc' }
+                ]
+            });
+            if (latestGoldRate) {
+                effectiveLockedRate = Number(latestGoldRate.ratePerGram);
+            }
+        }
+
         const creditMemo = await tx.creditMemo.create({
             data: {
                 memoId,
@@ -174,9 +194,9 @@ const createCreditMemo = asyncHandler(async (req, res) => {
                 linkedItems: validLinkedItems,
                 shopId: shop_id || 'MAIN',
                 createdById: req.user.id,
-                isRateLocked: isRateLocked || (paymentMethod === 'gold_exchange'),
-                lockedGoldRate: lockedGoldRate ? Number(lockedGoldRate) : null,
-                exchangePurity: exchangePurity || null,
+                isRateLocked: true, // Always locked regardless of payment method (Cash, UPI, Card, NEFT, Gold Exchange)
+                lockedGoldRate: effectiveLockedRate,
+                exchangePurity: purityToUse,
                 exchangeWeight: exchangeWeight ? Number(exchangeWeight) : null
             },
             include: {
@@ -285,14 +305,7 @@ const sendRedemptionOtp = asyncHandler(async (req, res) => {
 
     const otpService = require('../../utils/otpService');
     const otpKey = `credit_memo_otp_${memo.memoId}`;
-    const otp = await otpService.generateAndStoreOTP(otpKey, 300, 'credit_memo_redemption');
-
-    // Also send SMS to the customer's phone
-    try {
-        await otpService.generateAndStoreOTP(customerPhone, 300, 'credit_memo_redemption');
-    } catch (e) {
-        // Non-fatal if SMS dispatch fails in sandbox
-    }
+    const otp = await otpService.generateAndStoreOTP(otpKey, 300, 'credit_memo_redemption', customerPhone);
 
     const responseData = {
         memoId: memo.memoId,
@@ -301,10 +314,6 @@ const sendRedemptionOtp = asyncHandler(async (req, res) => {
         balance: memo.balance,
         message: `Security OTP sent to customer phone ending in ${customerPhone.slice(-4)}`
     };
-
-    if (process.env.IS_SANDBOX === 'true' || process.env.NODE_ENV !== 'production') {
-        responseData.otp = otp;
-    }
 
     ApiResponse.success(responseData, 'Redemption authorization OTP sent successfully').send(res);
 });

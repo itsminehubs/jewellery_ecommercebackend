@@ -248,13 +248,10 @@ const recordInstallment = async (schemeId, paymentData, performedBy) => {
             }
         }
 
-        // Rule 2: Monthly installments must be paid between the 1st and 10th of every month
-        // (Unless explicitly overridden by admin with grace approval notes)
+        // Rule 2: Monthly installments are scheduled between the 1st and 10th of every month.
+        // Payment restriction after the 10th is removed so payments are accepted anytime during the month.
         const currentDay = new Date().getDate();
         const isWithinWindow = currentDay >= 1 && currentDay <= 10;
-        if (!isWithinWindow && !paymentData.allowGracePeriod && !paymentData.overrideWindow) {
-            throw new Error(`Monthly installments must be paid between the 1st and 10th of the month (Today is day ${currentDay}). Admin override is required to accept late installments.`);
-        }
 
         let goldRateApplied = null;
         let gramsCredited = null;
@@ -286,7 +283,7 @@ const recordInstallment = async (schemeId, paymentData, performedBy) => {
                 gramsCredited,
                 method: paymentData.method,
                 transactionId: paymentData.transactionId,
-                notes: paymentData.notes || (isWithinWindow ? 'Paid on schedule (1-10 window)' : 'Late installment accepted under grace period'),
+                notes: paymentData.notes || (isWithinWindow ? 'Paid on schedule (1-10 window)' : 'Installment payment'),
                 collectedById: performedBy
             }
         });
@@ -712,10 +709,6 @@ const requestClosureOTP = async (schemeId, performedBy) => {
         message: `Closure OTP sent to registered mobile number ending with ${scheme.customer.phone.slice(-4)}`,
         phoneEnding: scheme.customer.phone.slice(-4)
     };
-
-    if (process.env.IS_SANDBOX === 'true' || process.env.NODE_ENV !== 'production') {
-        result.otp = otp;
-    }
 
     await prisma.schemeActivityLog.create({
         data: {

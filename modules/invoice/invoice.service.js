@@ -121,8 +121,8 @@ const downloadInvoice = async (invoiceId) => {
     const invoice = await prisma.invoice.findUnique({
         where: { id: invoiceId },
         include: { 
-            order: { include: { user: { include: { addresses: true } }, items: { include: { product: true } } } },
-            posOrder: { include: { customer: { include: { addresses: true } }, items: { include: { product: true } } } }
+            order: { include: { user: { include: { addresses: true } }, items: { include: { product: { include: { metalDetails: true, stoneDetails: true } } } } } },
+            posOrder: { include: { customer: { include: { addresses: true } }, items: { include: { product: { include: { metalDetails: true, stoneDetails: true } } } } } }
         }
     });
 
