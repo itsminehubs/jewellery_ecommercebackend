@@ -4,6 +4,13 @@ const { CACHE_KEYS, CACHE_TTL } = require('./constants');
 const logger = require('./logger');
 const ApiError = require('./ApiError');
 
+const SMS_TEMPLATE_IDS = {
+  login: '1077335120021098038',
+  reset_password: '1077367200020363807',
+  credit_memo_redemption: '1077251020006541404',
+  scheme_closure: '1077512160006563219'
+};
+
 /**
  * Generate and store OTP for a given key (phone/email)
  * @param {string} key - Unique identifier (phone or email)
@@ -16,33 +23,39 @@ const ApiError = require('./ApiError');
  * @param {string} phone - 10-digit mobile number
  * @param {string} message - Message body
  */
-const sendSMS = async (phone, message) => {
+const sendSMS = async (phone, message, templateId) => {
   const cleanPhone = String(phone || '').replace(/\D/g, '').slice(-10);
   if (cleanPhone.length !== 10) {
-    logger.warn(`[SMS] Invalid 10-digit phone number: ${phone}`);
+    logger.warn('[SMS] Invalid 10-digit phone number');
+    return false;
+  }
+
+  const accessToken = process.env.WAPPIE_ACCESS_TOKEN;
+  if (!accessToken) {
+    logger.error('[SMS] Wappie access token is not configured');
     return false;
   }
 
   const params = new URLSearchParams({
-    access_token: 'de9ba8ce66886140238eeeade03c8310',
+    access_token: accessToken,
     to: cleanPhone,
     country_code: '+91',
-    sender: 'CRBNSM',
-    service: 'SI',
-    message: message
+    sender: process.env.WAPPIE_SENDER_ID || 'CRBNSM',
+    service: process.env.WAPPIE_SERVICE || 'SI',
+    message,
+    template_id: templateId
   });
 
   try {
     const response = await fetch(`https://apis.wappie.shop/v1/sms/messages?${params.toString()}`, { method: 'GET' });
-    const responseText = await response.text();
     if (!response.ok) {
-      logger.error(`[SMS] Wappie API error for ${cleanPhone}: ${response.status} ${responseText}`);
+      logger.error(`[SMS] Wappie API rejected the request with status ${response.status}`);
       return false;
     }
-    logger.info(`[SMS] Successfully delivered to ${cleanPhone}: ${responseText}`);
+    logger.info('[SMS] Request accepted by Wappie gateway');
     return true;
   } catch (smsError) {
-    logger.error(`[SMS] Failed to send SMS to ${cleanPhone}: ${smsError.message}`);
+    logger.error(`[SMS] Wappie request failed: ${smsError.message}`);
     return false;
   }
 };
@@ -56,9 +69,9 @@ const sendSMS = async (phone, message) => {
  * @returns {Promise<string>} Generated OTP
  */
 const generateAndStoreOTP = async (key, expiration = CACHE_TTL.OTP, purpose = 'login', targetPhone = null) => {
+  const otpKey = `${CACHE_KEYS.OTP}${key}`;
   try {
     const otp = generateOTP(6);
-    const otpKey = `${CACHE_KEYS.OTP}${key}`;
     
     await cacheHelper.set(otpKey, otp, expiration);
     
@@ -78,9 +91,9 @@ const generateAndStoreOTP = async (key, expiration = CACHE_TTL.OTP, purpose = 'l
       if (purpose === 'reset_password') {
         messageTemplate = `The OTP to reset your CarbonSmith account password is ${otp}. Do not share this code with anyone.`;
       } else if (purpose === 'credit_memo_redemption') {
-        messageTemplate = `${otp} is your one-time verification code to authorize redemption of your Credit Memo / Advance Voucher at CarbonSmith. Valid for ${minutes} mins. Do not share it with anyone.`;
+        messageTemplate = `${otp}is your one-time verification code to authorize redemption of your Credit Memo / Advance Voucher at CarbonSmith. Valid for ${minutes} mins. Do not share it with anyone.`;
       } else if (purpose === 'scheme_closure') {
-        messageTemplate = `${otp} is your verification code to authorize closure and redemption of your Savings Scheme at CarbonSmith. Valid for ${minutes} mins.`;
+        messageTemplate = `${otp} is your verification code to authorise closure and redemption of your Savings Scheme at CarbonSmith. Valid for ${minutes} mins.`;
       } else {
         messageTemplate = `${otp} is your OTP to log in to your CarbonSmith account. Valid for ${minutes} mins. Do not share it with anyone.`;
       }
@@ -89,13 +102,22 @@ const generateAndStoreOTP = async (key, expiration = CACHE_TTL.OTP, purpose = 'l
         logger.info(`[SANDBOX OTP] ${otp} for ${cleanPhone} (purpose: ${purpose})`);
         console.log(`\n🔐 [SANDBOX OTP] ${otp} for ${cleanPhone} (purpose: ${purpose})\n`);
       } else {
-        await sendSMS(cleanPhone, messageTemplate);
+        const templateId = SMS_TEMPLATE_IDS[purpose] || SMS_TEMPLATE_IDS.login;
+        const sent = await sendSMS(cleanPhone, messageTemplate, templateId);
+        if (!sent) {
+          await cacheHelper.del(otpKey);
+          if (key !== cleanPhone) {
+            await cacheHelper.del(`${CACHE_KEYS.OTP}${cleanPhone}`);
+          }
+          throw ApiError.internal('Failed to send OTP SMS');
+        }
       }
     }
     
     return otp;
   } catch (error) {
-    logger.error(`Error generating/storing OTP for ${key}: ${error.message}`);
+    if (error instanceof ApiError) throw error;
+    logger.error(`Error generating/storing OTP: ${error.message}`);
     throw ApiError.internal('Failed to generate OTP');
   }
 };
