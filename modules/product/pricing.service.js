@@ -101,8 +101,13 @@ const calculateProductPrice = async (productData, metalDetails, stoneDetails) =>
 
     // 5. Calculate Making Charges & Apply Discount
     let makingValue = 0;
-    const makingCharges = productData.makingCharges ? Number(productData.makingCharges) : 0;
-    if (productData.makingChargeType === 'per_gram') {
+    let makingCharges = productData.makingCharges ? Number(productData.makingCharges) : 0;
+    const makingPercentage = productData.makingPercentage ? Number(productData.makingPercentage) : 0;
+
+    if (makingCharges === 0 && makingPercentage > 0 && metalValue > 0) {
+        makingValue = roundTo2(metalValue * (makingPercentage / 100));
+        makingCharges = netWeight > 0 ? roundTo2(makingValue / netWeight) : makingValue;
+    } else if (productData.makingChargeType === 'per_gram') {
         makingValue = makingCharges * netWeight;
     } else {
         makingValue = makingCharges;

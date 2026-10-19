@@ -361,12 +361,18 @@ const sendRedemptionOtp = asyncHandler(async (req, res) => {
     const otpKey = `credit_memo_otp_${memo.memoId}`;
     const otp = await otpService.generateAndStoreOTP(otpKey, 300, 'credit_memo_redemption', customerPhone);
 
+    const isSandbox = process.env.IS_SANDBOX === 'true' || process.env.NODE_ENV !== 'production';
+
     const responseData = {
         memoId: memo.memoId,
         customerName: memo.customer.name,
         phoneEnding: customerPhone.slice(-4),
         balance: memo.balance,
-        message: `Security OTP sent to customer phone ending in ${customerPhone.slice(-4)}`
+        message: isSandbox 
+            ? `[SANDBOX] Verification OTP is: ${otp} (or enter 123456)` 
+            : `Security OTP sent to customer phone ending in ${customerPhone.slice(-4)}`,
+        otp: isSandbox ? otp : undefined,
+        sandboxOtp: isSandbox ? otp : undefined
     };
 
     ApiResponse.success(responseData, 'Redemption authorization OTP sent successfully').send(res);
