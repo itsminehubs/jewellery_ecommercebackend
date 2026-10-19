@@ -705,9 +705,15 @@ const requestClosureOTP = async (schemeId, performedBy) => {
     const otpService = require('../../utils/otpService');
     const otp = await otpService.generateAndStoreOTP(scheme.customer.phone, undefined, 'scheme_closure');
 
+    const isSandbox = process.env.IS_SANDBOX === 'true' || process.env.NODE_ENV !== 'production';
+
     const result = {
-        message: `Closure OTP sent to registered mobile number ending with ${scheme.customer.phone.slice(-4)}`,
-        phoneEnding: scheme.customer.phone.slice(-4)
+        message: isSandbox
+            ? `[SANDBOX] Closure OTP is: ${otp} (or enter 123456)`
+            : `Closure OTP sent to registered mobile number ending with ${scheme.customer.phone.slice(-4)}`,
+        phoneEnding: scheme.customer.phone.slice(-4),
+        otp: isSandbox ? otp : undefined,
+        sandboxOtp: isSandbox ? otp : undefined
     };
 
     await prisma.schemeActivityLog.create({

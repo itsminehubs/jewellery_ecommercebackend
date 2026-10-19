@@ -147,6 +147,7 @@ model Product {
   price            Decimal @db.Decimal(20, 2)
   purchasePrice    Decimal @default(0) @db.Decimal(20, 2)
   makingCharges    Decimal @default(0) @db.Decimal(20, 2)
+  makingPercentage Decimal? @default(0) @db.Decimal(5, 2)
   makingChargeType String  @default("per_gram") // fixed, per_gram
   stoneCharges     Decimal @default(0) @db.Decimal(20, 2)
   wastage          Decimal @default(0) @db.Decimal(5, 2)

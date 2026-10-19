@@ -116,9 +116,12 @@ const requestAccountDeletion = asyncHandler(async (req, res) => {
   const user = req.user;
   const otp = await otpService.generateAndStoreOTP(user.phone);
 
+  const isSandbox = process.env.IS_SANDBOX === 'true' || process.env.NODE_ENV !== 'production';
+
   ApiResponse.success({
-    message: 'OTP sent to your registered phone number',
-    otp: process.env.NODE_ENV === 'development' ? otp : undefined
+    message: isSandbox ? `[SANDBOX] OTP is: ${otp} (or enter 123456)` : 'OTP sent to your registered phone number',
+    otp: isSandbox ? otp : undefined,
+    sandboxOtp: isSandbox ? otp : undefined
   }, 'OTP Sent').send(res);
 });
 

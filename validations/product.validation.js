@@ -52,6 +52,7 @@ const createProduct = {
 
         // POS/Jewellery Specific (Maintained for legacy/internal logic if needed, but made optional)
         makingCharges: Joi.number().min(0).default(0),
+        makingPercentage: Joi.number().min(0).max(100).allow(null, '').optional().default(0),
         makingChargeType: Joi.string().valid('fixed', 'per_gram').default('per_gram'),
         stoneCharges: Joi.number().min(0).default(0),
         wastage: Joi.number().min(0).default(0),
@@ -119,6 +120,7 @@ const updateProduct = {
         specifications: Joi.object().pattern(Joi.string(), Joi.string()),
 
         makingCharges: Joi.number().min(0),
+        makingPercentage: Joi.number().min(0).max(100).allow(null, '').optional(),
         makingChargeType: Joi.string().valid('fixed', 'per_gram'),
         stoneCharges: Joi.number().min(0),
         wastage: Joi.number().min(0),
