@@ -441,6 +441,11 @@ model CreditMemo {
 
   lockedGoldRate    Decimal? @db.Decimal(20, 2)
   isRateLocked      Boolean  @default(false)
+  referencePurity   String?  @default("22K")
+  lockedGrams       Decimal? @db.Decimal(20, 4)
+  remainingGrams    Decimal? @db.Decimal(20, 4)
+  lockedPureGrams   Decimal? @db.Decimal(20, 4)
+  remainingPureGrams Decimal? @db.Decimal(20, 4)
   exchangePurity    String?
   exchangeWeight    Decimal? @db.Decimal(20, 3)
 

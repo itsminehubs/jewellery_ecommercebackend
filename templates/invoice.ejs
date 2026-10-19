@@ -410,47 +410,74 @@
                 const invoiceValue = Number((finalTaxable + totalGST + roundOff).toFixed(2));
                 const netPayable = invoiceValue;
 
-                // Fallback to reconstruct payments if order.payments is missing
-                const displayPayments = (order.payments && order.payments.length > 0) ? order.payments : [];
+                // Enrich or reconstruct payments
+                let displayPayments = (order.payments && order.payments.length > 0) ? [...order.payments] : [];
                 if (displayPayments.length === 0 && order) {
                     if (Number(order.cashPaid) > 0) displayPayments.push({ method: 'cash', amount: Number(order.cashPaid) });
                     if (Number(order.cardPaid) > 0) displayPayments.push({ method: 'card', amount: Number(order.cardPaid) });
                     if (Number(order.upiPaid) > 0) displayPayments.push({ method: 'upi', amount: Number(order.upiPaid) });
+                }
 
-                    let parsedCreditMemos = [];
-                    if (order.notes && order.notes.includes('PAYMENT_REF:credit_memo:')) {
-                        const parts = order.notes.split('||');
-                        for (const part of parts) {
-                            if (part.startsWith('PAYMENT_REF:credit_memo:')) {
-                                const subParts = part.split(':');
-                                parsedCreditMemos.push({ method: 'credit_memo', referenceId: subParts[2], amount: Number(subParts[3] || 0) });
+                if (order.notes) {
+                    const parts = order.notes.split('||');
+                    for (const part of parts) {
+                        if (part.startsWith('PAYMENT_REF:credit_memo:')) {
+                            const subParts = part.split(':');
+                            const refId = subParts[2];
+                            const amt = Number(subParts[3] || 0);
+                            const gramsIdx = subParts.indexOf('GRAMS');
+                            const purityIdx = subParts.indexOf('PURITY');
+                            const rateIdx = subParts.indexOf('RATE');
+                            const grams = gramsIdx !== -1 ? Number(subParts[gramsIdx + 1]) : null;
+                            const purity = purityIdx !== -1 ? subParts[purityIdx + 1] : null;
+                            const rate = rateIdx !== -1 ? Number(subParts[rateIdx + 1]) : null;
+
+                            const existingMemo = displayPayments.find(p => p.method === 'credit_memo' && (!p.referenceId || p.referenceId === refId));
+                            if (existingMemo) {
+                                if (!existingMemo.referenceId) existingMemo.referenceId = refId;
+                                if (!existingMemo.grams && grams) existingMemo.grams = grams;
+                                if (!existingMemo.purity && purity) existingMemo.purity = purity;
+                                if (!existingMemo.rate && rate) existingMemo.rate = rate;
+                            } else {
+                                displayPayments.push({ 
+                                    method: 'credit_memo', 
+                                    referenceId: refId, 
+                                    amount: amt,
+                                    grams,
+                                    purity,
+                                    rate
+                                });
+                            }
+                        } else if (part.startsWith('PAYMENT_REF:neft:') || part.startsWith('PAYMENT_REF:rtgs:') || part.startsWith('PAYMENT_REF:neft_rtgs:')) {
+                            const subParts = part.split(':');
+                            const method = part.startsWith('PAYMENT_REF:rtgs:') ? 'rtgs' : 'neft';
+                            const utrNo = subParts[3] || subParts[2];
+                            const amt = Number(subParts[4] || subParts[3] || 0);
+
+                            const existingNeft = displayPayments.find(p => (p.method === 'neft' || p.method === 'rtgs' || p.method === 'neft_rtgs' || p.method === 'bank_transfer') && (!p.referenceId || p.referenceId === utrNo));
+                            if (existingNeft) {
+                                existingNeft.utrNumber = utrNo;
+                                existingNeft.referenceId = utrNo;
+                            } else {
+                                displayPayments.push({ method, referenceId: utrNo, utrNumber: utrNo, amount: amt });
+                            }
+                        } else if (part.startsWith('PAYMENT_REF:scheme:')) {
+                            const subParts = part.split(':');
+                            const schemeRef = subParts[2];
+                            const amt = Number(subParts[3] || 0);
+
+                            const existingScheme = displayPayments.find(p => p.method === 'scheme_redemption' && (!p.referenceId || p.referenceId === schemeRef));
+                            if (existingScheme) {
+                                if (!existingScheme.referenceId) existingScheme.referenceId = schemeRef;
+                            } else {
+                                displayPayments.push({ method: 'scheme_redemption', referenceId: schemeRef, amount: amt });
                             }
                         }
                     }
+                }
 
-                    let parsedNeftPayments = [];
-                    if (order.notes && (order.notes.includes('PAYMENT_REF:neft:') || order.notes.includes('PAYMENT_REF:rtgs:') || order.notes.includes('PAYMENT_REF:neft_rtgs:'))) {
-                        const parts = order.notes.split('||');
-                        for (const part of parts) {
-                            if (part.startsWith('PAYMENT_REF:neft:') || part.startsWith('PAYMENT_REF:rtgs:') || part.startsWith('PAYMENT_REF:neft_rtgs:')) {
-                                const subParts = part.split(':');
-                                const method = part.startsWith('PAYMENT_REF:rtgs:') ? 'rtgs' : 'neft';
-                                const utrNo = subParts[3] || subParts[2];
-                                const amt = Number(subParts[4] || subParts[3] || 0);
-                                parsedNeftPayments.push({ method, referenceId: utrNo, utrNumber: utrNo, amount: amt });
-                            }
-                        }
-                    }
-
-                    if (parsedCreditMemos.length > 0) {
-                        displayPayments.push(...parsedCreditMemos);
-                    } else if (Number(order.creditUsed) > 0) {
-                        displayPayments.push({ method: 'credit_memo', amount: Number(order.creditUsed) });
-                    }
-
-                    if (parsedNeftPayments.length > 0) {
-                        displayPayments.push(...parsedNeftPayments);
-                    }
+                if (displayPayments.length === 0 && Number(order.creditUsed) > 0) {
+                    displayPayments.push({ method: 'credit_memo', amount: Number(order.creditUsed) });
                 }
 
                 if (displayPayments.length === 0) {
@@ -485,7 +512,7 @@
                                 <% displayPayments.forEach(function(p) { %>
                                     <tr>
                                         <td class="border-r-invoice">
-                                            <%= p.method === 'neft' ? 'NEFT (Bank Transfer)' : p.method === 'rtgs' ? 'RTGS (Bank Transfer)' : (p.method === 'neft_rtgs' || p.method === 'bank_transfer') ? 'NEFT / RTGS (Bank Transfer)' : p.method === 'credit_memo' ? 'Advance / Credit Note' : p.method.toUpperCase() %>
+                                            <%= p.method === 'neft' ? 'NEFT (Bank Transfer)' : p.method === 'rtgs' ? 'RTGS (Bank Transfer)' : (p.method === 'neft_rtgs' || p.method === 'bank_transfer') ? 'NEFT / RTGS (Bank Transfer)' : p.method === 'credit_memo' ? 'Advance / Credit Note' : p.method === 'scheme_redemption' ? 'Savings Scheme' : p.method.toUpperCase() %>
                                         </td>
                                         <td class="border-r-invoice">
                                             <%= p.utrNumber || p.referenceId || p.transactionId || '---' %>
