@@ -114,21 +114,38 @@ const searchActiveMemos = asyncHandler(async (req, res) => {
     ApiResponse.success(memos, 'Active Credit Memos found').send(res);
 });
 
+const { toPureGoldGrams, parseKarat } = require('../../utils/purityHelper');
+
 // Create new Credit Memo
 const createCreditMemo = asyncHandler(async (req, res) => {
-    const { customer, originalAmount, paymentMethod, notes, shop_id, linkedItems, isRateLocked, lockedGoldRate, exchangePurity, exchangeWeight } = req.body;
+    const {
+        customer,
+        originalAmount,
+        paymentMethod,
+        notes,
+        shop_id,
+        linkedItems,
+        isRateLocked,
+        lockedGoldRate,
+        referencePurity,
+        exchangePurity,
+        exchangeWeight
+    } = req.body;
 
     if (!customer || !paymentMethod) {
         return ApiResponse.error('Customer ID and paymentMethod are required', 400).send(res);
     }
 
+    const purityToUse = referencePurity || exchangePurity || '22K';
+    let effectiveLockedRate = lockedGoldRate ? Number(lockedGoldRate) : null;
+
     let finalAmount = Number(originalAmount) || 0;
-    if (paymentMethod === 'gold_exchange' && exchangeWeight && lockedGoldRate && finalAmount === 0) {
-        finalAmount = Number(exchangeWeight) * Number(lockedGoldRate);
+    if (paymentMethod === 'gold_exchange' && exchangeWeight && effectiveLockedRate && finalAmount === 0) {
+        finalAmount = Number((Number(exchangeWeight) * effectiveLockedRate).toFixed(2));
     }
 
-    if (finalAmount <= 0) {
-        return ApiResponse.error('Credit Memo amount must be greater than 0', 400).send(res);
+    if (finalAmount <= 0 && (!exchangeWeight || Number(exchangeWeight) <= 0)) {
+        return ApiResponse.error('Credit Memo amount or exchange weight must be greater than 0', 400).send(res);
     }
 
     let finalNotes = notes || '';
@@ -157,17 +174,11 @@ const createCreditMemo = asyncHandler(async (req, res) => {
             }
         }
 
-        const today = new Date();
-        const startOfDay = new Date(today.setHours(0, 0, 0, 0));
-
         // Generate Memo ID (Format: CS-CM-001)
         const memoId = await generateCreditMemoNumber(tx);
 
-        let effectiveLockedRate = lockedGoldRate ? Number(lockedGoldRate) : null;
-        const purityToUse = exchangePurity || '22K';
-
         if (!effectiveLockedRate) {
-            // Auto fetch current live rate for the purity so it is ALWAYS locked regardless of payment method
+            // Auto fetch current live rate for the selected purity so it is ALWAYS locked
             const latestGoldRate = await tx.goldRate.findFirst({
                 where: {
                     metal: 'gold',
@@ -180,8 +191,46 @@ const createCreditMemo = asyncHandler(async (req, res) => {
             });
             if (latestGoldRate) {
                 effectiveLockedRate = Number(latestGoldRate.ratePerGram);
+            } else {
+                // Fallback to 22K derived rate if direct purity not found
+                const base22k = await tx.goldRate.findFirst({
+                    where: { metal: 'gold', purity: { equals: '22K', mode: 'insensitive' } },
+                    orderBy: [{ effectiveDate: 'desc' }, { createdAt: 'desc' }]
+                });
+                if (base22k) {
+                    const karat = parseKarat(purityToUse);
+                    effectiveLockedRate = Number(((Number(base22k.ratePerGram) * karat) / 22).toFixed(2));
+                }
             }
         }
+
+        if (!effectiveLockedRate || effectiveLockedRate <= 0) {
+            throw new Error(`Unable to determine gold rate for purity ${purityToUse}. Please enter rate manually.`);
+        }
+
+        const additionalCash = Number(req.body.cashAmount || 0);
+
+        // If gold exchange, calculate gold value and combine with any additional cash/online money
+        let exchangeGoldValue = 0;
+        if (paymentMethod === 'gold_exchange' && exchangeWeight) {
+            exchangeGoldValue = Number((Number(exchangeWeight) * effectiveLockedRate).toFixed(2));
+            finalAmount = Number((exchangeGoldValue + additionalCash).toFixed(2));
+            if (additionalCash > 0) {
+                finalNotes = `Deposit Breakdown: ${Number(exchangeWeight).toFixed(3)}g Old ${purityToUse} Gold (₹${exchangeGoldValue.toLocaleString('en-IN')}) + ₹${additionalCash.toLocaleString('en-IN')} Cash/Online\n` + finalNotes;
+            }
+        }
+
+        // Calculate exact locked grams in selected reference purity and pure gold (24K)
+        let lockedGrams = 0;
+        if (paymentMethod === 'gold_exchange' && exchangeWeight) {
+            const goldGrams = Number(Number(exchangeWeight).toFixed(4));
+            const cashGrams = (additionalCash > 0 && effectiveLockedRate > 0) ? Number((additionalCash / effectiveLockedRate).toFixed(4)) : 0;
+            lockedGrams = Number((goldGrams + cashGrams).toFixed(4));
+        } else {
+            lockedGrams = Number((finalAmount / effectiveLockedRate).toFixed(4));
+        }
+
+        const lockedPureGrams = Number(toPureGoldGrams(lockedGrams, purityToUse).toFixed(4));
 
         const creditMemo = await tx.creditMemo.create({
             data: {
@@ -194,8 +243,13 @@ const createCreditMemo = asyncHandler(async (req, res) => {
                 linkedItems: validLinkedItems,
                 shopId: shop_id || 'MAIN',
                 createdById: req.user.id,
-                isRateLocked: true, // Always locked regardless of payment method (Cash, UPI, Card, NEFT, Gold Exchange)
+                isRateLocked: true,
+                referencePurity: purityToUse,
                 lockedGoldRate: effectiveLockedRate,
+                lockedGrams: lockedGrams,
+                remainingGrams: lockedGrams,
+                lockedPureGrams: lockedPureGrams,
+                remainingPureGrams: lockedPureGrams,
                 exchangePurity: purityToUse,
                 exchangeWeight: exchangeWeight ? Number(exchangeWeight) : null
             },
@@ -349,7 +403,7 @@ const verifyRedemptionOtp = asyncHandler(async (req, res) => {
             try {
                 await otpService.verifyOTP(memo.customer.phone, String(otp).trim(), false);
                 isValid = true;
-            } catch (e2) {}
+            } catch (e2) { }
         }
     }
 
