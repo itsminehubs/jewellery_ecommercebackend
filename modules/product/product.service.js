@@ -262,6 +262,9 @@ const createProduct = async (productData, imagePaths = [], userId = null) => {
         categoryId: resolvedCategoryId,
         price: pricingResults.price || 0,
         finalPrice: pricingResults.finalPrice || 0,
+        makingCharges: (pricingResults.makingCharges !== undefined && baseProductData.makingPercentage && Number(baseProductData.makingPercentage) > 0)
+          ? pricingResults.makingCharges
+          : (baseProductData.makingCharges || 0),
         metalDetails: metalDetails ? {
           create: pricingResults.metalDetails
         } : undefined,
@@ -391,6 +394,10 @@ const updateProduct = async (productId, updateData, imagePaths = [], imagesToDel
   // Normalize unique fields
   if (baseProductData.huid === "") baseProductData.huid = null;
 
+  const activeMakingPct = baseProductData.makingPercentage !== undefined
+    ? Number(baseProductData.makingPercentage || 0)
+    : Number(existingProduct.makingPercentage || 0);
+
   let updatedProduct;
   try {
     updatedProduct = await prisma.product.update({
@@ -400,6 +407,9 @@ const updateProduct = async (productId, updateData, imagePaths = [], imagesToDel
         categoryId: resolvedCategoryId || undefined,
         price: pricingResults.price || existingProduct.price,
         finalPrice: pricingResults.finalPrice || existingProduct.finalPrice,
+        ...(pricingResults.makingCharges !== undefined && activeMakingPct > 0 && {
+          makingCharges: pricingResults.makingCharges
+        }),
         images: newImagesData.length > 0 ? {
           create: newImagesData
         } : undefined,

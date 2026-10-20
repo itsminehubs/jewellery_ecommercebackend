@@ -223,11 +223,21 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
 
         // 5. Calculate Making Charges & Apply Discount
         let makingValue = 0;
-        const makingCharges = productData.makingCharges ? Number(productData.makingCharges) : 0;
-        if (productData.makingChargeType === 'per_gram') {
-            makingValue = makingCharges * netWeight;
+        let makingCharges = productData.makingCharges ? Number(productData.makingCharges) : 0;
+        const makingPercentage = productData.makingPercentage ? Number(productData.makingPercentage) : 0;
+
+        if (makingPercentage > 0 && rateUsed > 0) {
+            if (productData.makingChargeType === 'per_gram') {
+                makingCharges = roundTo2((makingPercentage / 100) * rateUsed);
+                makingValue = roundTo2(makingCharges * netWeight);
+            } else {
+                makingValue = roundTo2(metalValue * (makingPercentage / 100));
+                makingCharges = makingValue;
+            }
+        } else if (productData.makingChargeType === 'per_gram') {
+            makingValue = roundTo2(makingCharges * netWeight);
         } else {
-            makingValue = makingCharges;
+            makingValue = roundTo2(makingCharges);
         }
 
         const discountAmount = Number(item.discount || 0);
@@ -257,6 +267,7 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
                 metalValue,
                 makingCharge: makingValue,
                 originalMakingCharge: makingValue,
+                unitMakingCharge: makingCharges,
                 discountedMakingValue: discountedMakingValue,
                 stoneValue,
                 discountAmount,
