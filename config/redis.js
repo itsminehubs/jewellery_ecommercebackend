@@ -58,6 +58,21 @@ const createRedisClient = () => {
 };
 
 /**
+ * In-memory fallback cache when Redis is unavailable or in read-only/MISCONF state
+ */
+const memoryStore = new Map();
+
+// Periodic cleanup of expired keys in memory store
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, item] of memoryStore.entries()) {
+    if (item.expiresAt && item.expiresAt <= now) {
+      memoryStore.delete(key);
+    }
+  }
+}, 60000).unref();
+
+/**
  * Get Redis client instance
  * @returns {Redis}
  */
@@ -69,7 +84,7 @@ const getRedisClient = () => {
 };
 
 /**
- * Cache helper functions
+ * Cache helper functions with automatic in-memory fallback
  */
 const cacheHelper = {
   /**
@@ -80,9 +95,23 @@ const cacheHelper = {
    * @returns {Promise<string>}
    */
   set: async (key, value, expirationInSeconds = 3600) => {
-    const client = getRedisClient();
     const stringValue = typeof value === 'string' ? value : JSON.stringify(value);
-    return await client.setex(key, expirationInSeconds, stringValue);
+    
+    // Always store in memory fallback
+    const expiresAt = expirationInSeconds > 0 ? Date.now() + (expirationInSeconds * 1000) : null;
+    memoryStore.set(key, { value: stringValue, expiresAt });
+
+    // Attempt to persist in Redis if available
+    try {
+      const client = getRedisClient();
+      if (client && (client.status === 'ready' || client.status === 'connect')) {
+        await client.setex(key, expirationInSeconds, stringValue);
+      }
+    } catch (error) {
+      logger.warn(`Redis set failed for key "${key}", retained in memory fallback: ${error.message}`);
+    }
+
+    return 'OK';
   },
 
   /**
@@ -91,10 +120,31 @@ const cacheHelper = {
    * @returns {Promise<any>}
    */
   get: async (key) => {
-    const client = getRedisClient();
-    const value = await client.get(key);
+    let value = null;
 
-    if (!value) return null;
+    // Try Redis first
+    try {
+      const client = getRedisClient();
+      if (client && (client.status === 'ready' || client.status === 'connect')) {
+        value = await client.get(key);
+      }
+    } catch (error) {
+      logger.warn(`Redis get failed for key "${key}", falling back to memory: ${error.message}`);
+    }
+
+    // Fallback to memory store if Redis returned null or failed
+    if (value === null || value === undefined) {
+      if (memoryStore.has(key)) {
+        const entry = memoryStore.get(key);
+        if (!entry.expiresAt || entry.expiresAt > Date.now()) {
+          value = entry.value;
+        } else {
+          memoryStore.delete(key);
+        }
+      }
+    }
+
+    if (value === null || value === undefined) return null;
 
     try {
       return JSON.parse(value);
@@ -109,8 +159,17 @@ const cacheHelper = {
    * @returns {Promise<number>}
    */
   del: async (key) => {
-    const client = getRedisClient();
-    return await client.del(key);
+    memoryStore.delete(key);
+
+    try {
+      const client = getRedisClient();
+      if (client && (client.status === 'ready' || client.status === 'connect')) {
+        return await client.del(key);
+      }
+    } catch (error) {
+      logger.warn(`Redis del failed for key "${key}": ${error.message}`);
+    }
+    return 1;
   },
 
   /**
@@ -119,11 +178,27 @@ const cacheHelper = {
    * @returns {Promise<void>}
    */
   delPattern: async (pattern) => {
-    const client = getRedisClient();
-    const keys = await client.keys(pattern);
+    try {
+      const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
+      for (const key of memoryStore.keys()) {
+        if (regex.test(key)) {
+          memoryStore.delete(key);
+        }
+      }
+    } catch {
+      // Ignore regex parsing errors
+    }
 
-    if (keys.length > 0) {
-      await client.del(...keys);
+    try {
+      const client = getRedisClient();
+      if (client && (client.status === 'ready' || client.status === 'connect')) {
+        const keys = await client.keys(pattern);
+        if (keys.length > 0) {
+          await client.del(...keys);
+        }
+      }
+    } catch (error) {
+      logger.warn(`Redis delPattern failed for pattern "${pattern}": ${error.message}`);
     }
   },
 
@@ -133,8 +208,23 @@ const cacheHelper = {
    * @returns {Promise<number>}
    */
   exists: async (key) => {
-    const client = getRedisClient();
-    return await client.exists(key);
+    try {
+      const client = getRedisClient();
+      if (client && (client.status === 'ready' || client.status === 'connect')) {
+        return await client.exists(key);
+      }
+    } catch (error) {
+      logger.warn(`Redis exists failed for key "${key}": ${error.message}`);
+    }
+
+    if (memoryStore.has(key)) {
+      const entry = memoryStore.get(key);
+      if (!entry.expiresAt || entry.expiresAt > Date.now()) {
+        return 1;
+      }
+      memoryStore.delete(key);
+    }
+    return 0;
   },
 
   /**
@@ -144,8 +234,20 @@ const cacheHelper = {
    * @returns {Promise<number>}
    */
   expire: async (key, seconds) => {
-    const client = getRedisClient();
-    return await client.expire(key, seconds);
+    if (memoryStore.has(key)) {
+      const entry = memoryStore.get(key);
+      entry.expiresAt = Date.now() + (seconds * 1000);
+    }
+
+    try {
+      const client = getRedisClient();
+      if (client && (client.status === 'ready' || client.status === 'connect')) {
+        return await client.expire(key, seconds);
+      }
+    } catch (error) {
+      logger.warn(`Redis expire failed for key "${key}": ${error.message}`);
+    }
+    return 1;
   },
 
   /**
@@ -155,8 +257,24 @@ const cacheHelper = {
    * @returns {Promise<number>}
    */
   increment: async (key, amount = 1) => {
-    const client = getRedisClient();
-    return await client.incrby(key, amount);
+    let currentVal = 0;
+    if (memoryStore.has(key)) {
+      const entry = memoryStore.get(key);
+      currentVal = parseInt(entry.value, 10) || 0;
+    }
+    const newVal = currentVal + amount;
+    memoryStore.set(key, { value: String(newVal), expiresAt: null });
+
+    try {
+      const client = getRedisClient();
+      if (client && (client.status === 'ready' || client.status === 'connect')) {
+        return await client.incrby(key, amount);
+      }
+    } catch (error) {
+      logger.warn(`Redis increment failed for key "${key}": ${error.message}`);
+    }
+
+    return newVal;
   }
 };
 
