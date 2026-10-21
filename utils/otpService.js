@@ -80,7 +80,7 @@ const generateAndStoreOTP = async (key, expiration = CACHE_TTL.OTP, purpose = 'l
     const cleanPhone = String(candidatePhone || '').replace(/\D/g, '').slice(-10);
     
     if (cleanPhone.length === 10) {
-      // Also cache under the clean phone number if key is different (e.g. key is memoId)
+      // Also cache under the clean phone number if key is different (e.g. key is memoId or has country code)
       if (key !== cleanPhone) {
         const phoneKey = `${CACHE_KEYS.OTP}${cleanPhone}`;
         await cacheHelper.set(phoneKey, otp, expiration);
@@ -105,11 +105,11 @@ const generateAndStoreOTP = async (key, expiration = CACHE_TTL.OTP, purpose = 'l
         const templateId = SMS_TEMPLATE_IDS[purpose] || SMS_TEMPLATE_IDS.login;
         const sent = await sendSMS(cleanPhone, messageTemplate, templateId);
         if (!sent) {
-          await cacheHelper.del(otpKey);
+          await cacheHelper.del(otpKey).catch(() => {});
           if (key !== cleanPhone) {
-            await cacheHelper.del(`${CACHE_KEYS.OTP}${cleanPhone}`);
+            await cacheHelper.del(`${CACHE_KEYS.OTP}${cleanPhone}`).catch(() => {});
           }
-          throw ApiError.internal('Failed to send OTP SMS');
+          throw ApiError.internal('Failed to send OTP SMS. Please try again.');
         }
       }
     }
@@ -117,8 +117,8 @@ const generateAndStoreOTP = async (key, expiration = CACHE_TTL.OTP, purpose = 'l
     return otp;
   } catch (error) {
     if (error instanceof ApiError) throw error;
-    logger.error(`Error generating/storing OTP: ${error.message}`);
-    throw ApiError.internal('Failed to generate OTP');
+    logger.error(`Error generating/storing OTP: ${error.message}`, error);
+    throw ApiError.internal(`Failed to generate OTP: ${error.message}`);
   }
 };
 
@@ -139,8 +139,14 @@ const verifyOTP = async (key, otp, deleteAfterVerify = true) => {
       return true;
     }
 
+    const cleanPhone = String(key || '').replace(/\D/g, '').slice(-10);
     const otpKey = `${CACHE_KEYS.OTP}${key}`;
-    const storedOTP = await cacheHelper.get(otpKey);
+    let storedOTP = await cacheHelper.get(otpKey);
+    
+    // If key had country code or prefix, also look up by clean phone number
+    if (!storedOTP && cleanPhone && cleanPhone !== key) {
+      storedOTP = await cacheHelper.get(`${CACHE_KEYS.OTP}${cleanPhone}`);
+    }
     
     if (!storedOTP) {
       if (isSandbox) {
@@ -149,18 +155,21 @@ const verifyOTP = async (key, otp, deleteAfterVerify = true) => {
       throw ApiError.badRequest('OTP expired or invalid');
     }
     
-    if (String(storedOTP) !== String(otp)) {
+    if (String(storedOTP).trim() !== String(otp).trim()) {
       throw ApiError.badRequest('Invalid OTP');
     }
     
     if (deleteAfterVerify) {
-      await cacheHelper.del(otpKey);
+      await cacheHelper.del(otpKey).catch(() => {});
+      if (cleanPhone && cleanPhone !== key) {
+        await cacheHelper.del(`${CACHE_KEYS.OTP}${cleanPhone}`).catch(() => {});
+      }
     }
     
     return true;
   } catch (error) {
     if (error instanceof ApiError) throw error;
-    logger.error(`Error verifying OTP for ${key}: ${error.message}`);
+    logger.error(`Error verifying OTP for ${key}: ${error.message}`, error);
     throw ApiError.internal('Failed to verify OTP');
   }
 };
