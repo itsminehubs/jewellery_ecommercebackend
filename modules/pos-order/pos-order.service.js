@@ -404,30 +404,23 @@ const createOrder = async (orderData) => {
                 throw new Error('Scheme has already been fully redeemed');
             }
 
-            // Rule 5: Jewellery can be purchased after completion of 330 days from enrollment
+            // Rule 5, 13 & 22: Tiered Benefit Ratio (4 Tiers)
+            // Early redemption (< 180 days) is allowed according to rules, not strictly blocked!
             const enrollmentDate = new Date(scheme.startDate || scheme.createdAt);
             const daysSinceEnrollment = Math.floor((new Date() - enrollmentDate) / (1000 * 60 * 60 * 24));
-            if (daysSinceEnrollment < 330 && !orderData.override330DaysLock) {
-                throw new Error(`Rule 5 Restriction: Jewellery can only be purchased after completion of 330 days from scheme enrollment date (Current: ${daysSinceEnrollment} days elapsed).`);
-            }
-
-            // Rule 22 & 13: Tiered Benefit Ratio
-            const paidInstallmentCount = scheme.installments ? scheme.installments.length : 0;
-            const totalMonths = scheme.totalMonths || 11;
-            const halfTenureThreshold = totalMonths === 11 ? 6 : Math.ceil(totalMonths / 2);
 
             let benefitRatio = 0;
             let benefitTier = 'NO_BENEFIT';
-            if (daysSinceEnrollment > 365) {
+            if (daysSinceEnrollment >= 365) {
                 benefitRatio = 0;
                 benefitTier = 'EXPIRED_365_DAYS_ZERO_BENEFIT';
-            } else if (paidInstallmentCount < halfTenureThreshold) {
+            } else if (daysSinceEnrollment < 180) {
                 benefitRatio = 0;
-                benefitTier = 'PREMATURE_UNDER_HALF_TENURE';
-            } else if (paidInstallmentCount >= halfTenureThreshold && paidInstallmentCount < totalMonths) {
+                benefitTier = 'TENURE_UNDER_6_MONTHS_ZERO_BENEFIT';
+            } else if (daysSinceEnrollment >= 180 && daysSinceEnrollment < 330) {
                 benefitRatio = 0.5;
-                benefitTier = 'HALF_TENURE_50_PERCENT_BENEFIT';
-            } else if (paidInstallmentCount >= totalMonths) {
+                benefitTier = 'TENURE_6_TO_11_MONTHS_PARTIAL_BENEFIT';
+            } else if (daysSinceEnrollment >= 330 && daysSinceEnrollment < 365) {
                 benefitRatio = 1.0;
                 benefitTier = 'FULL_TENURE_100_PERCENT_BENEFIT';
             }
@@ -443,25 +436,66 @@ const createOrder = async (orderData) => {
                 throw new Error('Rule 18 & 19 Restriction: Additional offers or vouchers cannot be combined with scheme benefit redemption.');
             }
 
-            // Rule 26: Mandatory OTP Verification
+            // Rule 26 & Management Authorization: Dual OTP Verification (Customer OTP + Management OTP to 7887973088)
             const schemePaymentObj = (orderData.payments || []).find(p => p.method === 'scheme_redemption');
             const schemeOtp = orderData.schemeOtp || schemePaymentObj?.otp;
-            if (!schemeOtp && !orderData.overrideSchemeOtp) {
+            const managementOtp = orderData.managementOtp || schemePaymentObj?.managementOtp;
+            const MANAGEMENT_PHONE = process.env.MANAGEMENT_SCHEME_OTP_PHONE || '7887973088';
+
+            const { cacheHelper } = require('../../config');
+            let customerPreVerified = false;
+            let mgmtPreVerified = false;
+            if (cacheHelper) {
+                customerPreVerified = await cacheHelper.get(`scheme_customer_verified_${scheme.id}`);
+                mgmtPreVerified = await cacheHelper.get(`scheme_mgmt_verified_${scheme.id}`);
+            }
+
+            // Step 1: Mandatory Customer OTP Verification
+            if (!schemeOtp && !customerPreVerified && !orderData.overrideSchemeOtp) {
                 throw new Error('Rule 26 Mandatory Requirement: Customer OTP verification is required to authorize scheme redemption.');
             }
             if (schemeOtp && !orderData.overrideSchemeOtp) {
                 const otpService = require('../../utils/otpService');
-                await otpService.verifyOTP(scheme.customer.phone, schemeOtp);
+                await otpService.verifyOTP(scheme.customer.phone, schemeOtp, false);
+            }
+
+            // Step 2: Mandatory Management OTP Verification (Strictly required for phone 7887973088)
+            if (!managementOtp && !mgmtPreVerified && !orderData.overrideSchemeOtp) {
+                throw new Error(`Management Security Alert: Management OTP verification (sent to ${MANAGEMENT_PHONE}) is mandatory. Sales executive cannot redeem or use the Savings Scheme in billing without management approval.`);
+            }
+            if (managementOtp && !orderData.overrideSchemeOtp) {
+                const otpService = require('../../utils/otpService');
+                let isMgmtValid = false;
+                try {
+                    await otpService.verifyOTP(`scheme_mgmt_otp_${scheme.id}`, String(managementOtp).trim(), false);
+                    isMgmtValid = true;
+                } catch (e) {
+                    try {
+                        await otpService.verifyOTP(MANAGEMENT_PHONE, String(managementOtp).trim(), false);
+                        isMgmtValid = true;
+                    } catch (e2) {}
+                }
+                if (!isMgmtValid && !mgmtPreVerified) {
+                    throw new Error(`Invalid or expired Management OTP for ${MANAGEMENT_PHONE}. Sales executive cannot redeem scheme without valid management authorization.`);
+                }
+            }
+
+            // Clear scheme verification flags after successful billing usage
+            if (cacheHelper) {
+                await cacheHelper.del(`scheme_customer_verified_${scheme.id}`).catch(() => {});
+                await cacheHelper.del(`scheme_mgmt_verified_${scheme.id}`).catch(() => {});
             }
 
             // Check items against Admin Configured Applicable Purities & Bullion Restrictions
             let applicablePurities = ['22K', '18K', '14K'];
+            let metaDiscounts = {};
             try {
                 if (scheme.notes && scheme.notes.trim().startsWith('{')) {
                     const parsed = JSON.parse(scheme.notes);
                     if (parsed.applicablePurities && Array.isArray(parsed.applicablePurities)) {
                         applicablePurities = parsed.applicablePurities.map(p => String(p).toUpperCase());
                     }
+                    metaDiscounts = parsed;
                 }
             } catch (e) { }
 
@@ -524,11 +558,16 @@ const createOrder = async (orderData) => {
 
                 // Missing gold quantity handling using dedicated Scheme Gold Rate on redemption date
                 let schemeGoldRateUsed = null;
-                const normPurity = String(scheme.purity || '22K').trim().toUpperCase();
+                const p = String(scheme.purity || '22K').trim().toUpperCase();
+                const aliases = (p === '22K' || p === '916' || p === '22KT') ? ['22K', '916', '22KT'] :
+                                (p === '18K' || p === '750' || p === '18KT') ? ['18K', '750', '18KT'] :
+                                (p === '14K' || p === '585' || p === '14KT') ? ['14K', '585', '14KT'] :
+                                (p === '24K' || p === '999' || p === '24KT') ? ['24K', '999', '24KT'] : [p];
+
                 const schemeRateRecord = await tx.schemeGoldRate.findFirst({
                     where: {
                         metal: { equals: 'gold', mode: 'insensitive' },
-                        purity: { equals: normPurity, mode: 'insensitive' }
+                        purity: { in: aliases, mode: 'insensitive' }
                     },
                     orderBy: [{ effectiveDate: 'desc' }, { createdAt: 'desc' }]
                 });
@@ -536,8 +575,10 @@ const createOrder = async (orderData) => {
                     schemeGoldRateUsed = Number(Number(schemeRateRecord.ratePerGram).toFixed(2));
                 }
 
-                // Making charge discount (up to 20% * benefitRatio)
-                const makingDiscountPercent = 20 * benefitRatio;
+                // Gold Making Charge Discount: Up to 50% for 6-11m, Up to 100% for full tenure (0% if < 6m)
+                const configuredGoldFull = Number(metaDiscounts.goldMakingDiscountFull || metaDiscounts.goldMakingDiscountUpToFull || 100);
+                const configuredGoldHalf = Number(metaDiscounts.goldMakingDiscountUpToHalf || 50);
+                const makingDiscountPercent = benefitRatio === 1.0 ? configuredGoldFull : (benefitRatio === 0.5 ? configuredGoldHalf : 0);
                 const makingDiscountAmount = roundTo2(eligibleMakingCharges * (makingDiscountPercent / 100));
 
                 schemeRedemptionAudit = {
@@ -557,9 +598,15 @@ const createOrder = async (orderData) => {
                     benefitRatio
                 };
             } else if (scheme.schemeType === 'DIAMOND') {
-                const diamondDiscountPercent = 40 * benefitRatio;
+                // Diamond Discounts: Flat 20% on diamonds & 20% on making charges for 6-11m; Flat 40% on diamonds & 40% on making charges for full tenure (0% if < 6m)
+                const configuredDiaFull = Number(metaDiscounts.diamondFlatDiscountFull || 40);
+                const configuredDiaHalf = Number(metaDiscounts.diamondFlatDiscountHalf || 20);
+                const configuredDiaMakingFull = Number(metaDiscounts.diamondMakingDiscountFull || metaDiscounts.diamondMakingFlatDiscountFull || 40);
+                const configuredDiaMakingHalf = Number(metaDiscounts.diamondMakingDiscountHalf || metaDiscounts.diamondMakingFlatDiscountHalf || 20);
+
+                const diamondDiscountPercent = benefitRatio === 1.0 ? configuredDiaFull : (benefitRatio === 0.5 ? configuredDiaHalf : 0);
+                const makingDiscountPercent = benefitRatio === 1.0 ? configuredDiaMakingFull : (benefitRatio === 0.5 ? configuredDiaMakingHalf : 0);
                 const diamondDiscountAmount = roundTo2(eligibleDiamondPrice * (diamondDiscountPercent / 100));
-                const makingDiscountPercent = 40 * benefitRatio;
                 const makingDiscountAmount = roundTo2(eligibleDiamondMaking * (makingDiscountPercent / 100));
 
                 schemeRedemptionAudit = {
@@ -597,6 +644,9 @@ const createOrder = async (orderData) => {
                         totalOrderAmount,
                         totalSchemeRedemption,
                         daysSinceEnrollment,
+                        customerPhone: scheme.customer?.phone,
+                        managementPhone: MANAGEMENT_PHONE,
+                        managementAuthorized: true,
                         customerPan: customerPan ? `****${customerPan.slice(-4)}` : null,
                         ...schemeRedemptionAudit
                     },

@@ -1,6 +1,8 @@
 const prisma = require('../../config/prisma');
 const { validateAndCheckDuplicateUtr } = require('../../utils/utrValidator');
 const { generateSchemeNumber } = require('../../utils/invoiceNumberGenerator');
+const { cacheHelper } = require('../../config');
+const MANAGEMENT_PHONE = process.env.MANAGEMENT_SCHEME_OTP_PHONE || '7887973088';
 
 const parseSchemeDetails = (scheme) => {
     if (!scheme) return null;
@@ -62,11 +64,25 @@ const parseSchemeDetails = (scheme) => {
     };
 };
 
+const getPurityAliases = (purity) => {
+    if (!purity) return [];
+    const p = String(purity).trim().toUpperCase();
+    if (p === '22K' || p === '916' || p === '22KT') return ['22K', '916', '22KT'];
+    if (p === '18K' || p === '750' || p === '18KT') return ['18K', '750', '18KT'];
+    if (p === '14K' || p === '585' || p === '14KT') return ['14K', '585', '14KT'];
+    if (p === '24K' || p === '999' || p === '24KT') return ['24K', '999', '24KT'];
+    return [p];
+};
+
 const enrollCustomer = async (data) => {
     // --- Load store-level scheme settings (configured by admin/superadmin) ---
     let storeSchemeSettings = {};
     try {
-        const store = await prisma.store.findUnique({ where: { shop_id: data.shop_id } });
+        let store = await prisma.store.findUnique({ where: { shop_id: data.shop_id } });
+        if (!store) {
+            // If enrolled online or shop_id not found, fall back to primary physical store settings
+            store = await prisma.store.findFirst({ orderBy: { createdAt: 'asc' } });
+        }
         if (store && store.metadata && typeof store.metadata === 'object') {
             storeSchemeSettings = store.metadata.schemeSettings || {};
         }
@@ -205,7 +221,7 @@ const enrollCustomer = async (data) => {
     return parseSchemeDetails(scheme);
 };
 
-const recordInstallment = async (schemeId, paymentData, performedBy) => {
+const recordInstallment = async (schemeId, paymentData, performedBy, userRole = 'staff') => {
     return await prisma.$transaction(async (tx) => {
         const scheme = await tx.scheme.findUnique({
             where: { id: schemeId },
@@ -214,15 +230,43 @@ const recordInstallment = async (schemeId, paymentData, performedBy) => {
 
         if (!scheme) throw new Error('Scheme not found');
         if (scheme.status !== 'active') throw new Error(`Cannot pay installment for scheme in ${scheme.status} status`);
-        if (scheme.installments.length >= scheme.totalMonths) throw new Error('All installments already paid for this scheme tenure.');
+
+        const isStaff = ['super_admin', 'admin', 'store_manager', 'sales_staff', 'accounts_finance', 'staff'].includes(userRole);
+        // Authorization: Non-staff users can only record installments on their own scheme
+        if (!isStaff && scheme.customerId !== performedBy) {
+            throw new Error('Unauthorized: You can only deposit installments for your own savings scheme.');
+        }
+
+        // Security check: Only staff at physical showrooms can record cash deposits
+        if (!isStaff && paymentData.method === 'cash') {
+            throw new Error('Cash payments cannot be recorded online. Please visit an authorized showroom to pay in cash.');
+        }
 
         const amount = Number(paymentData.amount);
         const monthlyInstallment = Number(scheme.monthlyInstallment);
+        const totalMonths = scheme.totalMonths || 11;
+        const maxTotalPayable = monthlyInstallment * totalMonths;
+        const currentPaid = Number(scheme.totalPaid || 0);
+
+        if (isNaN(amount) || amount <= 0) {
+            throw new Error('A valid positive installment amount is required.');
+        }
+
+        // Must be an exact multiple of the monthly installment
+        if (amount < monthlyInstallment || (Math.round(amount * 100) % Math.round(monthlyInstallment * 100) !== 0)) {
+            throw new Error(`Installment amount must be an exact multiple of the monthly installment (₹${monthlyInstallment.toLocaleString('en-IN')}).`);
+        }
 
         // Rule 4: Maximum 5 installments can be paid in a single transaction
         const maxAllowedInSingleTx = monthlyInstallment * 5;
         if (amount > maxAllowedInSingleTx) {
             throw new Error(`A maximum of 5 installments (₹${maxAllowedInSingleTx.toLocaleString('en-IN')}) can be paid in a single transaction.`);
+        }
+
+        // Rule: Cannot overpay beyond total tenure amount
+        if (currentPaid + amount > maxTotalPayable) {
+            const remainingPayable = maxTotalPayable - currentPaid;
+            throw new Error(`Payment of ₹${amount.toLocaleString('en-IN')} exceeds the remaining balance for this scheme. Max remaining payable: ₹${remainingPayable.toLocaleString('en-IN')}.`);
         }
 
         // NEFT / RTGS / Bank Transfer: Mandatory UTR number and duplicate checking
@@ -249,7 +293,6 @@ const recordInstallment = async (schemeId, paymentData, performedBy) => {
         }
 
         // Rule 2: Monthly installments are scheduled between the 1st and 10th of every month.
-        // Payment restriction after the 10th is removed so payments are accepted anytime during the month.
         const currentDay = new Date().getDate();
         const isWithinWindow = currentDay >= 1 && currentDay <= 10;
 
@@ -259,15 +302,15 @@ const recordInstallment = async (schemeId, paymentData, performedBy) => {
         // Rule 6 & 8: Frozen gold rate at time of each installment payment for 22K/18K/14K
         // Strictly uses dedicated Scheme Gold Rate table (tx.schemeGoldRate)
         if (scheme.schemeType === 'GOLD' && scheme.purity) {
-            const normPurity = String(scheme.purity).trim().toUpperCase();
+            const aliases = getPurityAliases(scheme.purity);
             const rateRecord = await tx.schemeGoldRate.findFirst({
                 where: {
                     metal: { equals: 'gold', mode: 'insensitive' },
-                    purity: { equals: normPurity, mode: 'insensitive' }
+                    purity: { in: aliases, mode: 'insensitive' }
                 },
                 orderBy: [{ effectiveDate: 'desc' }, { createdAt: 'desc' }]
             });
-            if (!rateRecord) {
+            if (!rateRecord || Number(rateRecord.ratePerGram) <= 0) {
                 throw new Error(`Dedicated Scheme Gold Rate not set for ${scheme.purity}. Please configure the Scheme Gold Rate in Scheme Gold Rates management.`);
             }
             
@@ -289,10 +332,10 @@ const recordInstallment = async (schemeId, paymentData, performedBy) => {
         });
 
         const newTotalPaid = Number(scheme.totalPaid) + amount;
-        const newInstallmentCount = scheme.installments.length + 1;
+        const monthsPaidCovered = Math.round(newTotalPaid / monthlyInstallment);
         
         let newStatus = scheme.status;
-        if (newInstallmentCount >= scheme.totalMonths) {
+        if (monthsPaidCovered >= totalMonths || newTotalPaid >= maxTotalPayable) {
             newStatus = 'matured';
         }
 
@@ -314,7 +357,7 @@ const recordInstallment = async (schemeId, paymentData, performedBy) => {
             data: {
                 schemeId: scheme.id,
                 action: 'INSTALLMENT',
-                description: `Paid ₹${amount.toLocaleString('en-IN')} for installment ${newInstallmentCount}/${scheme.totalMonths} via ${paymentData.method.toUpperCase()}. Rate frozen at ₹${goldRateApplied || 'N/A'}/g.`,
+                description: `Paid ₹${amount.toLocaleString('en-IN')} covering ${monthsPaidCovered}/${totalMonths} months via ${paymentData.method.toUpperCase()}. Rate frozen at ₹${goldRateApplied || 'N/A'}/g.`,
                 details: {
                     amount,
                     method: paymentData.method,
@@ -322,6 +365,7 @@ const recordInstallment = async (schemeId, paymentData, performedBy) => {
                     goldRateApplied,
                     gramsCredited,
                     newAccumulatedGrams,
+                    monthsPaidCovered,
                     paymentWindowDay: currentDay,
                     isLateWithGrace: !isWithinWindow
                 },
@@ -329,12 +373,13 @@ const recordInstallment = async (schemeId, paymentData, performedBy) => {
             }
         });
 
-        // Update Cashbook for the store
-        if (['cash', 'upi', 'card', 'bank_transfer', 'neft_rtgs', 'neft', 'rtgs'].includes(paymentData.method)) {
+        // Update Cashbook for the physical store if payment is in-store
+        const activeShopId = paymentData.shop_id || (scheme.shopId && scheme.shopId !== 'ONLINE' ? scheme.shopId : null);
+        if (isStaff && activeShopId && activeShopId !== 'ONLINE' && ['cash', 'upi', 'card', 'bank_transfer', 'neft_rtgs', 'neft', 'rtgs'].includes(paymentData.method)) {
             const cashbookService = require('../accounting/cashbook.service');
             if (cashbookService.updateCashbookOnEventPrisma) {
                 await cashbookService.updateCashbookOnEventPrisma(
-                    scheme.shopId, 
+                    activeShopId, 
                     amount, 
                     paymentData.method, 
                     'sale',
@@ -348,9 +393,23 @@ const recordInstallment = async (schemeId, paymentData, performedBy) => {
 };
 
 const getStoreSchemes = async (shopId, filter = {}) => {
-    const { shop_id, page, limit, search, ...cleanFilter } = filter;
+    const { shop_id, page, limit, search, status, allStores, ...cleanFilter } = filter;
+
+    // Cross-store & Online Lookup:
+    // If querying by customerId, active search (phone/schemeId), or allStores flag is set,
+    // do not scope to a specific shopId so customers who enrolled online or at other branches
+    // can be serviced, billed, and redeemed at any physical showroom counter.
+    const isGlobalLookup = Boolean(
+        cleanFilter.customerId ||
+        (search && String(search).trim()) ||
+        allStores === 'true' ||
+        allStores === true
+    );
+    const effectiveShopId = isGlobalLookup || shopId === 'all' || !shopId ? undefined : shopId;
+
     const where = {
-        ...(shopId ? { shopId } : {}),
+        ...(effectiveShopId ? { shopId: effectiveShopId } : {}),
+        ...(status && status !== 'all' ? { status } : {}),
         ...cleanFilter
     };
 
@@ -498,7 +557,21 @@ const deleteScheme = async (schemeId, performedBy) => {
  * - Rule 22: Window is between 330 and 345 days. From 345 to 365 days eligible. 
  *     After 365 days: Auto-closure with 0% benefit and principal returned.
  */
-const calculateRedemptionValue = (schemeRaw) => {
+/**
+ * Calculates Scheme Benefit and Redemption Eligibility based on the 4 Tiers & Rules:
+ * - Tenure, min installment, and discount percentages configured by Management.
+ * - Tier 1: Less than 6 months (180 days): 0% benefit. Early redemption permitted (not strictly blocked).
+ * - Tier 2: Between 6 months and 11 months (180 to 329 days):
+ *           Gold: Up to 50% discount on making charges (or management configured).
+ *           Diamond: Flat 20% discount on diamonds & flat 20% discount on making charges.
+ * - Tier 3: 330 to 364 days (Full tenure): Full benefits!
+ *           Gold: Up to 100% discount on making charges (or management configured).
+ *           Diamond: Flat 40% discount on diamonds & flat 40% discount on making charges.
+ * - Tier 4: 365+ days: Auto-closure / expiration with 0% benefits. Principal protected.
+ * - STRICT RULE: NO extra bonus gold weight in grams in any tenure (only making charge discount).
+ * - STRICT RULE: NO cash installment bonus in diamond (only diamond & making charge discounts).
+ */
+const calculateRedemptionValue = (schemeRaw, quoteGoldRate = null, storeSettings = {}) => {
     const scheme = parseSchemeDetails(schemeRaw);
     if (!scheme) return { error: 'Scheme not found' };
 
@@ -510,58 +583,79 @@ const calculateRedemptionValue = (schemeRaw) => {
         };
     }
 
-    const paidInstallmentCount = scheme.installments ? scheme.installments.length : 0;
+    const monthlyInstallment = Number(scheme.monthlyInstallment || 1);
+    const totalPaid = Number(scheme.totalPaid || 0);
     const totalMonths = scheme.totalMonths || 11;
-    const halfTenureThreshold = totalMonths === 11 ? 6 : Math.ceil(totalMonths / 2);
+    const paidInstallmentCount = Math.min(totalMonths, Math.floor(totalPaid / (monthlyInstallment > 0 ? monthlyInstallment : 1)));
 
     // Calculate days elapsed since enrollment
     const enrollmentDate = new Date(scheme.startDate || scheme.createdAt);
     const today = new Date();
     const daysSinceEnrollment = Math.floor((today - enrollmentDate) / (1000 * 60 * 60 * 24));
 
-    // Rule 22: Auto-closure penalty if > 365 days
-    const isPast365Days = daysSinceEnrollment > 365;
+    // 4 Duration Tiers
+    const isPast365Days = daysSinceEnrollment >= 365;
+    const isUnder6Months = daysSinceEnrollment < 180;
+    const isHalfTenure = daysSinceEnrollment >= 180 && daysSinceEnrollment < 330;
+    const isFullTenure = daysSinceEnrollment >= 330 && daysSinceEnrollment < 365;
 
-    // Benefit ratio determination
-    let benefitRatio = 0; // 0, 0.5, or 1.0
+    // Configurable discounts from management (store settings or scheme metadata defaults)
+    const settings = {
+        goldMakingDiscountUpToHalf: 50,
+        goldMakingDiscountUpToFull: 100,
+        diamondFlatDiscountHalf: 20,
+        diamondMakingFlatDiscountHalf: 20,
+        diamondFlatDiscountFull: 40,
+        diamondMakingFlatDiscountFull: 40,
+        ...storeSettings,
+        ...(scheme.metadata || {})
+    };
+
+    let benefitRatio = 0;
     let benefitTier = 'NO_BENEFIT';
+    let goldMakingDiscount = 0;
+    let diamondDiscount = 0;
+    let diamondMakingDiscount = 0;
 
     if (isPast365Days) {
+        benefitTier = 'EXPIRED_AFTER_365_DAYS_NO_BENEFIT';
         benefitRatio = 0;
-        benefitTier = 'EXPIRED_365_DAYS_ZERO_BENEFIT';
-    } else if (paidInstallmentCount < halfTenureThreshold) {
+    } else if (isUnder6Months) {
+        benefitTier = 'TENURE_UNDER_6_MONTHS_ZERO_BENEFIT';
         benefitRatio = 0;
-        benefitTier = 'PREMATURE_UNDER_HALF_TENURE';
-    } else if (paidInstallmentCount >= halfTenureThreshold && paidInstallmentCount < totalMonths) {
+    } else if (isHalfTenure) {
+        benefitTier = 'TENURE_6_TO_11_MONTHS_PARTIAL_BENEFIT';
         benefitRatio = 0.5;
-        benefitTier = 'HALF_TENURE_50_PERCENT_BENEFIT';
-    } else if (paidInstallmentCount >= totalMonths) {
+        goldMakingDiscount = Number(settings.goldMakingDiscountUpToHalf || 50);
+        diamondDiscount = Number(settings.diamondFlatDiscountHalf || 20);
+        diamondMakingDiscount = Number(settings.diamondMakingFlatDiscountHalf || 20);
+    } else if (isFullTenure) {
+        benefitTier = 'FULL_TENURE_FULL_BENEFIT';
         benefitRatio = 1.0;
-        benefitTier = 'FULL_TENURE_100_PERCENT_BENEFIT';
+        goldMakingDiscount = Number(settings.goldMakingDiscountUpToFull || 100);
+        diamondDiscount = Number(settings.diamondFlatDiscountFull || 40);
+        diamondMakingDiscount = Number(settings.diamondMakingFlatDiscountFull || 40);
     }
 
-    const canPurchaseNow = daysSinceEnrollment >= 330;
+    const canPurchaseNow = true; // Redemptions before 6 months are allowed according to rules, not strictly blocked!
     const isOptimalClosureWindow = daysSinceEnrollment >= 330 && daysSinceEnrollment <= 345;
-    const isExtendedGraceWindow = daysSinceEnrollment > 345 && daysSinceEnrollment <= 365;
+    const isExtendedGraceWindow = daysSinceEnrollment > 345 && daysSinceEnrollment < 365;
 
-    const totalPaid = Number(scheme.totalPaid || 0);
     const accumulatedGrams = Number(scheme.accumulatedGrams || 0);
-
-    // Dynamic minimum installment & applicable purities from admin configuration
     const minMonthlyInstallment = scheme.minMonthlyInstallment || Number(scheme.monthlyInstallment);
     const applicablePurities = scheme.applicablePurities || (scheme.purity ? [scheme.purity] : ['22K', '18K', '14K']);
 
     if (scheme.schemeType === 'GOLD') {
-        const fullMakingChargeDiscount = 20; // 20% standard discount on making charges
-        const makingChargeDiscount = fullMakingChargeDiscount * benefitRatio;
-
         const remainingGrams = scheme.remainingGrams != null 
             ? scheme.remainingGrams 
             : Number((accumulatedGrams - (Number(scheme.redeemedGrams) || 0)).toFixed(4));
 
-        const standardBonusGramPercentage = Number(scheme.bonusPercentage || 0) > 0 ? 5 : 0;
-        const bonusWeightGrams = Number(((remainingGrams * (standardBonusGramPercentage / 100)) * benefitRatio).toFixed(4));
-        const totalEligibleGrams = Number((remainingGrams + bonusWeightGrams).toFixed(4));
+        // STRICT USER RULE: NO extra bonus gold weight in grams in any tenure (only making charge discount)
+        const bonusWeightGrams = 0;
+        const totalEligibleGrams = remainingGrams;
+
+        const activeGoldRate = quoteGoldRate || scheme.weightedAverageRate || 0;
+        const finalRedemptionAmount = Number((totalEligibleGrams * (activeGoldRate > 0 ? activeGoldRate : (accumulatedGrams > 0 ? totalPaid / accumulatedGrams : 0))).toFixed(2));
 
         return {
             schemeId: scheme.schemeId,
@@ -575,6 +669,9 @@ const calculateRedemptionValue = (schemeRaw) => {
             isOptimalClosureWindow,
             isExtendedGraceWindow,
             isPast365Days,
+            isUnder6Months,
+            isHalfTenure,
+            isFullTenure,
             paidMonths: paidInstallmentCount,
             totalMonths,
             benefitTier,
@@ -585,27 +682,27 @@ const calculateRedemptionValue = (schemeRaw) => {
             redeemedGrams: scheme.redeemedGrams || 0,
             remainingGrams,
             weightedAverageRate: scheme.weightedAverageRate || 0,
-            bonusWeightGrams,
+            bonusWeightGrams: 0, // Zero bonus grams
             totalEligibleGrams,
-            makingChargeDiscount,
+            finalRedemptionAmount: finalRedemptionAmount > 0 ? finalRedemptionAmount : totalPaid,
+            makingChargeDiscount: goldMakingDiscount,
             diamondDiscount: 0,
             eligiblePurities: applicablePurities,
             ineligibleItems: ['24K Gold Coins', '24K Gold Bars'],
             razorpaySupported: true,
-            notes: daysSinceEnrollment < 330 
-                ? `Jewellery purchase unlocks after 330 days (Days remaining: ${330 - daysSinceEnrollment}). Current eligible benefit: ${benefitRatio * 100}%.`
-                : (isPast365Days 
-                    ? '365 days exceeded. Scheme expired without benefits. Principal refundable.'
-                    : `Eligible for redemption with ${benefitRatio * 100}% scheme benefit.`)
+            notes: isUnder6Months
+                ? `Early redemption (under 6 months): Allowed with 0% making charge discount.`
+                : (isHalfTenure
+                    ? `Half-tenure benefit: Up to ${goldMakingDiscount}% discount on making charges.`
+                    : (isFullTenure
+                        ? `Full tenure completed: Full ${goldMakingDiscount}% discount on making charges.`
+                        : '365 days exceeded. Scheme expired without benefits. Principal refundable.'))
         };
     }
 
     if (scheme.schemeType === 'DIAMOND') {
-        const fullBonus = (Number(scheme.monthlyInstallment) * Number(scheme.bonusPercentage || 100)) / 100;
-        const eligibleBonus = fullBonus * benefitRatio;
-
-        const fullMakingChargeDiscount = 40;
-        const fullDiamondDiscount = 40;
+        // STRICT USER RULE: NO cash installment bonus in diamond (only diamond & making charge discounts)
+        const eligibleBonus = 0;
 
         return {
             schemeId: scheme.schemeId,
@@ -618,22 +715,27 @@ const calculateRedemptionValue = (schemeRaw) => {
             isOptimalClosureWindow,
             isExtendedGraceWindow,
             isPast365Days,
+            isUnder6Months,
+            isHalfTenure,
+            isFullTenure,
             paidMonths: paidInstallmentCount,
             totalMonths,
             benefitTier,
             benefitRatio,
             benefitPercentageText: `${benefitRatio * 100}%`,
             totalPaid,
-            eligibleBonus,
-            finalRedemptionAmount: totalPaid + eligibleBonus,
-            makingChargeDiscount: fullMakingChargeDiscount * benefitRatio,
-            diamondDiscount: fullDiamondDiscount * benefitRatio,
+            eligibleBonus: 0, // Zero cash bonus
+            finalRedemptionAmount: totalPaid,
+            makingChargeDiscount: diamondMakingDiscount,
+            diamondDiscount: diamondDiscount,
             razorpaySupported: true,
-            notes: daysSinceEnrollment < 330 
-                ? `Redemption unlocks after 330 days (Days remaining: ${330 - daysSinceEnrollment}). Current eligible benefit: ${benefitRatio * 100}%.`
-                : (isPast365Days 
-                    ? '365 days exceeded. Scheme expired without benefits. Principal refundable.'
-                    : `Eligible for redemption with ${benefitRatio * 100}% scheme benefit.`)
+            notes: isUnder6Months
+                ? `Early redemption (under 6 months): Allowed with 0% diamond & making charge discount.`
+                : (isHalfTenure
+                    ? `Half-tenure benefit: Flat ${diamondDiscount}% discount on diamonds & ${diamondMakingDiscount}% discount on making charges.`
+                    : (isFullTenure
+                        ? `Full tenure completed: Flat ${diamondDiscount}% discount on diamonds & ${diamondMakingDiscount}% discount on making charges.`
+                        : '365 days exceeded. Scheme expired without benefits. Principal refundable.'))
         };
     }
 };
@@ -675,20 +777,22 @@ const getSchemeTerms = () => {
 const getRedemptionQuote = async (schemeId) => {
     const scheme = await getSchemeById(schemeId);
     if (!scheme) throw new Error('Scheme not found');
-    const quote = calculateRedemptionValue(scheme);
 
-    // Attach current Scheme Gold Rate strictly from dedicated schemeGoldRate table
+    let currentGoldRate = null;
     if (scheme.schemeType === 'GOLD' && scheme.purity) {
-        const normPurity = String(scheme.purity).trim().toUpperCase();
+        const aliases = getPurityAliases(scheme.purity);
         const schemeRate = await prisma.schemeGoldRate.findFirst({
             where: {
                 metal: { equals: 'gold', mode: 'insensitive' },
-                purity: { equals: normPurity, mode: 'insensitive' }
+                purity: { in: aliases, mode: 'insensitive' }
             },
             orderBy: [{ effectiveDate: 'desc' }, { createdAt: 'desc' }]
         });
-        quote.currentGoldRate = schemeRate ? Number(Number(schemeRate.ratePerGram).toFixed(2)) : null;
+        currentGoldRate = schemeRate ? Number(Number(schemeRate.ratePerGram).toFixed(2)) : null;
     }
+
+    const quote = calculateRedemptionValue(scheme, currentGoldRate);
+    quote.currentGoldRate = currentGoldRate;
     return quote;
 };
 
@@ -729,7 +833,7 @@ const requestClosureOTP = async (schemeId, performedBy) => {
     return result;
 };
 
-const closeSchemeWithOTP = async (schemeId, otp, closureData, performedBy) => {
+const closeSchemeWithOTP = async (schemeId, otp, managementOtp, closureData, performedBy, userRole = 'staff') => {
     const scheme = await prisma.scheme.findUnique({
         where: { id: schemeId },
         include: { customer: true, installments: true }
@@ -739,19 +843,61 @@ const closeSchemeWithOTP = async (schemeId, otp, closureData, performedBy) => {
         throw new Error('Scheme is already closed or redeemed');
     }
 
-    // Verify OTP (Rule 26)
-    const otpService = require('../../utils/otpService');
-    await otpService.verifyOTP(scheme.customer.phone, otp);
+    const isStaff = ['super_admin', 'admin', 'store_manager', 'sales_staff', 'accounts_finance', 'staff'].includes(userRole);
+    if (!isStaff && scheme.customerId !== performedBy) {
+        throw new Error('Unauthorized: You can only close your own savings scheme.');
+    }
 
-    const quote = calculateRedemptionValue(scheme);
+    const otpService = require('../../utils/otpService');
+
+    // Rule 26: Customer OTP Verification
+    let customerVerified = false;
+    if (cacheHelper) {
+        customerVerified = await cacheHelper.get(`scheme_customer_verified_${scheme.id}`);
+    }
+    if (!customerVerified && !otp) {
+        throw new Error('Rule 26 Requirement: Customer OTP verification is required to close scheme.');
+    }
+    if (otp) {
+        await otpService.verifyOTP(scheme.customer.phone, otp, false);
+    }
+
+    // Step 2: Management OTP Verification (Sent to 7887973088)
+    let mgmtVerified = false;
+    if (cacheHelper) {
+        mgmtVerified = await cacheHelper.get(`scheme_mgmt_verified_${scheme.id}`);
+    }
+    if (!mgmtVerified && !managementOtp) {
+        throw new Error(`Management Authorization Required: Management OTP verification sent to ${MANAGEMENT_PHONE} is mandatory to close and redeem scheme.`);
+    }
+    if (managementOtp) {
+        let isMgmtValid = false;
+        try {
+            await otpService.verifyOTP(`scheme_mgmt_otp_${scheme.id}`, String(managementOtp).trim(), false);
+            isMgmtValid = true;
+        } catch (e) {
+            try {
+                await otpService.verifyOTP(MANAGEMENT_PHONE, String(managementOtp).trim(), false);
+                isMgmtValid = true;
+            } catch (e2) {}
+        }
+        if (!isMgmtValid && !mgmtVerified) {
+            throw new Error(`Invalid or expired Management OTP for ${MANAGEMENT_PHONE}. Closure not authorized.`);
+        }
+    }
+
+    const quote = await getRedemptionQuote(scheme.id);
+
+    // Early redemption allowed according to rules and regulations (not strictly blocked)
+    const finalValue = quote.finalRedemptionAmount || quote.totalPaid || 0;
 
     const updated = await prisma.scheme.update({
         where: { id: scheme.id },
         data: {
             status: 'closed',
             redemptionDate: new Date(),
-            redemptionValue: quote.finalRedemptionAmount || quote.totalPaid || 0,
-            notes: `${scheme.notes || ''} | Closed with OTP verification on ${new Date().toISOString()}`
+            redemptionValue: finalValue,
+            notes: `${scheme.notes || ''} | Closed with Customer & Management (${MANAGEMENT_PHONE}) dual OTP verification on ${new Date().toISOString()}`
         }
     });
 
@@ -759,27 +905,137 @@ const closeSchemeWithOTP = async (schemeId, otp, closureData, performedBy) => {
         data: {
             schemeId: scheme.id,
             action: 'SCHEME_CLOSED',
-            description: `Scheme successfully closed via OTP verification. Benefit Tier: ${quote.benefitTier}. Benefit: ${quote.benefitPercentageText}.`,
+            description: `Scheme successfully closed via Customer & Management (${MANAGEMENT_PHONE}) Dual OTP verification. Benefit Tier: ${quote.benefitTier}. Benefit: ${quote.benefitPercentageText}. Value: ₹${finalValue.toLocaleString('en-IN')}`,
             details: {
                 quote,
-                closureData
+                closureData,
+                managementPhone: MANAGEMENT_PHONE
             },
             performedById: performedBy
         }
     });
 
+    // Clear verification cache
+    if (cacheHelper) {
+        await cacheHelper.del(`scheme_customer_verified_${scheme.id}`).catch(() => {});
+        await cacheHelper.del(`scheme_mgmt_verified_${scheme.id}`).catch(() => {});
+    }
+
     return { scheme: updated, quote };
 };
 
-const verifyClosureOTP = async (schemeId, otp) => {
+const verifyClosureOTP = async (schemeId, otp, performedBy = null) => {
     const scheme = await prisma.scheme.findUnique({
         where: { id: schemeId },
         include: { customer: true }
     });
     if (!scheme) throw new Error('Scheme not found');
     const otpService = require('../../utils/otpService');
-    await otpService.verifyOTP(scheme.customer.phone, otp);
-    return { verified: true, message: 'Customer OTP successfully verified' };
+    await otpService.verifyOTP(scheme.customer.phone, otp, false);
+
+    if (cacheHelper) {
+        await cacheHelper.set(`scheme_customer_verified_${scheme.id}`, true, 1800);
+    }
+
+    await prisma.schemeActivityLog.create({
+        data: {
+            schemeId: scheme.id,
+            action: 'CUSTOMER_CLOSURE_OTP_VERIFIED',
+            description: `Customer closure OTP verified for phone ${scheme.customer.phone}`,
+            details: { phoneEnding: scheme.customer.phone.slice(-4) },
+            performedById: performedBy
+        }
+    }).catch(() => {});
+
+    return { 
+        verified: true, 
+        message: `Customer OTP verified successfully. Management authorization (${MANAGEMENT_PHONE}) is required next to redeem scheme.` 
+    };
+};
+
+const requestManagementClosureOTP = async (schemeId, performedBy) => {
+    const scheme = await prisma.scheme.findUnique({
+        where: { id: schemeId },
+        include: { customer: true }
+    });
+    if (!scheme) throw new Error('Scheme not found');
+    if (scheme.status === 'closed' || scheme.status === 'redeemed') {
+        throw new Error('Scheme is already closed or redeemed');
+    }
+
+    const otpService = require('../../utils/otpService');
+    const otpKey = `scheme_mgmt_otp_${scheme.id}`;
+    const otp = await otpService.generateAndStoreOTP(otpKey, 300, 'scheme_management_auth', MANAGEMENT_PHONE);
+
+    const isSandbox = process.env.IS_SANDBOX === 'true' || process.env.NODE_ENV !== 'production';
+
+    const result = {
+        message: isSandbox
+            ? `[SANDBOX] Management Authorization OTP is: ${otp} (or enter 123456)`
+            : `Management Authorization OTP sent to management mobile number ${MANAGEMENT_PHONE}`,
+        managementPhone: MANAGEMENT_PHONE,
+        phoneEnding: MANAGEMENT_PHONE.slice(-4),
+        otp: isSandbox ? otp : undefined,
+        sandboxOtp: isSandbox ? otp : undefined
+    };
+
+    await prisma.schemeActivityLog.create({
+        data: {
+            schemeId: scheme.id,
+            action: 'MANAGEMENT_OTP_REQUESTED',
+            description: `Management authorization OTP requested and sent to ${MANAGEMENT_PHONE}`,
+            details: { managementPhone: MANAGEMENT_PHONE },
+            performedById: performedBy
+        }
+    }).catch(() => {});
+
+    return result;
+};
+
+const verifyManagementClosureOTP = async (schemeId, otp, performedBy = null) => {
+    const scheme = await prisma.scheme.findUnique({
+        where: { id: schemeId },
+        include: { customer: true }
+    });
+    if (!scheme) throw new Error('Scheme not found');
+
+    const otpService = require('../../utils/otpService');
+    const otpKey = `scheme_mgmt_otp_${scheme.id}`;
+
+    let isValid = false;
+    try {
+        await otpService.verifyOTP(otpKey, String(otp).trim(), false);
+        isValid = true;
+    } catch (e) {
+        try {
+            await otpService.verifyOTP(MANAGEMENT_PHONE, String(otp).trim(), false);
+            isValid = true;
+        } catch (e2) {}
+    }
+
+    if (!isValid) {
+        throw new Error(`Invalid or expired Management OTP. Please check the code sent to ${MANAGEMENT_PHONE}`);
+    }
+
+    if (cacheHelper) {
+        await cacheHelper.set(`scheme_mgmt_verified_${scheme.id}`, true, 1800);
+    }
+
+    await prisma.schemeActivityLog.create({
+        data: {
+            schemeId: scheme.id,
+            action: 'MANAGEMENT_OTP_VERIFIED',
+            description: `Management authorization OTP verified for phone ${MANAGEMENT_PHONE}`,
+            details: { managementPhone: MANAGEMENT_PHONE },
+            performedById: performedBy
+        }
+    }).catch(() => {});
+
+    return { 
+        verified: true, 
+        managementPhone: MANAGEMENT_PHONE,
+        message: `Management authorization verified successfully for ${MANAGEMENT_PHONE}. Scheme redemption fully approved.` 
+    };
 };
 
 /**
@@ -851,5 +1107,7 @@ module.exports = {
     requestClosureOTP,
     closeSchemeWithOTP,
     verifyClosureOTP,
+    requestManagementClosureOTP,
+    verifyManagementClosureOTP,
     processExpiredSchemes
 };

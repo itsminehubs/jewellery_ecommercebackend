@@ -27,7 +27,9 @@ const getAllProducts = async (filters = {}, options = {}) => {
     carbonsmithworld,
     status,
     exclude,
-    productType
+    productType,
+    featured,
+    trending
   } = options;
 
   const where = { ...filters, deletedAt: null };
@@ -115,6 +117,8 @@ const getAllProducts = async (filters = {}, options = {}) => {
 
   if (minDiscount) where.discount = { gte: Number(minDiscount) };
   if (forHer === 'true' || forHer === true) where.forHer = true;
+  if (featured === 'true' || featured === true) where.featured = true;
+  if (trending === 'true' || trending === true) where.trending = true;
 
   if (carbonsmithworld === 'true' || carbonsmithworld === true) {
     where.carbonsmithworld = true;
@@ -129,9 +133,11 @@ const getAllProducts = async (filters = {}, options = {}) => {
 
   // Sorting translation
   let orderBy = { createdAt: 'desc' };
+  if (sort === '-createdAt' || sort === 'newest') orderBy = { createdAt: 'desc' };
+  if (sort === 'createdAt') orderBy = { createdAt: 'asc' };
   if (sort === 'price' || sort === 'price-asc') orderBy = { finalPrice: 'asc' };
   if (sort === '-price' || sort === 'price-desc') orderBy = { finalPrice: 'desc' };
-  if (sort === 'views' || sort === 'popularity') orderBy = { views: 'desc' };
+  if (sort === '-views' || sort === 'views' || sort === 'popularity') orderBy = { views: 'desc' };
   if (sort === 'rating') orderBy = { rating: 'desc' };
   if (sort === 'discount') orderBy = { discount: 'desc' };
   if (sort === 'recommended') orderBy = { featured: 'desc' };
