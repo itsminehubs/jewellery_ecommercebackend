@@ -132,15 +132,21 @@ const getAllProducts = async (filters = {}, options = {}) => {
   const skip = (page - 1) * limit;
 
   // Sorting translation
-  let orderBy = { createdAt: 'desc' };
-  if (sort === '-createdAt' || sort === 'newest') orderBy = { createdAt: 'desc' };
-  if (sort === 'createdAt') orderBy = { createdAt: 'asc' };
-  if (sort === 'price' || sort === 'price-asc') orderBy = { finalPrice: 'asc' };
-  if (sort === '-price' || sort === 'price-desc') orderBy = { finalPrice: 'desc' };
-  if (sort === '-views' || sort === 'views' || sort === 'popularity') orderBy = { views: 'desc' };
-  if (sort === 'rating') orderBy = { rating: 'desc' };
-  if (sort === 'discount') orderBy = { discount: 'desc' };
-  if (sort === 'recommended') orderBy = { featured: 'desc' };
+  let primarySort = { createdAt: 'desc' };
+  if (sort === '-createdAt' || sort === 'newest') primarySort = { createdAt: 'desc' };
+  if (sort === 'createdAt') primarySort = { createdAt: 'asc' };
+  if (sort === 'price' || sort === 'price-asc') primarySort = { finalPrice: 'asc' };
+  if (sort === '-price' || sort === 'price-desc') primarySort = { finalPrice: 'desc' };
+  if (sort === '-views' || sort === 'views' || sort === 'popularity') primarySort = { views: 'desc' };
+  if (sort === 'rating') primarySort = { rating: 'desc' };
+  if (sort === 'discount') primarySort = { discount: 'desc' };
+  if (sort === 'recommended') primarySort = { featured: 'desc' };
+
+  // If no single productType is specified or 'all' is passed, prioritize diamond (stoneDetails > 0) above gold (0 stones)
+  let orderBy = [primarySort];
+  if (!productType || productType === 'all' || (productType.includes('diamond') && productType.includes('gold'))) {
+    orderBy = [{ stoneDetails: { _count: 'desc' } }, primarySort];
+  }
 
   const products = await prisma.product.findMany({
     where,
