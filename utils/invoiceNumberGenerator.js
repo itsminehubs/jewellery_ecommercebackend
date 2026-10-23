@@ -184,34 +184,34 @@ async function generateImitationOrderNumber(tx = defaultPrisma) {
  * Generates sequential scheme invoice number CS-SCH-001, CS-SCH-002, etc.
  */
 async function generateSchemeNumber(tx = defaultPrisma) {
-    const existing = await tx.scheme.findMany({
+    const latest = await tx.scheme.findFirst({
         where: { schemeId: { startsWith: 'CS-SCH-' } },
+        orderBy: { createdAt: 'desc' },
         select: { schemeId: true }
     });
 
     let maxNum = 0;
     const regex = /^CS-SCH-(\d+)$/;
-    for (const item of existing) {
-        const match = regex.exec(item.schemeId);
+    if (latest && latest.schemeId) {
+        const match = regex.exec(latest.schemeId);
         if (match) {
-            const val = parseInt(match[1], 10);
-            if (!isNaN(val) && val > maxNum) {
-                maxNum = val;
-            }
+            maxNum = parseInt(match[1], 10) || 0;
         }
     }
 
     let nextNum = maxNum + 1;
     let isUnique = false;
     let candidate = '';
+    let attempts = 0;
 
-    while (!isUnique) {
+    while (!isUnique && attempts < 50) {
         candidate = `CS-SCH-${nextNum.toString().padStart(3, '0')}`;
         const exists = await tx.scheme.findUnique({ where: { schemeId: candidate }, select: { id: true } });
         if (!exists) {
             isUnique = true;
         } else {
             nextNum++;
+            attempts++;
         }
     }
 
