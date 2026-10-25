@@ -282,16 +282,16 @@ const createProduct = async (productData, imagePaths = [], userId = null) => {
         } : undefined,
         stoneDetails: stoneDetails && stoneDetails.length > 0 ? {
           create: pricingResults.stoneDetails.map(s => ({
-            stoneType: s.stoneType,
-            synthetic: s.synthetic,
-            shape: s.shape,
-            netWeight: s.netWeight || 0,
-            color: s.color,
-            clarity: s.clarity,
-            carat: s.carat,
-            cut: s.cut,
-            certification: s.certification,
-            rate: s.rate || 0
+            stoneType: s.stoneType || 'Other',
+            synthetic: Boolean(s.synthetic),
+            shape: s.shape || null,
+            netWeight: (s.netWeight !== undefined && s.netWeight !== null && String(s.netWeight).trim() !== '') ? Number(s.netWeight) : 0,
+            color: s.color || null,
+            clarity: s.clarity || null,
+            carat: s.carat ? String(s.carat) : null,
+            cut: s.cut || null,
+            certification: s.certification || null,
+            rate: (s.rate !== undefined && s.rate !== null && String(s.rate).trim() !== '') ? Number(s.rate) : 0
           }))
         } : undefined,
         images: images.length > 0 ? {
@@ -434,16 +434,16 @@ const updateProduct = async (productId, updateData, imagePaths = [], imagesToDel
         stoneDetails: stoneDetails ? {
           deleteMany: {},
           create: pricingResults.stoneDetails.map(s => ({
-            stoneType: s.stoneType,
-            synthetic: s.synthetic,
-            shape: s.shape,
-            netWeight: s.netWeight || 0,
-            color: s.color,
-            clarity: s.clarity,
-            carat: s.carat,
-            cut: s.cut,
-            certification: s.certification,
-            rate: s.rate
+            stoneType: s.stoneType || 'Other',
+            synthetic: Boolean(s.synthetic),
+            shape: s.shape || null,
+            netWeight: (s.netWeight !== undefined && s.netWeight !== null && String(s.netWeight).trim() !== '') ? Number(s.netWeight) : 0,
+            color: s.color || null,
+            clarity: s.clarity || null,
+            carat: s.carat ? String(s.carat) : null,
+            cut: s.cut || null,
+            certification: s.certification || null,
+            rate: (s.rate !== undefined && s.rate !== null && String(s.rate).trim() !== '') ? Number(s.rate) : 0
           }))
         } : undefined
       },
