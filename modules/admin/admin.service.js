@@ -457,7 +457,8 @@ const getStockAnalytics = async () => {
   const stats = await prisma.product.aggregate({
     where: {
       deletedAt: null,
-      carbonsmithworld: false // Exclude Carbonsmith World
+      carbonsmithworld: false, // Exclude Carbonsmith World
+      NOT: { internalState: 'IN_REPAIR' }
     },
     _sum: { stock: true }
   });
