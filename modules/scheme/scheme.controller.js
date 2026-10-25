@@ -270,11 +270,14 @@ const getSchemeSettings = asyncHandler(async (req, res) => {
         maxInstallmentsPerTx: settings.maxInstallmentsPerTx ?? 5,
         // Configurable discount rates
         goldMakingDiscountUpToHalf: settings.goldMakingDiscountUpToHalf ?? 50,
-        goldMakingDiscountUpToFull: settings.goldMakingDiscountUpToFull ?? 100,
+        goldMakingDiscountUpToFull: settings.goldMakingDiscountUpToFull ?? settings.goldMakingDiscountFull ?? 100,
+        goldMakingDiscountFull: settings.goldMakingDiscountUpToFull ?? settings.goldMakingDiscountFull ?? 100,
         diamondFlatDiscountHalf: settings.diamondFlatDiscountHalf ?? 20,
-        diamondMakingFlatDiscountHalf: settings.diamondMakingFlatDiscountHalf ?? 20,
+        diamondMakingFlatDiscountHalf: settings.diamondMakingFlatDiscountHalf ?? settings.diamondMakingDiscountHalf ?? 20,
+        diamondMakingDiscountHalf: settings.diamondMakingFlatDiscountHalf ?? settings.diamondMakingDiscountHalf ?? 20,
         diamondFlatDiscountFull: settings.diamondFlatDiscountFull ?? 40,
-        diamondMakingFlatDiscountFull: settings.diamondMakingFlatDiscountFull ?? 40,
+        diamondMakingFlatDiscountFull: settings.diamondMakingFlatDiscountFull ?? settings.diamondMakingDiscountFull ?? 40,
+        diamondMakingDiscountFull: settings.diamondMakingFlatDiscountFull ?? settings.diamondMakingDiscountFull ?? 40,
         isConfigured: Boolean(meta.schemeSettings)
     }, 'Scheme settings fetched successfully').send(res);
 });
@@ -297,12 +300,20 @@ const updateSchemeSettings = asyncHandler(async (req, res) => {
         bonusPercentage, 
         maxInstallmentsPerTx,
         goldMakingDiscountUpToHalf,
-        goldMakingDiscountUpToFull,
         diamondFlatDiscountHalf,
-        diamondMakingFlatDiscountHalf,
-        diamondFlatDiscountFull,
-        diamondMakingFlatDiscountFull
+        diamondFlatDiscountFull
     } = req.body;
+
+    // Accept both naming conventions for full compatibility with frontend
+    const goldMakingDiscountUpToFull = req.body.goldMakingDiscountUpToFull != null
+        ? req.body.goldMakingDiscountUpToFull
+        : req.body.goldMakingDiscountFull;
+    const diamondMakingFlatDiscountHalf = req.body.diamondMakingFlatDiscountHalf != null
+        ? req.body.diamondMakingFlatDiscountHalf
+        : req.body.diamondMakingDiscountHalf;
+    const diamondMakingFlatDiscountFull = req.body.diamondMakingFlatDiscountFull != null
+        ? req.body.diamondMakingFlatDiscountFull
+        : req.body.diamondMakingDiscountFull;
 
     // Validate
     if (minMonthlyInstallment != null && Number(minMonthlyInstallment) <= 0) {
