@@ -25,10 +25,16 @@ const calculateProductPrice = async (productData, metalDetails, stoneDetails) =>
                 stone.netWeight = roundTo3(caratVal * 0.200);
             }
 
-            const stoneWeightGrams = stone.netWeight ? Number(stone.netWeight) : 0;
+            const stoneWeightGrams = (stone.netWeight !== undefined && stone.netWeight !== null && String(stone.netWeight).trim() !== '') 
+                ? Number(stone.netWeight) 
+                : 0;
+            stone.netWeight = stoneWeightGrams;
             totalStoneWeight += stoneWeightGrams;
 
-            let rate = stone.rate ? Number(stone.rate) : 0;
+            let rate = (stone.rate !== undefined && stone.rate !== null && String(stone.rate).trim() !== '') 
+                ? Number(stone.rate) 
+                : 0;
+            stone.rate = rate;
 
             if (stone.stoneType === 'Diamond') {
                 const query = {
