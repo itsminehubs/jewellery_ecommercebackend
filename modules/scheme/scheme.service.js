@@ -2,6 +2,9 @@ const prisma = require('../../config/prisma');
 const { validateAndCheckDuplicateUtr } = require('../../utils/utrValidator');
 const { generateSchemeNumber } = require('../../utils/invoiceNumberGenerator');
 const { cacheHelper } = require('../../config');
+const crypto = require('crypto');
+const ApiError = require('../../utils/ApiError');
+const { createRazorpayOrder, fetchPayment } = require('../../config/razorpay');
 const MANAGEMENT_PHONE = process.env.MANAGEMENT_SCHEME_OTP_PHONE || '7887973088';
 
 const parseSchemeDetails = (scheme) => {
@@ -300,18 +303,30 @@ const recordInstallment = async (schemeId, paymentData, performedBy, userRole = 
         let gramsCredited = null;
 
         // Rule 6 & 8: Frozen gold rate at time of each installment payment for 22K/18K/14K
-        // Strictly uses dedicated Scheme Gold Rate table (tx.schemeGoldRate)
+        // Strictly uses dedicated Scheme Gold Rate table (tx.schemeGoldRate) with fallback to goldRate
         if (scheme.schemeType === 'GOLD' && scheme.purity) {
             const aliases = getPurityAliases(scheme.purity);
-            const rateRecord = await tx.schemeGoldRate.findFirst({
+            let rateRecord = await tx.schemeGoldRate.findFirst({
                 where: {
                     metal: { equals: 'gold', mode: 'insensitive' },
                     purity: { in: aliases, mode: 'insensitive' }
                 },
                 orderBy: [{ effectiveDate: 'desc' }, { createdAt: 'desc' }]
             });
+
+            // Fallback to active goldRate table if dedicated schemeGoldRate is not configured yet
             if (!rateRecord || Number(rateRecord.ratePerGram) <= 0) {
-                throw new Error(`Dedicated Scheme Gold Rate not set for ${scheme.purity}. Please configure the Scheme Gold Rate in Scheme Gold Rates management.`);
+                rateRecord = await tx.goldRate.findFirst({
+                    where: {
+                        metal: { equals: 'gold', mode: 'insensitive' },
+                        purity: { in: aliases, mode: 'insensitive' }
+                    },
+                    orderBy: [{ effectiveDate: 'desc' }, { createdAt: 'desc' }]
+                });
+            }
+
+            if (!rateRecord || Number(rateRecord.ratePerGram) <= 0) {
+                throw new Error(`Live gold rate not set for ${scheme.purity}. Please configure gold rates in Gold Rate settings.`);
             }
             
             goldRateApplied = Number(Number(rateRecord.ratePerGram).toFixed(2));
@@ -1092,10 +1107,115 @@ const processExpiredSchemes = async (shopId) => {
     return results;
 };
 
+/**
+ * Create Razorpay payment order for online Scheme installment
+ */
+const createSchemePaymentOrder = async (schemeId, amount, userId) => {
+    const scheme = await prisma.scheme.findUnique({
+        where: { id: schemeId }
+    });
+    if (!scheme) throw ApiError.notFound('Scheme not found');
+    if (scheme.status !== 'active') throw ApiError.badRequest(`Cannot pay installment for scheme in ${scheme.status} status`);
+    if (scheme.customerId !== userId) throw ApiError.forbidden('Unauthorized: You can only deposit installments for your own savings scheme.');
+
+    const installmentAmt = Number(amount);
+    const monthlyInstallment = Number(scheme.monthlyInstallment);
+    const totalMonths = scheme.totalMonths || 11;
+    const maxTotalPayable = monthlyInstallment * totalMonths;
+    const currentPaid = Number(scheme.totalPaid || 0);
+
+    if (isNaN(installmentAmt) || installmentAmt <= 0) {
+        throw ApiError.badRequest('A valid positive installment amount is required.');
+    }
+    if (installmentAmt < monthlyInstallment || (Math.round(installmentAmt * 100) % Math.round(monthlyInstallment * 100) !== 0)) {
+        throw ApiError.badRequest(`Installment amount must be an exact multiple of the monthly installment (₹${monthlyInstallment.toLocaleString('en-IN')}).`);
+    }
+    const maxAllowedInSingleTx = monthlyInstallment * 5;
+    if (installmentAmt > maxAllowedInSingleTx) {
+        throw ApiError.badRequest(`A maximum of 5 installments (₹${maxAllowedInSingleTx.toLocaleString('en-IN')}) can be paid in a single transaction.`);
+    }
+    if (currentPaid + installmentAmt > maxTotalPayable) {
+        const remainingPayable = maxTotalPayable - currentPaid;
+        throw ApiError.badRequest(`Payment of ₹${installmentAmt.toLocaleString('en-IN')} exceeds the remaining balance for this scheme. Max remaining payable: ₹${remainingPayable.toLocaleString('en-IN')}.`);
+    }
+
+    // Razorpay receipt max length is 40 chars
+    const receipt = `sch_${scheme.schemeId}_${Date.now()}`.slice(0, 40);
+
+    const razorpayOrder = await createRazorpayOrder(
+        installmentAmt,
+        'INR',
+        receipt,
+        {
+            schemeId: scheme.id,
+            schemeCode: scheme.schemeId,
+            userId: userId.toString(),
+            amount: installmentAmt.toString()
+        }
+    );
+
+    return {
+        schemeId: scheme.id,
+        schemeCode: scheme.schemeId,
+        razorpayOrderId: razorpayOrder.id,
+        amount: razorpayOrder.amount,
+        currency: razorpayOrder.currency,
+        keyId: process.env.RAZORPAY_KEY_ID
+    };
+};
+
+/**
+ * Verify Razorpay payment signature and record scheme installment
+ */
+const verifySchemePayment = async (schemeId, paymentData, userId) => {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = paymentData;
+
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+        throw ApiError.badRequest('Missing Razorpay payment parameters');
+    }
+
+    const text = `${razorpay_order_id}|${razorpay_payment_id}`;
+    const expectedSignature = crypto
+        .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+        .update(text)
+        .digest('hex');
+
+    if (expectedSignature !== razorpay_signature) {
+        throw ApiError.badRequest('Invalid payment signature');
+    }
+
+    // Verify payment status with Razorpay
+    const payment = await fetchPayment(razorpay_payment_id);
+    if (!payment || payment.status !== 'captured') {
+        throw ApiError.badRequest('Payment not captured by payment gateway');
+    }
+
+    const amountInRupees = Number(payment.amount) / 100;
+
+    // Prevent duplicate installment for identical transaction ID
+    const existingInstallment = await prisma.schemeInstallment.findFirst({
+        where: { transactionId: razorpay_payment_id }
+    });
+    if (existingInstallment) {
+        return await getSchemeById(schemeId);
+    }
+
+    const recordPayload = {
+        amount: amountInRupees,
+        method: 'razorpay',
+        transactionId: razorpay_payment_id,
+        notes: `Razorpay Online Payment (Order: ${razorpay_order_id})`
+    };
+
+    return await recordInstallment(schemeId, recordPayload, userId, 'customer');
+};
+
 module.exports = {
     parseSchemeDetails,
     enrollCustomer,
     recordInstallment,
+    createSchemePaymentOrder,
+    verifySchemePayment,
     getStoreSchemes,
     calculateRedemptionValue,
     getUserSchemeStatements,

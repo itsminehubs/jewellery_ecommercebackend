@@ -83,6 +83,19 @@ const recordInstallment = asyncHandler(async (req, res) => {
     ApiResponse.success(scheme, 'Installment recorded successfully').send(res);
 });
 
+const createPaymentOrder = asyncHandler(async (req, res) => {
+    const schemeId = req.params.id;
+    const { amount } = req.body;
+    const orderData = await schemeService.createSchemePaymentOrder(schemeId, amount, req.user.id);
+    ApiResponse.success(orderData, 'Scheme payment order created successfully').send(res);
+});
+
+const verifyPayment = asyncHandler(async (req, res) => {
+    const schemeId = req.params.id;
+    const updatedScheme = await schemeService.verifySchemePayment(schemeId, req.body, req.user.id);
+    ApiResponse.success(updatedScheme, 'Payment verified and gold credited successfully').send(res);
+});
+
 const getStoreSchemes = asyncHandler(async (req, res) => {
     const isStaff = isStaffUser(req.user);
     if (!isStaff) {
@@ -375,6 +388,8 @@ const updateSchemeSettings = asyncHandler(async (req, res) => {
 module.exports = {
     enrollCustomer,
     recordInstallment,
+    createPaymentOrder,
+    verifyPayment,
     getStoreSchemes,
     getUserStatements,
     getScheme,

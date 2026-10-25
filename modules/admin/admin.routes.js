@@ -42,5 +42,27 @@ router.post('/adjust-stock', checkPermission(PERMISSIONS.STOCK_MANAGE), adminCon
 router.get('/bulk-export', checkAnyPermission([PERMISSIONS.PRODUCT_BULK_MANAGE, PERMISSIONS.VIEW_FINANCIAL_REPORTS]), adminController.exportProducts);
 router.post('/bulk-import', checkPermission(PERMISSIONS.PRODUCT_BULK_MANAGE), uploadSingle('file'), adminController.importProducts);
 
+// Alias to update product via /admin/products/:id
+const productController = require('../product/product.controller');
+const { productImageUpload } = require('../../middlewares/upload.middleware');
+const validate = require('../../middlewares/validate.middleware');
+const productValidation = require('../../validations/product.validation');
+
+const parseProductData = (req, res, next) => {
+    const fieldsToParse = ['metalDetails', 'stoneDetails', 'basicDetails', 'categoryAttributes', 'specifications'];
+    fieldsToParse.forEach(field => {
+        if (req.body[field] && typeof req.body[field] === 'string') {
+            try {
+                req.body[field] = JSON.parse(req.body[field]);
+            } catch (error) {
+                console.warn(`Failed to parse ${field}:`, error.message);
+            }
+        }
+    });
+    next();
+};
+
+router.put('/products/:id', checkPermission(PERMISSIONS.PRODUCT_EDIT), productImageUpload, parseProductData, validate(productValidation.updateProduct), productController.updateProduct);
+router.patch('/products/:id', checkPermission(PERMISSIONS.PRODUCT_EDIT), productImageUpload, parseProductData, validate(productValidation.updateProduct), productController.updateProduct);
 
 module.exports = router;
