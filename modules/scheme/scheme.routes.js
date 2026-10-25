@@ -25,6 +25,8 @@ router.post('/:id/close-with-otp', schemeController.closeSchemeWithOTP);
 router.post('/process-expired', checkPermission(PERMISSIONS.SCHEME_MANAGE), schemeController.processExpiredSchemes);
 router.put('/:id', checkPermission(PERMISSIONS.SCHEME_MANAGE), schemeController.updateScheme);
 router.delete('/:id', checkPermission(PERMISSIONS.SCHEME_MANAGE), schemeController.deleteScheme);
+router.post('/:id/create-payment-order', schemeController.createPaymentOrder);
+router.post('/:id/verify-payment', schemeController.verifyPayment);
 router.post('/:id/installments', schemeController.recordInstallment);
 
 module.exports = router;
