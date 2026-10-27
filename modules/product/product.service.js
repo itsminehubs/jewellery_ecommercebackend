@@ -29,7 +29,8 @@ const getAllProducts = async (filters = {}, options = {}) => {
     exclude,
     productType,
     featured,
-    trending
+    trending,
+    makeForOrder
   } = options;
 
   const where = { ...filters, deletedAt: null };
@@ -71,16 +72,46 @@ const getAllProducts = async (filters = {}, options = {}) => {
     const types = productType.split(',').map(t => t.trim().toLowerCase());
     const conditions = [];
 
+    // Filter to identify genuine diamond stones that have Color, Clarity, Cut, and/or diamond rate
+    const diamondStoneFilter = {
+      AND: [
+        { rate: { gt: 0 } },
+        {
+          OR: [
+            {
+              AND: [
+                { stoneType: { equals: 'Diamond', mode: 'insensitive' } },
+                {
+                  OR: [
+                    { clarity: { not: null, not: '' } },
+                    { cut: { not: null, not: '' } },
+                    { color: { not: null, not: '' } }
+                  ]
+                }
+              ]
+            },
+            {
+              AND: [
+                { color: { not: null, not: '' } },
+                { clarity: { not: null, not: '' } },
+                { cut: { not: null, not: '' } }
+              ]
+            }
+          ]
+        }
+      ]
+    };
+
     if (types.includes('diamond')) {
       conditions.push({
         metalDetails: { metalType: { in: ['Gold', 'gold', 'Platinum', 'platinum'] } },
-        stoneDetails: { some: {} }
+        stoneDetails: { some: diamondStoneFilter }
       });
     }
     if (types.includes('gold')) {
       conditions.push({
         metalDetails: { metalType: { in: ['Gold', 'gold'] } },
-        stoneDetails: { none: {} }
+        stoneDetails: { none: diamondStoneFilter } // Plain gold OR gold with other stones (no diamond 4Cs)
       });
     }
     if (types.includes('silver')) {
@@ -127,6 +158,15 @@ const getAllProducts = async (filters = {}, options = {}) => {
   } else {
     // Hide carbonsmithworld products from regular store queries by default
     where.carbonsmithworld = false;
+  }
+
+  if (makeForOrder === 'true' || makeForOrder === true) {
+    where.makeForOrder = true;
+  } else if (makeForOrder === 'all') {
+    // Show all products, do not filter by makeForOrder (used by Admin and POS)
+  } else {
+    // Hide makeForOrder products from public store/app queries by default
+    where.makeForOrder = false;
   }
 
   const skip = (page - 1) * limit;
@@ -222,6 +262,10 @@ const createProduct = async (productData, imagePaths = [], userId = null) => {
 
   // Extract nested models
   const { metalDetails, stoneDetails, category, ...baseProductData } = productData;
+
+  if (baseProductData.makeForOrder !== undefined) {
+    baseProductData.makeForOrder = String(baseProductData.makeForOrder) === 'true';
+  }
 
   // Run dynamic pricing engine before creation
   const pricingResults = await pricingService.calculateProductPrice(baseProductData, metalDetails, stoneDetails);
@@ -362,6 +406,10 @@ const updateProduct = async (productId, updateData, imagePaths = [], imagesToDel
   }
 
   const { metalDetails, stoneDetails, category, ...baseProductData } = updateData;
+
+  if (baseProductData.makeForOrder !== undefined) {
+    baseProductData.makeForOrder = String(baseProductData.makeForOrder) === 'true';
+  }
 
   let resolvedCategoryId = category;
   if (category) {
@@ -572,7 +620,8 @@ const getProductsByCategory = async (categoryIdOrSlug, options = {}) => {
     categoryId: resolvedCategoryId,
     status: { in: ['active', 'out_of_stock', 'sold'] },
     deletedAt: null,
-    carbonsmithworld: false
+    carbonsmithworld: false,
+    makeForOrder: false
   };
 
   if (search) {
@@ -625,7 +674,8 @@ const getFeaturedProducts = async (options = {}) => {
     featured: true,
     status: { in: ['active', 'out_of_stock', 'sold'] },
     deletedAt: null,
-    carbonsmithworld: false
+    carbonsmithworld: false,
+    makeForOrder: false
   };
 
   const skip = (page - 1) * limit;
@@ -656,7 +706,8 @@ const getTrendingProducts = async (options = {}) => {
     trending: true,
     status: { in: ['active', 'out_of_stock', 'sold'] },
     deletedAt: null,
-    carbonsmithworld: false
+    carbonsmithworld: false,
+    makeForOrder: false
   };
 
   const skip = (page - 1) * limit;
