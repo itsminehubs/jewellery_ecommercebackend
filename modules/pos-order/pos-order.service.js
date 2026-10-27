@@ -719,6 +719,7 @@ const createOrder = async (orderData) => {
 
         // 3. Handle Credit Memo Redemption
         if (totalCreditMemo > 0) {
+            const verifiedCustomerPhonesInBatch = new Set();
             for (const payment of orderData.payments) {
                 if (payment.method === 'credit_memo') {
                     if (!payment.referenceId || !payment.referenceId.trim()) {
@@ -739,26 +740,36 @@ const createOrder = async (orderData) => {
                     }
 
                     // Security: Verify OTP if provided or require redemption authorization
-                    const otp = payment.otp || payment.redemptionOtp;
+                    const otp = payment.otp || payment.redemptionOtp || orderData.creditMemoOtp;
                     if (!payment.skipOtp && !orderData.skipCreditMemoOtp) {
                         if (!otp) {
                             throw new ApiError(400, `Security Requirement: Customer OTP verification is required to redeem Credit Memo #${memo.memoId}.`);
                         }
-                        const otpService = require('../../utils/otpService');
-                        const otpKey = `credit_memo_otp_${memo.memoId}`;
+                        const cleanCustomerPhone = memo.customer?.phone ? String(memo.customer.phone).replace(/\D/g, '').slice(-10) : null;
                         let otpVerified = false;
-                        try {
-                            await otpService.verifyOTP(otpKey, String(otp).trim(), true);
+
+                        // If this customer's OTP was already verified in this batch, approve seamlessly
+                        if (cleanCustomerPhone && verifiedCustomerPhonesInBatch.has(cleanCustomerPhone)) {
                             otpVerified = true;
-                        } catch (e1) {
-                            if (memo.customer?.phone) {
-                                try {
-                                    await otpService.verifyOTP(memo.customer.phone, String(otp).trim(), true);
-                                    otpVerified = true;
-                                } catch (e2) { }
+                        } else {
+                            const otpService = require('../../utils/otpService');
+                            const otpKey = `credit_memo_otp_${memo.memoId}`;
+                            try {
+                                await otpService.verifyOTP(otpKey, String(otp).trim(), false);
+                                otpVerified = true;
+                            } catch (e1) {
+                                if (cleanCustomerPhone) {
+                                    try {
+                                        await otpService.verifyOTP(cleanCustomerPhone, String(otp).trim(), false);
+                                        otpVerified = true;
+                                    } catch (e2) { }
+                                }
                             }
                         }
-                        if (!otpVerified) {
+
+                        if (otpVerified && cleanCustomerPhone) {
+                            verifiedCustomerPhonesInBatch.add(cleanCustomerPhone);
+                        } else if (!otpVerified) {
                             throw new ApiError(400, `Invalid or expired OTP for Credit Memo #${memo.memoId}. Redemption denied for security.`);
                         }
                     }

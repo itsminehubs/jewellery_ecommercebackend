@@ -1,4 +1,6 @@
 const prisma = require('../../config/prisma');
+const { cacheHelper } = require('../../config');
+const { CACHE_KEYS } = require('../../utils/constants');
 const { recordTransactionPrisma } = require('../accounting/customer-ledger.service');
 const ApiResponse = require('../../utils/ApiResponse');
 const { asyncHandler } = require('../../middlewares/error.middleware');
@@ -424,6 +426,127 @@ const verifyRedemptionOtp = asyncHandler(async (req, res) => {
     }, 'OTP verified successfully').send(res);
 });
 
+// Request a single unified OTP to authorize redemption of multiple Credit Memos for the same customer
+const sendCombinedRedemptionOtp = asyncHandler(async (req, res) => {
+    const { memoIds } = req.body;
+    if (!memoIds || !Array.isArray(memoIds) || memoIds.length === 0) {
+        return ApiResponse.error('At least one credit memo ID is required in memoIds array', 400).send(res);
+    }
+
+    const cleanMemoIds = memoIds.map(id => String(id).trim()).filter(Boolean);
+    const memos = await prisma.creditMemo.findMany({
+        where: { memoId: { in: cleanMemoIds } },
+        include: {
+            customer: { select: { id: true, name: true, phone: true } }
+        }
+    });
+
+    if (memos.length === 0) {
+        return ApiResponse.error('No matching credit memos found', 404).send(res);
+    }
+
+    // Verify active status and positive balance
+    for (const memo of memos) {
+        if (memo.status !== 'active' || Number(memo.balance) <= 0) {
+            return ApiResponse.error(`Credit Memo #${memo.memoId} is not active or has zero balance (Status: ${memo.status}, Balance: ₹${memo.balance})`, 400).send(res);
+        }
+    }
+
+    const customerPhone = memos[0].customer?.phone;
+    if (!customerPhone) {
+        return ApiResponse.error('Customer associated with the selected Credit Memos has no registered phone number', 400).send(res);
+    }
+
+    const cleanPhone = String(customerPhone).replace(/\D/g, '').slice(-10);
+    const totalBalance = memos.reduce((sum, m) => sum + Number(m.balance || 0), 0);
+    const otpService = require('../../utils/otpService');
+
+    // Generate single 6-digit OTP for the customer
+    const otp = await otpService.generateAndStoreOTP(cleanPhone, 300, 'credit_memo_redemption', cleanPhone);
+
+    // Also link each individual memoId in Redis to this OTP for unified compatibility
+    if (cacheHelper) {
+        for (const memo of memos) {
+            await cacheHelper.set(`${CACHE_KEYS.OTP}credit_memo_otp_${memo.memoId}`, otp, 300).catch(() => {});
+        }
+    }
+
+    const isSandbox = process.env.IS_SANDBOX === 'true' || process.env.NODE_ENV !== 'production';
+    const memoCount = memos.length;
+
+    const responseData = {
+        memoIds: memos.map(m => m.memoId),
+        count: memoCount,
+        customerName: memos[0].customer?.name,
+        phoneEnding: cleanPhone.slice(-4),
+        totalBalance,
+        message: isSandbox
+            ? `[SANDBOX] Verification OTP for ${memoCount} Credit Memo${memoCount > 1 ? 's' : ''} (Total ₹${totalBalance.toLocaleString('en-IN')}) is: ${otp} (or enter 123456)`
+            : `Security OTP sent to customer mobile ending in ${cleanPhone.slice(-4)} for ${memoCount} Credit Memo${memoCount > 1 ? 's' : ''}`,
+        otp: isSandbox ? otp : undefined,
+        sandboxOtp: isSandbox ? otp : undefined
+    };
+
+    ApiResponse.success(responseData, 'Combined redemption authorization OTP sent successfully').send(res);
+});
+
+// Verify OTP for combined Credit Memos
+const verifyCombinedRedemptionOtp = asyncHandler(async (req, res) => {
+    const { memoIds, otp } = req.body;
+    if (!otp) {
+        return ApiResponse.error('OTP is required', 400).send(res);
+    }
+    if (!memoIds || !Array.isArray(memoIds) || memoIds.length === 0) {
+        return ApiResponse.error('memoIds array is required', 400).send(res);
+    }
+
+    const cleanMemoIds = memoIds.map(id => String(id).trim()).filter(Boolean);
+    const memos = await prisma.creditMemo.findMany({
+        where: { memoId: { in: cleanMemoIds } },
+        include: { customer: { select: { phone: true } } }
+    });
+
+    if (memos.length === 0) {
+        return ApiResponse.error('Credit Memos not found', 404).send(res);
+    }
+
+    const otpService = require('../../utils/otpService');
+    const customerPhone = memos[0].customer?.phone;
+    const cleanPhone = customerPhone ? String(customerPhone).replace(/\D/g, '').slice(-10) : null;
+
+    let isValid = false;
+
+    // 1. Verify against customer clean phone
+    if (cleanPhone) {
+        try {
+            await otpService.verifyOTP(cleanPhone, String(otp).trim(), false);
+            isValid = true;
+        } catch (e1) { }
+    }
+
+    // 2. Fallback: Verify against any memoId key
+    if (!isValid) {
+        for (const m of memos) {
+            try {
+                await otpService.verifyOTP(`credit_memo_otp_${m.memoId}`, String(otp).trim(), false);
+                isValid = true;
+                break;
+            } catch (e2) { }
+        }
+    }
+
+    if (!isValid) {
+        return ApiResponse.error('Invalid or expired OTP. Please enter the correct verification code.', 400).send(res);
+    }
+
+    ApiResponse.success({
+        verified: true,
+        memoIds: cleanMemoIds,
+        count: cleanMemoIds.length,
+        message: `All ${cleanMemoIds.length} Credit Memos successfully authorized`
+    }, 'All credit memos authorized successfully').send(res);
+});
+
 module.exports = {
     getAllCreditMemos,
     searchActiveMemos,
@@ -431,6 +554,8 @@ module.exports = {
     updateCreditMemo,
     deleteCreditMemo,
     sendRedemptionOtp,
-    verifyRedemptionOtp
+    verifyRedemptionOtp,
+    sendCombinedRedemptionOtp,
+    verifyCombinedRedemptionOtp
 };
 
