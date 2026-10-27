@@ -27,44 +27,74 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
     let cartTotal = 0;
     const calculatedItems = [];
 
-    // Resolve active Credit Memo if provided (by memoId or UUID or passed through lockedGoldRate)
-    let activeCreditMemo = null;
-    let availableRefGrams = 0;
-    let memoRefPurity = '22K';
-    let memoLockedRate = 0;
+    // 1. Resolve active Credit Memos (supports single ID, array of IDs, or comma-separated string)
+    let memoLookupIds = [];
+    if (Array.isArray(creditMemoRef)) {
+        memoLookupIds = creditMemoRef.map(id => String(id).trim()).filter(Boolean);
+    } else if (typeof creditMemoRef === 'string' && creditMemoRef.trim()) {
+        memoLookupIds = creditMemoRef.split(',').map(id => id.trim()).filter(Boolean);
+    } else if (typeof lockedGoldRate === 'string' && isNaN(Number(lockedGoldRate)) && lockedGoldRate.trim()) {
+        memoLookupIds = [lockedGoldRate.trim()];
+    }
 
-    const lookupMemo = creditMemoRef || (typeof lockedGoldRate === 'string' && isNaN(Number(lockedGoldRate)) ? lockedGoldRate : null);
-    if (lookupMemo) {
-        activeCreditMemo = await prisma.creditMemo.findFirst({
+    let activeMemos = [];
+    if (memoLookupIds.length > 0) {
+        const foundMemos = await prisma.creditMemo.findMany({
             where: {
                 OR: [
-                    { memoId: String(lookupMemo).trim() },
-                    { id: String(lookupMemo).trim() }
-                ]
+                    { memoId: { in: memoLookupIds } },
+                    { id: { in: memoLookupIds } }
+                ],
+                status: { not: 'cancelled' }
             }
+        });
+
+        for (const lookupId of memoLookupIds) {
+            const m = foundMemos.find(fm => fm.memoId === lookupId || fm.id === lookupId);
+            if (m && !activeMemos.some(am => am.id === m.id)) {
+                const refPurity = m.referencePurity || m.exchangePurity || '22K';
+                const rate = Number(m.lockedGoldRate || 0);
+                let grams = 0;
+                if (m.remainingGrams !== null && m.remainingGrams !== undefined) {
+                    grams = Number(m.remainingGrams);
+                } else if (m.lockedGrams !== null && m.lockedGrams !== undefined) {
+                    grams = Number(m.lockedGrams);
+                } else if (rate > 0) {
+                    grams = Number((Number(m.balance) / rate).toFixed(4));
+                }
+
+                if (grams > 0 && rate > 0) {
+                    activeMemos.push({
+                        id: m.id,
+                        memoId: m.memoId,
+                        referencePurity: refPurity,
+                        refKarat: parseKarat(refPurity),
+                        lockedRate: rate,
+                        initialGrams: roundTo4(grams),
+                        availableGrams: roundTo4(grams),
+                        consumedGrams: 0,
+                        consumedValue: 0
+                    });
+                }
+            }
+        }
+    }
+
+    // Fallback for manual legacy rate override without memo
+    if (activeMemos.length === 0 && lockedGoldRate && !isNaN(Number(lockedGoldRate)) && Number(lockedGoldRate) > 0) {
+        activeMemos.push({
+            id: 'legacy-override',
+            memoId: 'Rate Override',
+            referencePurity: '22K',
+            refKarat: 22,
+            lockedRate: Number(lockedGoldRate),
+            initialGrams: 999999,
+            availableGrams: 999999,
+            consumedGrams: 0,
+            consumedValue: 0
         });
     }
 
-    if (activeCreditMemo && activeCreditMemo.status !== 'cancelled') {
-        memoRefPurity = activeCreditMemo.referencePurity || activeCreditMemo.exchangePurity || '22K';
-        memoLockedRate = Number(activeCreditMemo.lockedGoldRate || 0);
-
-        if (activeCreditMemo.remainingGrams !== null && activeCreditMemo.remainingGrams !== undefined) {
-            availableRefGrams = Number(activeCreditMemo.remainingGrams);
-        } else if (activeCreditMemo.lockedGrams !== null && activeCreditMemo.lockedGrams !== undefined) {
-            availableRefGrams = Number(activeCreditMemo.lockedGrams);
-        } else if (memoLockedRate > 0) {
-            availableRefGrams = Number((Number(activeCreditMemo.balance) / memoLockedRate).toFixed(4));
-        }
-    } else if (lockedGoldRate && !isNaN(Number(lockedGoldRate)) && Number(lockedGoldRate) > 0) {
-        // Fallback for legacy rate override without memo
-        memoLockedRate = Number(lockedGoldRate);
-        memoRefPurity = '22K';
-        availableRefGrams = 999999;
-    }
-
-    const initialAvailableRefGrams = availableRefGrams;
-    const refKarat = parseKarat(memoRefPurity);
     let totalLockedGoldValue = 0;
     let totalCustomerSavings = 0;
 
@@ -182,30 +212,47 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
         let rateUsed = currentPurityRate;
         let appliedProductGrams = 0;
         let remainingProductGrams = totalItemGoldWeight;
-        let consumedRefGrams = 0;
         let lockedPortionValue = 0;
         let remainingPortionValue = 0;
         let itemSavings = 0;
+        const itemConsumedBreakdown = [];
 
-        if (metalType === 'gold' && availableRefGrams > 0 && memoLockedRate > 0) {
-            // Universal Purity Conversion:
-            // locked_product_grams = available_ref_grams * (refKarat / prodKarat)
-            const coverableProductGrams = (availableRefGrams * refKarat) / prodKarat;
+        if (metalType === 'gold' && activeMemos.some(m => m.availableGrams > 0)) {
+            let itemWeightNeeded = totalItemGoldWeight;
 
-            // applied_product_grams = MIN(coverableProductGrams, totalItemGoldWeight)
-            appliedProductGrams = roundTo3(Math.min(coverableProductGrams, totalItemGoldWeight));
-            remainingProductGrams = roundTo3(Math.max(0, totalItemGoldWeight - appliedProductGrams));
+            for (const memo of activeMemos) {
+                if (memo.availableGrams <= 0 || itemWeightNeeded <= 0) continue;
 
-            // consumed_reference_grams = applied_product_grams * (prodKarat / refKarat)
-            consumedRefGrams = roundTo4((appliedProductGrams * prodKarat) / refKarat);
-            availableRefGrams = Math.max(0, availableRefGrams - consumedRefGrams);
+                // Universal Purity Conversion for this memo:
+                // coverable_product_grams = memo.availableGrams * (memo.refKarat / prodKarat)
+                const coverableProductGrams = (memo.availableGrams * memo.refKarat) / prodKarat;
+                const applyGrams = roundTo3(Math.min(coverableProductGrams, itemWeightNeeded));
+                if (applyGrams <= 0) continue;
 
-            // Locked Portion Valuation: consumedRefGrams * memoLockedRate
-            lockedPortionValue = roundTo2(consumedRefGrams * memoLockedRate);
+                // consumed_reference_grams = applyGrams * (prodKarat / memo.refKarat)
+                const refGramsConsumed = roundTo4((applyGrams * prodKarat) / memo.refKarat);
+                memo.availableGrams = Math.max(0, roundTo4(memo.availableGrams - refGramsConsumed));
+                memo.consumedGrams = roundTo4(memo.consumedGrams + refGramsConsumed);
 
-            // Remaining Portion Valuation: remainingProductGrams * currentPurityRate
+                const memoPortionValue = roundTo2(refGramsConsumed * memo.lockedRate);
+                memo.consumedValue = roundTo2(memo.consumedValue + memoPortionValue);
+
+                lockedPortionValue = roundTo2(lockedPortionValue + memoPortionValue);
+                appliedProductGrams = roundTo3(appliedProductGrams + applyGrams);
+                itemWeightNeeded = roundTo3(Math.max(0, itemWeightNeeded - applyGrams));
+
+                itemConsumedBreakdown.push({
+                    memoId: memo.memoId,
+                    referencePurity: memo.referencePurity,
+                    lockedRate: memo.lockedRate,
+                    appliedProductGrams: applyGrams,
+                    consumedRefGrams: refGramsConsumed,
+                    portionValue: memoPortionValue
+                });
+            }
+
+            remainingProductGrams = itemWeightNeeded;
             remainingPortionValue = roundTo2(remainingProductGrams * currentPurityRate);
-
             metalValue = roundTo2(lockedPortionValue + remainingPortionValue);
 
             // Savings calculation against pricing 100% at today's market rate
@@ -214,7 +261,7 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
             totalCustomerSavings = roundTo2(totalCustomerSavings + itemSavings);
             totalLockedGoldValue = roundTo2(totalLockedGoldValue + lockedPortionValue);
 
-            rateUsed = appliedProductGrams > 0 ? memoLockedRate : currentPurityRate;
+            rateUsed = appliedProductGrams > 0 ? (itemConsumedBreakdown[0]?.lockedRate || currentPurityRate) : currentPurityRate;
         } else {
             metalValue = roundTo2(totalItemGoldWeight * currentPurityRate);
             remainingPortionValue = metalValue;
@@ -277,15 +324,16 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
                 rateUsed,
                 currentPurityRate,
                 rateLock: {
-                    referencePurity: memoRefPurity,
+                    referencePurity: itemConsumedBreakdown[0]?.referencePurity || activeMemos[0]?.referencePurity || '22K',
                     productPurity: productPurity,
                     appliedProductGrams,
                     remainingProductGrams,
-                    consumedRefGrams,
+                    consumedRefGrams: roundTo4(itemConsumedBreakdown.reduce((s, b) => s + b.consumedRefGrams, 0)),
                     lockedPortionValue,
                     remainingPortionValue,
                     savings: itemSavings,
-                    lockedRate: memoLockedRate
+                    lockedRate: itemConsumedBreakdown[0]?.lockedRate || activeMemos[0]?.lockedRate || 0,
+                    breakdown: itemConsumedBreakdown
                 }
             },
             quantity: qty
@@ -298,15 +346,24 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
             subtotal: roundTo2(cartSubtotal),
             gst: roundTo2(cartGst),
             total: roundTo2(cartSubtotal + cartGst),
-            goldLock: (activeCreditMemo || lockedGoldRate) ? {
-                memoId: activeCreditMemo ? activeCreditMemo.memoId : null,
-                referencePurity: memoRefPurity,
-                lockedRate: memoLockedRate,
-                initialAvailableGrams: roundTo3(initialAvailableRefGrams),
-                consumedRefGrams: roundTo3(initialAvailableRefGrams - availableRefGrams),
-                remainingRefGrams: roundTo3(availableRefGrams),
+            goldLock: activeMemos.length > 0 && activeMemos.some(m => m.consumedGrams > 0 || m.initialGrams > 0) ? {
+                memoId: activeMemos.map(m => m.memoId).join(', '),
+                referencePurity: activeMemos[0]?.referencePurity || '22K',
+                lockedRate: activeMemos[0]?.lockedRate || 0,
+                initialAvailableGrams: roundTo3(activeMemos.reduce((s, m) => s + m.initialGrams, 0)),
+                consumedRefGrams: roundTo3(activeMemos.reduce((s, m) => s + m.consumedGrams, 0)),
+                remainingRefGrams: roundTo3(activeMemos.reduce((s, m) => s + m.availableGrams, 0)),
                 totalLockedGoldValue: roundTo2(totalLockedGoldValue),
-                totalCustomerSavings: roundTo2(totalCustomerSavings)
+                totalCustomerSavings: roundTo2(totalCustomerSavings),
+                memos: activeMemos.map(m => ({
+                    memoId: m.memoId,
+                    referencePurity: m.referencePurity,
+                    lockedRate: m.lockedRate,
+                    initialAvailableGrams: roundTo3(m.initialGrams),
+                    consumedRefGrams: roundTo3(m.consumedGrams),
+                    remainingRefGrams: roundTo3(m.availableGrams),
+                    consumedValue: roundTo2(m.consumedValue)
+                }))
             } : null
         }
     };
@@ -709,16 +766,19 @@ const createOrder = async (orderData) => {
                     let newRemainingGrams = memo.remainingGrams;
                     let newRemainingPureGrams = memo.remainingPureGrams;
 
+                    let gramsConsumed = 0;
+                    const refPurity = memo.referencePurity || memo.exchangePurity || '22K';
+
                     if (newBalance <= 0) {
+                        gramsConsumed = Number(memo.remainingGrams || 0);
                         newRemainingGrams = 0;
                         newRemainingPureGrams = 0;
                     } else if (memo.lockedGoldRate && Number(memo.lockedGoldRate) > 0) {
-                        const gramsConsumed = parsedAmount / Number(memo.lockedGoldRate);
+                        gramsConsumed = parsedAmount / Number(memo.lockedGoldRate);
                         if (memo.remainingGrams !== null && memo.remainingGrams !== undefined) {
                             newRemainingGrams = Math.max(0, Number((Number(memo.remainingGrams) - gramsConsumed).toFixed(4)));
                         }
                         if (memo.remainingPureGrams !== null && memo.remainingPureGrams !== undefined) {
-                            const refPurity = memo.referencePurity || memo.exchangePurity || '22K';
                             const pureGramsConsumed = toPureGoldGrams(gramsConsumed, refPurity);
                             newRemainingPureGrams = Math.max(0, Number((Number(memo.remainingPureGrams) - pureGramsConsumed).toFixed(4)));
                         }
@@ -734,8 +794,11 @@ const createOrder = async (orderData) => {
                         }
                     });
 
-                    // Store reference for invoice re-printing
-                    orderData.notes = (orderData.notes ? orderData.notes + '||' : '') + `PAYMENT_REF:credit_memo:${memo.memoId}:${parsedAmount}`;
+                    // Store reference for invoice re-printing with grams and locked rate details
+                    const memoTag = (memo.lockedGoldRate && Number(memo.lockedGoldRate) > 0)
+                        ? `PAYMENT_REF:credit_memo:${memo.memoId}:${parsedAmount}:GRAMS:${Number(gramsConsumed.toFixed(3))}:PURITY:${refPurity}:RATE:${memo.lockedGoldRate}`
+                        : `PAYMENT_REF:credit_memo:${memo.memoId}:${parsedAmount}`;
+                    orderData.notes = (orderData.notes ? orderData.notes + '||' : '') + memoTag;
                 }
             }
         }
