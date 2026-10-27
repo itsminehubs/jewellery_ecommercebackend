@@ -70,6 +70,34 @@ const getUserByPhone = async (phone) => {
   return { ...userJson, recentOrders: mappedOrders };
 };
 
+const searchCustomers = async (query, limit = 10) => {
+  if (!query || !query.trim()) return [];
+  const clean = query.trim();
+  const users = await prisma.user.findMany({
+    where: {
+      deletedAt: null,
+      OR: [
+        { phone: { contains: clean, mode: 'insensitive' } },
+        { name: { contains: clean, mode: 'insensitive' } },
+        { email: { contains: clean, mode: 'insensitive' } }
+      ]
+    },
+    take: limit,
+    select: {
+      id: true,
+      name: true,
+      phone: true,
+      email: true,
+      panNumber: true,
+      gstNumber: true,
+      loyaltyPoints: true,
+      loyaltyTier: true,
+      addresses: true
+    }
+  });
+  return users;
+};
+
 const createQuickCustomer = async (customerData) => {
   const { name, phone, email, addresses } = customerData;
   if (!phone) throw ApiError.badRequest('Phone is required');
@@ -379,6 +407,7 @@ const updateFcmToken = async (userId, fcmToken) => {
 module.exports = {
   getUser,
   getUserByPhone,
+  searchCustomers,
   createQuickCustomer,
   updateProfile,
   uploadProfileImage,

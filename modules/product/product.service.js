@@ -590,14 +590,16 @@ const getProductByScannedCode = async (scannedCode) => {
       OR: [
         { sku: { equals: cleanCode, mode: 'insensitive' } },
         { tagId: { equals: cleanCode, mode: 'insensitive' } },
-        { huid: { equals: cleanCode, mode: 'insensitive' } }
+        { huid: { equals: cleanCode, mode: 'insensitive' } },
+        { name: { equals: cleanCode, mode: 'insensitive' } },
+        { name: { contains: cleanCode, mode: 'insensitive' } }
       ]
     },
     include: { metalDetails: true, stoneDetails: true, images: true }
   });
 
   if (!product) {
-    throw ApiError.notFound('Product not found with this barcode');
+    throw ApiError.notFound('Product not found with this barcode or name');
   }
 
   return product;
