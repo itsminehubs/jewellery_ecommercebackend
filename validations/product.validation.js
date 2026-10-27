@@ -47,6 +47,7 @@ const createProduct = {
         trending: Joi.boolean().default(false),
         forHer: Joi.boolean().default(false),
         carbonsmithworld: Joi.boolean().default(false),
+        makeForOrder: Joi.boolean().default(false),
         sku: Joi.string().allow('', null),
         specifications: Joi.object().pattern(Joi.string(), Joi.string()),
 
@@ -117,6 +118,7 @@ const updateProduct = {
         trending: Joi.boolean(),
         forHer: Joi.boolean(),
         carbonsmithworld: Joi.boolean(),
+        makeForOrder: Joi.boolean(),
         specifications: Joi.object().pattern(Joi.string(), Joi.string()),
 
         makingCharges: Joi.number().min(0),
@@ -153,7 +155,8 @@ const getProducts = {
         minPrice: Joi.number().min(0),
         maxPrice: Joi.number().min(0),
         featured: Joi.boolean(),
-        trending: Joi.boolean()
+        trending: Joi.boolean(),
+        makeForOrder: Joi.alternatives().try(Joi.boolean(), Joi.string())
     })
 };
 

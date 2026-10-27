@@ -172,6 +172,7 @@ model Product {
   trending         Boolean @default(false)
   forHer           Boolean @default(false)
   carbonsmithworld Boolean @default(false)
+  makeForOrder     Boolean @default(false)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
