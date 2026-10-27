@@ -59,6 +59,7 @@ const parseSchemeDetails = (scheme) => {
         const rawDate = inst.date || inst.paymentDate || inst.paidAt || inst.createdAt;
         return {
             ...inst,
+            amount: instAmount,
             date: rawDate,
             paidAt: rawDate,
             paymentDate: rawDate,
@@ -72,6 +73,11 @@ const parseSchemeDetails = (scheme) => {
         };
     });
 
+    const maxInstallmentsPerTransaction = 5;
+    const maxInstallmentsOneTime = Math.min(maxInstallmentsPerTransaction, remainingMonths);
+    const maxPayableOneTime = maxInstallmentsOneTime * monthlyInstallment;
+    const remainingPayable = remainingMonths * monthlyInstallment;
+
     return {
         ...scheme,
         accumulatedGrams,
@@ -81,6 +87,10 @@ const parseSchemeDetails = (scheme) => {
         monthsPaid,
         paidInstallmentsCount: monthsPaid,
         remainingMonths,
+        remainingPayable,
+        maxInstallmentsPerTransaction,
+        maxInstallmentsOneTime,
+        maxPayableOneTime,
         weightedAverageRate,
         installments,
         minMonthlyInstallment,
