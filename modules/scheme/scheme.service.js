@@ -33,6 +33,15 @@ const parseSchemeDetails = (scheme) => {
     const redeemedGrams = Number(Number(scheme.redeemedGrams || 0).toFixed(4));
     const remainingGrams = Number(Math.max(0, accumulatedGrams - redeemedGrams).toFixed(4));
     const totalPaid = Number(scheme.totalPaid || 0);
+    const monthlyInstallment = Number(scheme.monthlyInstallment || 1);
+    const totalMonths = Number(scheme.totalMonths || 11);
+
+    // Dynamic month calculation based on totalPaid: accounts for bulk advance payments (e.g. 5 months paid at once)
+    const monthsPaid = Math.min(
+        totalMonths,
+        Math.floor(totalPaid / (monthlyInstallment > 0 ? monthlyInstallment : 1))
+    );
+    const remainingMonths = Math.max(0, totalMonths - monthsPaid);
 
     // Weighted average purchase rate from ledger lots: Total Paid / Total Accumulated Grams
     const weightedAverageRate = accumulatedGrams > 0 
@@ -43,12 +52,25 @@ const parseSchemeDetails = (scheme) => {
         ? 'PAN & AADHAAR' 
         : ((metadata.panNumber || scheme.customer?.panNumber) ? 'PAN' : (metadata.aadhaarNumber ? 'AADHAAR' : 'KYC_VERIFIED'));
 
-    // Format installments with 4-decimal precision for gramsCredited
-    const installments = (scheme.installments || []).map(inst => ({
-        ...inst,
-        gramsCredited: inst.gramsCredited != null ? Number(Number(inst.gramsCredited).toFixed(4)) : null,
-        goldRateApplied: inst.goldRateApplied != null ? Number(Number(inst.goldRateApplied).toFixed(2)) : null
-    }));
+    // Format installments with 4-decimal precision for gramsCredited and calculate months covered by each receipt
+    const installments = (scheme.installments || []).map(inst => {
+        const instAmount = Number(inst.amount || 0);
+        const monthsCovered = monthlyInstallment > 0 ? Math.round(instAmount / monthlyInstallment) : 1;
+        const rawDate = inst.date || inst.paymentDate || inst.paidAt || inst.createdAt;
+        return {
+            ...inst,
+            date: rawDate,
+            paidAt: rawDate,
+            paymentDate: rawDate,
+            createdAt: inst.createdAt || rawDate,
+            method: inst.method || inst.paymentMode || inst.paymentMethod || 'cash',
+            paymentMode: inst.method || inst.paymentMode || inst.paymentMethod || 'cash',
+            paymentMethod: inst.method || inst.paymentMode || inst.paymentMethod || 'cash',
+            monthsCovered: monthsCovered > 0 ? monthsCovered : 1,
+            gramsCredited: inst.gramsCredited != null ? Number(Number(inst.gramsCredited).toFixed(4)) : null,
+            goldRateApplied: inst.goldRateApplied != null ? Number(Number(inst.goldRateApplied).toFixed(2)) : null
+        };
+    });
 
     return {
         ...scheme,
@@ -56,6 +78,9 @@ const parseSchemeDetails = (scheme) => {
         redeemedGrams,
         remainingGrams,
         totalPaid,
+        monthsPaid,
+        paidInstallmentsCount: monthsPaid,
+        remainingMonths,
         weightedAverageRate,
         installments,
         minMonthlyInstallment,
@@ -403,7 +428,16 @@ const recordInstallment = async (schemeId, paymentData, performedBy, userRole = 
             }
         }
 
-        return updatedScheme;
+        const fullUpdatedScheme = await tx.scheme.findUnique({
+            where: { id: scheme.id },
+            include: {
+                customer: { select: { id: true, name: true, phone: true, email: true, panNumber: true } },
+                installments: { orderBy: { createdAt: 'desc' } },
+                activityLogs: { orderBy: { createdAt: 'desc' }, take: 10 }
+            }
+        });
+
+        return parseSchemeDetails(fullUpdatedScheme);
     });
 };
 
