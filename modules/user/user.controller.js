@@ -20,6 +20,13 @@ const getUserByPhone = asyncHandler(async (req, res) => {
   ApiResponse.success(user, 'User fetched successfully').send(res);
 });
 
+const searchCustomers = asyncHandler(async (req, res) => {
+  const query = req.query.query || req.query.q || req.query.search || req.query.phone;
+  const limit = parseInt(req.query.limit, 10) || 10;
+  const customers = await userService.searchCustomers(query, limit);
+  ApiResponse.success(customers, 'Customers found').send(res);
+});
+
 const createQuickCustomer = asyncHandler(async (req, res) => {
   const user = await userService.createQuickCustomer(req.body);
   ApiResponse.created(user, 'Quick customer created successfully').send(res);
@@ -157,6 +164,7 @@ const updateFcmToken = asyncHandler(async (req, res) => {
 module.exports = {
   getProfile,
   getUserByPhone,
+  searchCustomers,
   createQuickCustomer,
   updateProfile,
   uploadProfileImage,

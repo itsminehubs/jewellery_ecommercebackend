@@ -438,124 +438,22 @@ const createOrder = async (orderData) => {
         }
 
         // 2. Handle Scheme Redemption (with SECURITY VALIDATION & 27 RULES)
-        let redeemedSchemeId = null;
-        let schemeRedemptionAudit = null;
+        const redeemedSchemeIds = [];
         if (totalSchemeRedemption > 0) {
             const totalOrderAmount = Number(orderData.grandTotal || 0);
-            if (!orderData.redeemedSchemeId) throw new ApiError(400, 'Scheme ID is required for scheme redemption');
             if (!orderData.customerId) throw new ApiError(400, 'Customer ID is required to redeem a scheme');
 
-            const scheme = await tx.scheme.findUnique({
-                where: { id: orderData.redeemedSchemeId },
-                include: { customer: true, installments: true }
-            });
-            if (!scheme) throw new Error('Scheme not found');
+            // Find all scheme redemption payment entries
+            const schemePayments = (orderData.payments || []).filter(p => p.method === 'scheme_redemption');
+            const schemeTasks = schemePayments.length > 0 
+                ? schemePayments 
+                : (orderData.redeemedSchemeId ? [{ schemeId: orderData.redeemedSchemeId, amount: totalSchemeRedemption }] : []);
 
-            // Rule 10: Only the person in whose name the scheme is registered can redeem it
-            if (scheme.customerId !== orderData.customerId) {
-                throw new Error('SECURITY ALERT: Unauthorized scheme redemption attempt. Scheme does not belong to this customer (Rule 10).');
+            if (schemeTasks.length === 0) {
+                throw new ApiError(400, 'Scheme ID is required for scheme redemption');
             }
 
-            if (scheme.status === 'closed') throw new Error('Scheme is already closed');
-            if (scheme.status === 'redeemed' && Number(scheme.accumulatedGrams || 0) <= Number(scheme.redeemedGrams || 0)) {
-                throw new Error('Scheme has already been fully redeemed');
-            }
-
-            // Rule 5, 13 & 22: Tiered Benefit Ratio (4 Tiers)
-            // Early redemption (< 180 days) is allowed according to rules, not strictly blocked!
-            const enrollmentDate = new Date(scheme.startDate || scheme.createdAt);
-            const daysSinceEnrollment = Math.floor((new Date() - enrollmentDate) / (1000 * 60 * 60 * 24));
-
-            let benefitRatio = 0;
-            let benefitTier = 'NO_BENEFIT';
-            if (daysSinceEnrollment >= 365) {
-                benefitRatio = 0;
-                benefitTier = 'EXPIRED_365_DAYS_ZERO_BENEFIT';
-            } else if (daysSinceEnrollment < 180) {
-                benefitRatio = 0;
-                benefitTier = 'TENURE_UNDER_6_MONTHS_ZERO_BENEFIT';
-            } else if (daysSinceEnrollment >= 180 && daysSinceEnrollment < 330) {
-                benefitRatio = 0.5;
-                benefitTier = 'TENURE_6_TO_11_MONTHS_PARTIAL_BENEFIT';
-            } else if (daysSinceEnrollment >= 330 && daysSinceEnrollment < 365) {
-                benefitRatio = 1.0;
-                benefitTier = 'FULL_TENURE_100_PERCENT_BENEFIT';
-            }
-
-            // Rule 9: PAN card mandatory for purchases exceeding ₹2,00,000
-            const customerPan = scheme.customer?.panNumber || orderData.customerPan;
-            if (totalOrderAmount > 200000 && !customerPan) {
-                throw new Error('Rule 9 Mandatory Requirement: PAN card is required for jewellery purchases exceeding ₹2,00,000.');
-            }
-
-            // Rule 18 & 19: No additional offers or vouchers can be combined with scheme benefit
-            if (orderData.couponCode || orderData.voucherCode || (orderData.discount && Number(orderData.discount) > 0)) {
-                throw new Error('Rule 18 & 19 Restriction: Additional offers or vouchers cannot be combined with scheme benefit redemption.');
-            }
-
-            // Rule 26 & Management Authorization: Dual OTP Verification (Customer OTP + Management OTP to 7887973088)
-            const schemePaymentObj = (orderData.payments || []).find(p => p.method === 'scheme_redemption');
-            const schemeOtp = orderData.schemeOtp || schemePaymentObj?.otp;
-            const managementOtp = orderData.managementOtp || schemePaymentObj?.managementOtp;
-            const MANAGEMENT_PHONE = process.env.MANAGEMENT_SCHEME_OTP_PHONE || '7887973088';
-
-            const { cacheHelper } = require('../../config');
-            let customerPreVerified = false;
-            let mgmtPreVerified = false;
-            if (cacheHelper) {
-                customerPreVerified = await cacheHelper.get(`scheme_customer_verified_${scheme.id}`);
-                mgmtPreVerified = await cacheHelper.get(`scheme_mgmt_verified_${scheme.id}`);
-            }
-
-            // Step 1: Mandatory Customer OTP Verification
-            if (!schemeOtp && !customerPreVerified && !orderData.overrideSchemeOtp) {
-                throw new Error('Rule 26 Mandatory Requirement: Customer OTP verification is required to authorize scheme redemption.');
-            }
-            if (schemeOtp && !orderData.overrideSchemeOtp) {
-                const otpService = require('../../utils/otpService');
-                await otpService.verifyOTP(scheme.customer.phone, schemeOtp, false);
-            }
-
-            // Step 2: Mandatory Management OTP Verification (Strictly required for phone 7887973088)
-            if (!managementOtp && !mgmtPreVerified && !orderData.overrideSchemeOtp) {
-                throw new Error(`Management Security Alert: Management OTP verification (sent to ${MANAGEMENT_PHONE}) is mandatory. Sales executive cannot redeem or use the Savings Scheme in billing without management approval.`);
-            }
-            if (managementOtp && !orderData.overrideSchemeOtp) {
-                const otpService = require('../../utils/otpService');
-                let isMgmtValid = false;
-                try {
-                    await otpService.verifyOTP(`scheme_mgmt_otp_${scheme.id}`, String(managementOtp).trim(), false);
-                    isMgmtValid = true;
-                } catch (e) {
-                    try {
-                        await otpService.verifyOTP(MANAGEMENT_PHONE, String(managementOtp).trim(), false);
-                        isMgmtValid = true;
-                    } catch (e2) {}
-                }
-                if (!isMgmtValid && !mgmtPreVerified) {
-                    throw new Error(`Invalid or expired Management OTP for ${MANAGEMENT_PHONE}. Sales executive cannot redeem scheme without valid management authorization.`);
-                }
-            }
-
-            // Clear scheme verification flags after successful billing usage
-            if (cacheHelper) {
-                await cacheHelper.del(`scheme_customer_verified_${scheme.id}`).catch(() => {});
-                await cacheHelper.del(`scheme_mgmt_verified_${scheme.id}`).catch(() => {});
-            }
-
-            // Check items against Admin Configured Applicable Purities & Bullion Restrictions
-            let applicablePurities = ['22K', '18K', '14K'];
-            let metaDiscounts = {};
-            try {
-                if (scheme.notes && scheme.notes.trim().startsWith('{')) {
-                    const parsed = JSON.parse(scheme.notes);
-                    if (parsed.applicablePurities && Array.isArray(parsed.applicablePurities)) {
-                        applicablePurities = parsed.applicablePurities.map(p => String(p).toUpperCase());
-                    }
-                    metaDiscounts = parsed;
-                }
-            } catch (e) { }
-
+            // Calculate total cart weights and charges for scheme eligibility
             let totalNetGoldWeightRequired = 0;
             let eligibleMakingCharges = 0;
             let eligibleDiamondPrice = 0;
@@ -567,153 +465,256 @@ const createOrder = async (orderData) => {
                 if (product) {
                     const category = (product.category || '').toLowerCase();
                     const title = (product.title || product.name || '').toLowerCase();
-                    const purity = (product.purity || '').toUpperCase();
 
                     // Rule 7: Bullion restriction
                     if (category.includes('coin') || category.includes('bar') || title.includes('coin') || title.includes('gold bar')) {
                         throw new Error(`Bullion Restriction: Scheme is not applicable to coins or bars (${product.title || product.name}). Applicable to jewellery.`);
                     }
 
-                    if (scheme.schemeType === 'GOLD') {
-                        // Rule 6: Scheme applicable only to configured gold purities (22K, 18K, 14K)
-                        if (purity && applicablePurities.length > 0 && !applicablePurities.includes(purity)) {
-                            throw new Error(`Purity Restriction: Scheme is applicable to [${applicablePurities.join(', ')}] jewellery. Selected product is ${purity} (${product.title || product.name}).`);
-                        }
-                        const itemNetWeight = Number(item.netWeight || product.netWeight || product.weight || 0) * (item.quantity || 1);
-                        totalNetGoldWeightRequired += itemNetWeight;
-                        const itemMaking = Number(item.makingCharge || product.makingCharges || 0) * (item.quantity || 1);
-                        eligibleMakingCharges += itemMaking;
-                    } else if (scheme.schemeType === 'DIAMOND') {
-                        const itemDiamondVal = Number(item.stoneCharges || product.stoneCharges || 0) * (item.quantity || 1);
-                        eligibleDiamondPrice += itemDiamondVal;
-                        const itemMaking = Number(item.makingCharge || product.makingCharges || 0) * (item.quantity || 1);
-                        eligibleDiamondMaking += itemMaking;
+                    const itemNetWeight = Number(item.netWeight || product.netWeight || product.weight || 0) * (item.quantity || 1);
+                    totalNetGoldWeightRequired += itemNetWeight;
+                    const itemMaking = Number(item.makingCharge || product.makingCharges || 0) * (item.quantity || 1);
+                    eligibleMakingCharges += itemMaking;
+
+                    const itemDiamondVal = Number(item.stoneCharges || product.stoneCharges || 0) * (item.quantity || 1);
+                    eligibleDiamondPrice += itemDiamondVal;
+                    eligibleDiamondMaking += itemMaking;
+                }
+            }
+
+            let remainingGoldWeightToCover = totalNetGoldWeightRequired;
+
+            for (const sp of schemeTasks) {
+                const targetSchemeId = sp.schemeId || sp.referenceId || orderData.redeemedSchemeId;
+                if (!targetSchemeId) throw new ApiError(400, 'Scheme ID is required for each scheme redemption');
+
+                const scheme = await tx.scheme.findUnique({
+                    where: { id: targetSchemeId },
+                    include: { customer: true, installments: true }
+                });
+                if (!scheme) throw new Error(`Scheme #${targetSchemeId} not found`);
+
+                // Rule 10: Only the person in whose name the scheme is registered can redeem it
+                if (scheme.customerId !== orderData.customerId) {
+                    throw new Error('SECURITY ALERT: Unauthorized scheme redemption attempt. Scheme does not belong to this customer (Rule 10).');
+                }
+
+                if (scheme.status === 'closed') throw new Error(`Scheme #${scheme.schemeId || scheme.id} is already closed`);
+                if (scheme.status === 'redeemed' && Number(scheme.accumulatedGrams || 0) <= Number(scheme.redeemedGrams || 0)) {
+                    throw new Error(`Scheme #${scheme.schemeId || scheme.id} has already been fully redeemed`);
+                }
+
+                // Rule 5, 13 & 22: Tiered Benefit Ratio (4 Tiers)
+                const enrollmentDate = new Date(scheme.startDate || scheme.createdAt);
+                const daysSinceEnrollment = Math.floor((new Date() - enrollmentDate) / (1000 * 60 * 60 * 24));
+
+                let benefitRatio = 0;
+                let benefitTier = 'NO_BENEFIT';
+                if (daysSinceEnrollment >= 365) {
+                    benefitRatio = 0;
+                    benefitTier = 'EXPIRED_365_DAYS_ZERO_BENEFIT';
+                } else if (daysSinceEnrollment < 180) {
+                    benefitRatio = 0;
+                    benefitTier = 'TENURE_UNDER_6_MONTHS_ZERO_BENEFIT';
+                } else if (daysSinceEnrollment >= 180 && daysSinceEnrollment < 330) {
+                    benefitRatio = 0.5;
+                    benefitTier = 'TENURE_6_TO_11_MONTHS_PARTIAL_BENEFIT';
+                } else if (daysSinceEnrollment >= 330 && daysSinceEnrollment < 365) {
+                    benefitRatio = 1.0;
+                    benefitTier = 'FULL_TENURE_100_PERCENT_BENEFIT';
+                }
+
+                // Rule 9: PAN card mandatory for purchases exceeding ₹2,00,000
+                const customerPan = scheme.customer?.panNumber || orderData.customerPan;
+                if (totalOrderAmount > 200000 && !customerPan) {
+                    throw new Error('Rule 9 Mandatory Requirement: PAN card is required for jewellery purchases exceeding ₹2,00,000.');
+                }
+
+                // Rule 18 & 19: No additional offers or vouchers can be combined with scheme benefit
+                if (orderData.couponCode || orderData.voucherCode || (orderData.discount && Number(orderData.discount) > 0)) {
+                    throw new Error('Rule 18 & 19 Restriction: Additional offers or vouchers cannot be combined with scheme benefit redemption.');
+                }
+
+                // Rule 26 & Management Authorization: Dual OTP Verification
+                const schemeOtp = sp.otp || orderData.schemeOtp;
+                const managementOtp = sp.managementOtp || orderData.managementOtp;
+                const MANAGEMENT_PHONE = process.env.MANAGEMENT_SCHEME_OTP_PHONE || '7887973088';
+
+                const { cacheHelper } = require('../../config');
+                let customerPreVerified = false;
+                let mgmtPreVerified = false;
+                if (cacheHelper) {
+                    customerPreVerified = await cacheHelper.get(`scheme_customer_verified_${scheme.id}`);
+                    mgmtPreVerified = await cacheHelper.get(`scheme_mgmt_verified_${scheme.id}`);
+                }
+
+                // Step 1: Mandatory Customer OTP Verification
+                if (!schemeOtp && !customerPreVerified && !orderData.overrideSchemeOtp) {
+                    throw new Error(`Rule 26 Mandatory Requirement: Customer OTP verification is required to authorize redemption of scheme #${scheme.schemeId || scheme.id}.`);
+                }
+                if (schemeOtp && !orderData.overrideSchemeOtp) {
+                    const otpService = require('../../utils/otpService');
+                    await otpService.verifyOTP(scheme.customer.phone, schemeOtp, false);
+                }
+
+                // Step 2: Mandatory Management OTP Verification
+                if (!managementOtp && !mgmtPreVerified && !orderData.overrideSchemeOtp) {
+                    throw new Error(`Management Security Alert: Management OTP verification (sent to ${MANAGEMENT_PHONE}) is mandatory for scheme #${scheme.schemeId || scheme.id}. Sales executive cannot redeem without management approval.`);
+                }
+                if (managementOtp && !orderData.overrideSchemeOtp) {
+                    const otpService = require('../../utils/otpService');
+                    let isMgmtValid = false;
+                    try {
+                        await otpService.verifyOTP(`scheme_mgmt_otp_${scheme.id}`, String(managementOtp).trim(), false);
+                        isMgmtValid = true;
+                    } catch (e) {
+                        try {
+                            await otpService.verifyOTP(MANAGEMENT_PHONE, String(managementOtp).trim(), false);
+                            isMgmtValid = true;
+                        } catch (e2) {}
+                    }
+                    if (!isMgmtValid && !mgmtPreVerified) {
+                        throw new Error(`Invalid or expired Management OTP for ${MANAGEMENT_PHONE} on scheme #${scheme.schemeId || scheme.id}.`);
                     }
                 }
-            }
 
-            let newRedeemedGrams = Number(scheme.redeemedGrams || 0);
-            let leftoverGrams = 0;
-            let gramsDebited = 0;
-            let missingGrams = 0;
-            let newStatus = 'redeemed';
-
-            if (scheme.schemeType === 'GOLD') {
-                const totalAccumulated = Number(scheme.accumulatedGrams || 0);
-                const currentRedeemed = Number(scheme.redeemedGrams || 0);
-                const availableGrams = Number(Math.max(0, totalAccumulated - currentRedeemed).toFixed(4));
-
-                if (availableGrams <= 0) {
-                    throw new Error('Scheme has zero remaining gold grams available for redemption.');
+                // Clear scheme verification flags after successful billing usage
+                if (cacheHelper) {
+                    await cacheHelper.del(`scheme_customer_verified_${scheme.id}`).catch(() => {});
+                    await cacheHelper.del(`scheme_mgmt_verified_${scheme.id}`).catch(() => {});
                 }
 
-                gramsDebited = Number(Math.min(availableGrams, totalNetGoldWeightRequired).toFixed(4));
-                leftoverGrams = Number(Math.max(0, availableGrams - gramsDebited).toFixed(4));
-                missingGrams = Number(Math.max(0, totalNetGoldWeightRequired - availableGrams).toFixed(4));
-                newRedeemedGrams = Number((currentRedeemed + gramsDebited).toFixed(4));
-                newStatus = leftoverGrams > 0.0001 ? 'partially_redeemed' : 'redeemed';
+                let metaDiscounts = {};
+                try {
+                    if (scheme.notes && scheme.notes.trim().startsWith('{')) {
+                        metaDiscounts = JSON.parse(scheme.notes);
+                    }
+                } catch (e) { }
 
-                // Missing gold quantity handling using dedicated Scheme Gold Rate on redemption date
-                let schemeGoldRateUsed = null;
-                const p = String(scheme.purity || '22K').trim().toUpperCase();
-                const aliases = (p === '22K' || p === '916' || p === '22KT') ? ['22K', '916', '22KT'] :
-                                (p === '18K' || p === '750' || p === '18KT') ? ['18K', '750', '18KT'] :
-                                (p === '14K' || p === '585' || p === '14KT') ? ['14K', '585', '14KT'] :
-                                (p === '24K' || p === '999' || p === '24KT') ? ['24K', '999', '24KT'] : [p];
+                const thisSchemeAppliedAmount = Number(sp.amount || 0);
+                let newRedeemedGrams = Number(scheme.redeemedGrams || 0);
+                let leftoverGrams = 0;
+                let gramsDebited = 0;
+                let missingGrams = 0;
+                let newStatus = 'redeemed';
+                let schemeRedemptionAudit = null;
 
-                const schemeRateRecord = await tx.schemeGoldRate.findFirst({
-                    where: {
-                        metal: { equals: 'gold', mode: 'insensitive' },
-                        purity: { in: aliases, mode: 'insensitive' }
-                    },
-                    orderBy: [{ effectiveDate: 'desc' }, { createdAt: 'desc' }]
+                if (scheme.schemeType === 'GOLD') {
+                    const totalAccumulated = Number(scheme.accumulatedGrams || 0);
+                    const currentRedeemed = Number(scheme.redeemedGrams || 0);
+                    const availableGrams = Number(Math.max(0, totalAccumulated - currentRedeemed).toFixed(4));
+
+                    if (availableGrams <= 0) {
+                        throw new Error(`Scheme #${scheme.schemeId || scheme.id} has zero remaining gold grams available for redemption.`);
+                    }
+
+                    const weightToDebitAgainst = remainingGoldWeightToCover > 0 ? remainingGoldWeightToCover : availableGrams;
+                    gramsDebited = Number(Math.min(availableGrams, weightToDebitAgainst).toFixed(4));
+                    leftoverGrams = Number(Math.max(0, availableGrams - gramsDebited).toFixed(4));
+                    missingGrams = Number(Math.max(0, weightToDebitAgainst - availableGrams).toFixed(4));
+                    newRedeemedGrams = Number((currentRedeemed + gramsDebited).toFixed(4));
+                    newStatus = leftoverGrams > 0.0001 ? 'partially_redeemed' : 'redeemed';
+                    remainingGoldWeightToCover = Math.max(0, remainingGoldWeightToCover - gramsDebited);
+
+                    let schemeGoldRateUsed = null;
+                    const p = String(scheme.purity || '22K').trim().toUpperCase();
+                    const aliases = (p === '22K' || p === '916' || p === '22KT') ? ['22K', '916', '22KT'] :
+                                    (p === '18K' || p === '750' || p === '18KT') ? ['18K', '750', '18KT'] :
+                                    (p === '14K' || p === '585' || p === '14KT') ? ['14K', '585', '14KT'] :
+                                    (p === '24K' || p === '999' || p === '24KT') ? ['24K', '999', '24KT'] : [p];
+
+                    const schemeRateRecord = await tx.schemeGoldRate.findFirst({
+                        where: {
+                            metal: { equals: 'gold', mode: 'insensitive' },
+                            purity: { in: aliases, mode: 'insensitive' }
+                        },
+                        orderBy: [{ effectiveDate: 'desc' }, { createdAt: 'desc' }]
+                    });
+                    if (schemeRateRecord) {
+                        schemeGoldRateUsed = Number(Number(schemeRateRecord.ratePerGram).toFixed(2));
+                    }
+
+                    const configuredGoldFull = Number(metaDiscounts.goldMakingDiscountFull || metaDiscounts.goldMakingDiscountUpToFull || 100);
+                    const configuredGoldHalf = Number(metaDiscounts.goldMakingDiscountUpToHalf || 50);
+                    const makingDiscountPercent = benefitRatio === 1.0 ? configuredGoldFull : (benefitRatio === 0.5 ? configuredGoldHalf : 0);
+                    const makingDiscountAmount = roundTo2(eligibleMakingCharges * (makingDiscountPercent / 100));
+
+                    schemeRedemptionAudit = {
+                        schemeType: 'GOLD',
+                        purity: scheme.purity,
+                        availableGramsBefore: availableGrams,
+                        gramsDebited,
+                        leftoverGrams,
+                        missingGrams,
+                        totalNetGoldWeightRequired: Number(totalNetGoldWeightRequired.toFixed(4)),
+                        schemeGoldRateUsed,
+                        missingGoldPricedAtSchemeRate: (missingGrams > 0 && schemeGoldRateUsed) ? roundTo2(missingGrams * schemeGoldRateUsed) : 0,
+                        eligibleMakingCharges,
+                        makingDiscountPercent,
+                        makingDiscountAmount,
+                        benefitTier,
+                        benefitRatio
+                    };
+                } else if (scheme.schemeType === 'DIAMOND') {
+                    const configuredDiaFull = Number(metaDiscounts.diamondFlatDiscountFull || 40);
+                    const configuredDiaHalf = Number(metaDiscounts.diamondFlatDiscountHalf || 20);
+                    const configuredDiaMakingFull = Number(metaDiscounts.diamondMakingDiscountFull || metaDiscounts.diamondMakingFlatDiscountFull || 40);
+                    const configuredDiaMakingHalf = Number(metaDiscounts.diamondMakingDiscountHalf || metaDiscounts.diamondMakingFlatDiscountHalf || 20);
+
+                    const diamondDiscountPercent = benefitRatio === 1.0 ? configuredDiaFull : (benefitRatio === 0.5 ? configuredDiaHalf : 0);
+                    const makingDiscountPercent = benefitRatio === 1.0 ? configuredDiaMakingFull : (benefitRatio === 0.5 ? configuredDiaMakingHalf : 0);
+                    const diamondDiscountAmount = roundTo2(eligibleDiamondPrice * (diamondDiscountPercent / 100));
+                    const makingDiscountAmount = roundTo2(eligibleDiamondMaking * (makingDiscountPercent / 100));
+
+                    schemeRedemptionAudit = {
+                        schemeType: 'DIAMOND',
+                        eligibleDiamondPrice,
+                        diamondDiscountPercent,
+                        diamondDiscountAmount,
+                        eligibleDiamondMaking,
+                        makingDiscountPercent,
+                        makingDiscountAmount,
+                        benefitTier,
+                        benefitRatio
+                    };
+                }
+
+                // Update scheme status and grams balance
+                await tx.scheme.update({
+                    where: { id: scheme.id },
+                    data: {
+                        redeemedGrams: newRedeemedGrams,
+                        status: newStatus,
+                        redemptionDate: new Date(),
+                        redemptionValue: (Number(scheme.redemptionValue || 0) + thisSchemeAppliedAmount)
+                    }
                 });
-                if (schemeRateRecord) {
-                    schemeGoldRateUsed = Number(Number(schemeRateRecord.ratePerGram).toFixed(2));
-                }
 
-                // Gold Making Charge Discount: Up to 50% for 6-11m, Up to 100% for full tenure (0% if < 6m)
-                const configuredGoldFull = Number(metaDiscounts.goldMakingDiscountFull || metaDiscounts.goldMakingDiscountUpToFull || 100);
-                const configuredGoldHalf = Number(metaDiscounts.goldMakingDiscountUpToHalf || 50);
-                const makingDiscountPercent = benefitRatio === 1.0 ? configuredGoldFull : (benefitRatio === 0.5 ? configuredGoldHalf : 0);
-                const makingDiscountAmount = roundTo2(eligibleMakingCharges * (makingDiscountPercent / 100));
+                // Activity Log for Scheme Redemption
+                await tx.schemeActivityLog.create({
+                    data: {
+                        schemeId: scheme.id,
+                        action: 'REDEMPTION',
+                        description: `Scheme redeemed on order ${orderNumber}. Applied: ₹${thisSchemeAppliedAmount.toLocaleString('en-IN')}.${scheme.schemeType === 'GOLD' ? ` Debited: ${gramsDebited}g, Leftover: ${leftoverGrams}g.` : ''}`,
+                        details: {
+                            orderNumber,
+                            totalOrderAmount,
+                            thisSchemeAppliedAmount,
+                            daysSinceEnrollment,
+                            customerPhone: scheme.customer?.phone,
+                            managementPhone: MANAGEMENT_PHONE,
+                            managementAuthorized: true,
+                            customerPan: customerPan ? `****${customerPan.slice(-4)}` : null,
+                            ...schemeRedemptionAudit
+                        },
+                        performedById: orderData.billedBy
+                    }
+                });
 
-                schemeRedemptionAudit = {
-                    schemeType: 'GOLD',
-                    purity: scheme.purity,
-                    availableGramsBefore: availableGrams,
-                    gramsDebited,
-                    leftoverGrams,
-                    missingGrams,
-                    totalNetGoldWeightRequired: Number(totalNetGoldWeightRequired.toFixed(4)),
-                    schemeGoldRateUsed,
-                    missingGoldPricedAtSchemeRate: (missingGrams > 0 && schemeGoldRateUsed) ? roundTo2(missingGrams * schemeGoldRateUsed) : 0,
-                    eligibleMakingCharges,
-                    makingDiscountPercent,
-                    makingDiscountAmount,
-                    benefitTier,
-                    benefitRatio
-                };
-            } else if (scheme.schemeType === 'DIAMOND') {
-                // Diamond Discounts: Flat 20% on diamonds & 20% on making charges for 6-11m; Flat 40% on diamonds & 40% on making charges for full tenure (0% if < 6m)
-                const configuredDiaFull = Number(metaDiscounts.diamondFlatDiscountFull || 40);
-                const configuredDiaHalf = Number(metaDiscounts.diamondFlatDiscountHalf || 20);
-                const configuredDiaMakingFull = Number(metaDiscounts.diamondMakingDiscountFull || metaDiscounts.diamondMakingFlatDiscountFull || 40);
-                const configuredDiaMakingHalf = Number(metaDiscounts.diamondMakingDiscountHalf || metaDiscounts.diamondMakingFlatDiscountHalf || 20);
-
-                const diamondDiscountPercent = benefitRatio === 1.0 ? configuredDiaFull : (benefitRatio === 0.5 ? configuredDiaHalf : 0);
-                const makingDiscountPercent = benefitRatio === 1.0 ? configuredDiaMakingFull : (benefitRatio === 0.5 ? configuredDiaMakingHalf : 0);
-                const diamondDiscountAmount = roundTo2(eligibleDiamondPrice * (diamondDiscountPercent / 100));
-                const makingDiscountAmount = roundTo2(eligibleDiamondMaking * (makingDiscountPercent / 100));
-
-                schemeRedemptionAudit = {
-                    schemeType: 'DIAMOND',
-                    eligibleDiamondPrice,
-                    diamondDiscountPercent,
-                    diamondDiscountAmount,
-                    eligibleDiamondMaking,
-                    makingDiscountPercent,
-                    makingDiscountAmount,
-                    benefitTier,
-                    benefitRatio
-                };
+                redeemedSchemeIds.push(scheme.id);
+                // Append Scheme tag to order notes so printable invoice and reprints can parse it
+                orderData.notes = (orderData.notes ? orderData.notes + '||' : '') + `PAYMENT_REF:scheme:${scheme.schemeId || scheme.id}:${thisSchemeAppliedAmount}`;
             }
-
-            // Update scheme status and grams balance
-            await tx.scheme.update({
-                where: { id: scheme.id },
-                data: {
-                    redeemedGrams: newRedeemedGrams,
-                    status: newStatus,
-                    redemptionDate: new Date(),
-                    redemptionValue: (Number(scheme.redemptionValue || 0) + totalSchemeRedemption)
-                }
-            });
-
-            // Activity Log for Scheme Redemption
-            await tx.schemeActivityLog.create({
-                data: {
-                    schemeId: scheme.id,
-                    action: 'REDEMPTION',
-                    description: `Scheme redeemed on order ${orderNumber}. Applied: ₹${totalSchemeRedemption.toLocaleString('en-IN')}.${scheme.schemeType === 'GOLD' ? ` Debited: ${gramsDebited}g, Leftover: ${leftoverGrams}g.` : ''}`,
-                    details: {
-                        orderNumber,
-                        totalOrderAmount,
-                        totalSchemeRedemption,
-                        daysSinceEnrollment,
-                        customerPhone: scheme.customer?.phone,
-                        managementPhone: MANAGEMENT_PHONE,
-                        managementAuthorized: true,
-                        customerPan: customerPan ? `****${customerPan.slice(-4)}` : null,
-                        ...schemeRedemptionAudit
-                    },
-                    performedById: orderData.billedBy
-                }
-            });
-
-            redeemedSchemeId = scheme.id;
-            // Append Scheme tag to order notes so printable invoice and reprints can parse it
-            orderData.notes = (orderData.notes ? orderData.notes + '||' : '') + `PAYMENT_REF:scheme:${scheme.schemeId || scheme.id}:${totalSchemeRedemption}`;
         }
 
         // 3. Handle Credit Memo Redemption
@@ -837,11 +838,13 @@ const createOrder = async (orderData) => {
         });
 
         // Link Scheme Redemption to Order
-        if (redeemedSchemeId) {
-            await tx.scheme.update({
-                where: { id: redeemedSchemeId },
-                data: { redemptionOrderId: order.id }
-            });
+        if (redeemedSchemeIds.length > 0) {
+            for (const rSchemeId of redeemedSchemeIds) {
+                await tx.scheme.update({
+                    where: { id: rSchemeId },
+                    data: { redemptionOrderId: order.id }
+                });
+            }
         }
 
         // 5. Process Items
