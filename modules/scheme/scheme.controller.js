@@ -74,7 +74,9 @@ const recordInstallment = asyncHandler(async (req, res) => {
     const shop_id = isStaff ? (req.headers['x-shop-id'] || req.user.storeId || req.user.shop_id || req.body.shop_id || null) : null;
     const paymentData = {
         ...req.body,
-        ...(shop_id ? { shop_id } : {})
+        ...(shop_id ? { shop_id } : {}),
+        collectedByName: isStaff ? (req.body.collectedByName || req.body.salesExecutive || req.user.name || 'Store Executive') : null,
+        collectedByRole: isStaff ? (req.user.role || 'staff') : 'customer'
     };
     
     if (!paymentData.amount || !paymentData.method) {

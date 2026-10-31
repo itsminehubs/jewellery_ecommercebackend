@@ -128,6 +128,10 @@ const parseSchemeDetails = (scheme) => {
         const instAmount = Number(inst.amount || 0);
         const monthsCovered = monthlyInstallment > 0 ? Math.round(instAmount / monthlyInstallment) : 1;
         const rawDate = inst.date || inst.paymentDate || inst.paidAt || inst.createdAt;
+        const staffName = inst.collectedByName 
+            || inst.collectedBy?.name 
+            || (inst.notes && inst.notes.match(/Collected by ([^)]+)/)?.[1])
+            || null;
         return {
             ...inst,
             amount: instAmount,
@@ -140,7 +144,10 @@ const parseSchemeDetails = (scheme) => {
             paymentMethod: inst.method || inst.paymentMode || inst.paymentMethod || 'cash',
             monthsCovered: monthsCovered > 0 ? monthsCovered : 1,
             gramsCredited: inst.gramsCredited != null ? Number(Number(inst.gramsCredited).toFixed(4)) : null,
-            goldRateApplied: inst.goldRateApplied != null ? Number(Number(inst.goldRateApplied).toFixed(2)) : null
+            goldRateApplied: inst.goldRateApplied != null ? Number(Number(inst.goldRateApplied).toFixed(2)) : null,
+            collectedByName: staffName,
+            salesExecutive: staffName,
+            staffName: staffName
         };
     });
 
@@ -429,7 +436,10 @@ const enrollCustomer = async (data) => {
         where: { id: scheme.id },
         include: {
             customer: { select: { id: true, name: true, phone: true, email: true, panNumber: true } },
-            installments: { orderBy: { createdAt: 'desc' } },
+            installments: { 
+                orderBy: { createdAt: 'desc' },
+                include: { collectedBy: { select: { id: true, name: true, role: true, email: true } } }
+            },
             activityLogs: { orderBy: { createdAt: 'desc' }, take: 5 }
         }
     });
@@ -551,6 +561,9 @@ const recordInstallment = async (schemeId, paymentData, performedBy, userRole = 
             gramsCredited = Number((amount / goldRateApplied).toFixed(4));
         }
 
+        const staffName = paymentData.collectedByName || (isStaff ? 'Store Executive' : null);
+        const staffNote = staffName ? ` (Collected by ${staffName})` : '';
+
         const newInstallment = await tx.schemeInstallment.create({
             data: {
                 schemeId: scheme.id,
@@ -559,7 +572,7 @@ const recordInstallment = async (schemeId, paymentData, performedBy, userRole = 
                 gramsCredited,
                 method: paymentData.method,
                 transactionId: paymentData.transactionId,
-                notes: paymentData.notes || (isWithinWindow ? 'Paid on schedule (1-10 window)' : 'Installment payment'),
+                notes: paymentData.notes ? `${paymentData.notes}${staffNote}` : `${isWithinWindow ? 'Paid on schedule (1-10 window)' : 'Installment payment'}${staffNote}`,
                 collectedById: performedBy
             }
         });
@@ -590,7 +603,7 @@ const recordInstallment = async (schemeId, paymentData, performedBy, userRole = 
             data: {
                 schemeId: scheme.id,
                 action: 'INSTALLMENT',
-                description: `Paid ₹${amount.toLocaleString('en-IN')} covering ${monthsPaidCovered}/${totalMonths} months via ${paymentData.method.toUpperCase()}. Rate frozen at ₹${goldRateApplied || 'N/A'}/g.`,
+                description: `Paid ₹${amount.toLocaleString('en-IN')} covering ${monthsPaidCovered}/${totalMonths} months via ${paymentData.method.toUpperCase()}.${staffName ? ` Collected by ${staffName}.` : ''} Rate frozen at ₹${goldRateApplied || 'N/A'}/g.`,
                 details: {
                     amount,
                     method: paymentData.method,
@@ -600,7 +613,9 @@ const recordInstallment = async (schemeId, paymentData, performedBy, userRole = 
                     newAccumulatedGrams,
                     monthsPaidCovered,
                     paymentWindowDay: currentDay,
-                    isLateWithGrace: !isWithinWindow
+                    isLateWithGrace: !isWithinWindow,
+                    collectedByName: staffName,
+                    collectedBy: performedBy
                 },
                 performedById: performedBy
             }
@@ -629,7 +644,10 @@ const recordInstallment = async (schemeId, paymentData, performedBy, userRole = 
             where: { id: scheme.id },
             include: {
                 customer: { select: { id: true, name: true, phone: true, email: true, panNumber: true } },
-                installments: { orderBy: { createdAt: 'desc' } },
+                installments: { 
+                    orderBy: { createdAt: 'desc' },
+                    include: { collectedBy: { select: { id: true, name: true, role: true, email: true } } }
+                },
                 activityLogs: { orderBy: { createdAt: 'desc' }, take: 10 }
             }
         });
@@ -682,7 +700,10 @@ const getStoreSchemes = async (shopId, filter = {}) => {
         where,
         include: {
             customer: { select: { id: true, name: true, phone: true, email: true, panNumber: true } },
-            installments: true
+            installments: {
+                orderBy: { createdAt: 'desc' },
+                include: { collectedBy: { select: { id: true, name: true, role: true, email: true } } }
+            }
         },
         orderBy: { createdAt: 'desc' }
     });
@@ -699,7 +720,8 @@ const getUserSchemeStatements = async (customerId) => {
                 include: { performedBy: { select: { name: true } } }
             },
             installments: {
-                orderBy: { createdAt: 'desc' }
+                orderBy: { createdAt: 'desc' },
+                include: { collectedBy: { select: { id: true, name: true, role: true, email: true } } }
             }
         },
         orderBy: { createdAt: 'desc' }
@@ -714,7 +736,8 @@ const getSchemeById = async (schemeId) => {
         include: {
             customer: { select: { id: true, name: true, phone: true, email: true, panNumber: true } },
             installments: {
-                orderBy: { createdAt: 'desc' }
+                orderBy: { createdAt: 'desc' },
+                include: { collectedBy: { select: { id: true, name: true, role: true, email: true } } }
             },
             activityLogs: {
                 orderBy: { createdAt: 'desc' },

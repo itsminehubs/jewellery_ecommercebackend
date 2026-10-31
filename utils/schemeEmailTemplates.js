@@ -24,6 +24,8 @@ const generateSchemeEnrollmentEmail = (scheme, customer = {}, firstInstallment =
 
     let firstPaymentHtml = '';
     if (firstInstallment) {
+        const enrollingStaff = metadata.enrolledByName || firstInstallment.collectedByName || firstInstallment.staffName || firstInstallment.collectedBy?.name || null;
+        const firstMethodStr = (firstInstallment.method || firstInstallment.paymentMode || firstInstallment.paymentMethod || '—').toUpperCase();
         firstPaymentHtml = `
             <div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px; margin: 20px 0;">
                 <h4 style="margin: 0 0 10px 0; color: #166534; font-size: 14px; text-transform: uppercase;">Initial Installment Paid</h4>
@@ -41,9 +43,19 @@ const generateSchemeEnrollmentEmail = (scheme, customer = {}, firstInstallment =
                         <td style="padding: 4px 0; text-align: right; font-weight: bold; color: #b45309; font-family: monospace;">+${Number(firstInstallment.gramsCredited || 0).toFixed(4)} g</td>
                     </tr>
                     <tr>
-                        <td style="padding: 4px 0; color: #4b5563;">Payment Mode & Txn:</td>
-                        <td style="padding: 4px 0; text-align: right; text-transform: uppercase; font-size: 12px;">${firstInstallment.method || 'CASH'} ${firstInstallment.transactionId ? `(${firstInstallment.transactionId})` : ''}</td>
+                        <td style="padding: 4px 0; color: #4b5563;">Payment Mode:</td>
+                        <td style="padding: 4px 0; text-align: right; text-transform: uppercase; font-size: 12px; font-weight: bold;">${firstMethodStr}</td>
                     </tr>
+                    ${firstInstallment.transactionId ? `
+                    <tr>
+                        <td style="padding: 4px 0; color: #4b5563;">Transaction Ref / UTR:</td>
+                        <td style="padding: 4px 0; text-align: right; font-family: monospace; font-size: 12px; font-weight: bold;">${firstInstallment.transactionId}</td>
+                    </tr>` : ''}
+                    ${enrollingStaff ? `
+                    <tr>
+                        <td style="padding: 4px 0; color: #4b5563;">Attending Staff / Executive:</td>
+                        <td style="padding: 4px 0; text-align: right; font-size: 12px; font-weight: bold; color: #0f172a;">${enrollingStaff}</td>
+                    </tr>` : ''}
                 </table>
             </div>
         `;
@@ -159,17 +171,25 @@ const generateSchemeInstallmentEmail = (scheme, installment, customer = {}) => {
 
     const subject = `Installment Deposit Receipt & Passbook - #${schemeCode}`;
 
+    const staffCollector = installment.collectedByName 
+        || installment.staffName 
+        || installment.collectedBy?.name 
+        || (installment.notes && installment.notes.match(/Collected by ([^)]+)/)?.[1]) 
+        || null;
+
     // Generate table rows for immutable history
-    const historyRowsHtml = installments.map((inst, idx) => `
+    const historyRowsHtml = installments.map((inst, idx) => {
+        const staff = inst.collectedByName || inst.staffName || inst.collectedBy?.name || (inst.notes && inst.notes.match(/Collected by ([^)]+)/)?.[1]) || null;
+        return `
         <tr style="border-bottom: 1px solid #e2e8f0; font-size: 12px; color: #334155;">
             <td style="padding: 8px 6px; text-align: center;">${idx + 1}</td>
             <td style="padding: 8px 6px;">${formatDate(inst.date || inst.createdAt)}</td>
             <td style="padding: 8px 6px; text-align: right; font-weight: bold; font-family: monospace;">${formatCurrency(inst.amount)}</td>
             <td style="padding: 8px 6px; text-align: right; font-family: monospace;">₹${Number(inst.goldRateApplied || 0).toFixed(0)}/g</td>
             <td style="padding: 8px 6px; text-align: right; font-weight: bold; color: #b45309; font-family: monospace;">+${Number(inst.gramsCredited || 0).toFixed(4)}g</td>
-            <td style="padding: 8px 6px; text-transform: uppercase; font-size: 11px;">${inst.method || 'CASH'}</td>
+            <td style="padding: 8px 6px; text-transform: uppercase; font-size: 11px;">${(inst.method || inst.paymentMode || inst.paymentMethod || '—').toUpperCase()}${staff ? `<br/><span style="color:#64748b; font-size:10px;">By: ${staff}</span>` : ''}</td>
         </tr>
-    `).join('');
+    `;}).join('');
 
     const html = `
     <!DOCTYPE html>
@@ -200,7 +220,7 @@ const generateSchemeInstallmentEmail = (scheme, installment, customer = {}) => {
                 <div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 18px; margin: 20px 0;">
                     <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #bbf7d0; padding-bottom: 8px; margin-bottom: 10px;">
                         <span style="font-size: 12px; font-weight: bold; color: #166534; text-transform: uppercase;">Payment Deposit Receipt</span>
-                        <span style="font-size: 12px; font-family: monospace; color: #166534;">Txn: ${txnId.slice(-10)}</span>
+                        <span style="font-size: 12px; font-family: monospace; color: #166534;">Receipt #${schemeCode}-LOT${calculatedMonthsPaid}</span>
                     </div>
                     <table style="width: 100%; font-size: 13px; color: #1f2937;">
                         <tr>
@@ -217,8 +237,18 @@ const generateSchemeInstallmentEmail = (scheme, installment, customer = {}) => {
                         </tr>
                         <tr>
                             <td style="padding: 5px 0; color: #4b5563;">Payment Mode:</td>
-                            <td style="padding: 5px 0; text-align: right; text-transform: uppercase;">${methodStr}</td>
+                            <td style="padding: 5px 0; text-align: right; text-transform: uppercase; font-weight: bold;">${methodStr}</td>
                         </tr>
+                        ${installment.transactionId ? `
+                        <tr>
+                            <td style="padding: 5px 0; color: #4b5563;">Transaction Ref / UTR:</td>
+                            <td style="padding: 5px 0; text-align: right; font-family: monospace; font-weight: bold;">${installment.transactionId}</td>
+                        </tr>` : ''}
+                        ${staffCollector ? `
+                        <tr>
+                            <td style="padding: 5px 0; color: #4b5563;">Attending Staff / Executive:</td>
+                            <td style="padding: 5px 0; text-align: right; font-weight: bold; color: #0f172a;">${staffCollector}</td>
+                        </tr>` : ''}
                         <tr>
                             <td style="padding: 5px 0; color: #4b5563;">Receipt Date:</td>
                             <td style="padding: 5px 0; text-align: right;">${formatDate(installment.date || installment.createdAt)}</td>
