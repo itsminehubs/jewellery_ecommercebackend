@@ -16,6 +16,7 @@ router.put('/settings', checkPermission(PERMISSIONS.SCHEME_SETTINGS), schemeCont
 router.get('/', checkPermission(PERMISSIONS.SCHEME_VIEW), schemeController.getStoreSchemes);
 router.get('/statements', schemeController.getUserStatements);
 router.get('/:id', schemeController.getScheme);
+router.get('/:id/passbook-pdf', schemeController.downloadPassbookPdf);
 router.get('/:id/quote', schemeController.getRedemptionQuote);
 router.post('/:id/request-closure-otp', schemeController.requestClosureOTP);
 router.post('/:id/verify-closure-otp', schemeController.verifyClosureOTP);
