@@ -235,7 +235,7 @@ function generateSchemePassbookPdf(scheme, store = {}) {
                 cx += colDefs[6].w;
 
                 // Col 8: Mode
-                const modeStr = inst ? (inst.method || 'CASH').toUpperCase() : '-';
+                const modeStr = inst ? (inst.method || inst.paymentMode || inst.paymentMethod || '—').toUpperCase() : '-';
                 doc.font('Helvetica').text(modeStr, cx + 2, y + 3, { width: colDefs[7].w - 4, align: 'center' });
                 cx += colDefs[7].w;
 
