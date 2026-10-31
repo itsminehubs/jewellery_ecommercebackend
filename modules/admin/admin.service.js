@@ -13,17 +13,20 @@ const getDashboardStats = async (shopId = null) => {
   const filter = {}; // Order model doesn't have storeId, so global stats only
   const totalUsers = await prisma.user.count({ where: { role: 'user' } });
   
+  const productWhere = { deletedAt: null };
+  if (shopId && shopId !== 'all') {
+    productWhere.shopId = shopId;
+  }
+
   // Total of all products in catalog
   const totalProducts = await prisma.product.count({
-    where: {
-      deletedAt: null
-    }
+    where: productWhere
   });
 
   // Physical in-store products (excluding Made for Order, Carbonsmith World, and items in repair)
   const inStoreProducts = await prisma.product.count({
     where: {
-      deletedAt: null,
+      ...productWhere,
       carbonsmithworld: false,
       makeForOrder: false,
       NOT: { internalState: 'IN_REPAIR' }
@@ -33,7 +36,7 @@ const getDashboardStats = async (shopId = null) => {
   // Internal/store products currently in repair
   const repairProducts = await prisma.product.count({
     where: {
-      deletedAt: null,
+      ...productWhere,
       internalState: 'IN_REPAIR'
     }
   });
