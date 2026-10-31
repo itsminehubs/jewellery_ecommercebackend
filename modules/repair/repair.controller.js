@@ -80,6 +80,23 @@ exports.getAllRepairs = asyncHandler(async (req, res, next) => {
     if (req.query.customer) {
         filter.customerId = req.query.customer;
     }
+    if (req.query.startDate && req.query.endDate) {
+        let start = new Date(req.query.startDate);
+        let end = new Date(req.query.endDate);
+        if (isNaN(start.getTime())) start = new Date();
+        if (isNaN(end.getTime())) end = new Date();
+        if (typeof req.query.endDate === 'string' && req.query.endDate.length <= 10) {
+            end.setHours(23, 59, 59, 999);
+        }
+        if (start > end) { const tmp = start; start = end; end = tmp; }
+        filter.createdAt = { gte: start, lte: end };
+    } else if (req.query.date) {
+        const start = new Date(req.query.date);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(req.query.date);
+        end.setHours(23, 59, 59, 999);
+        filter.createdAt = { gte: start, lte: end };
+    }
 
     const page = parseInt(req.query.page, 10) || 1;
     const limit = parseInt(req.query.limit, 10) || 10;
@@ -123,6 +140,7 @@ exports.getAllRepairs = asyncHandler(async (req, res, next) => {
     });
 
     res.status(200).json({
+        success: true,
         status: 'success',
         results: formattedRepairs.length,
         pagination: {
