@@ -526,7 +526,7 @@ const updateProduct = async (productId, updateData, imagePaths = [], imagesToDel
 const deleteProduct = async (productId, userId = null) => {
   const product = await prisma.product.findUnique({
     where: { id: productId },
-    include: { images: true }
+    include: { images: true, metalDetails: true, stoneDetails: true, category: true }
   });
   if (!product) throw ApiError.notFound('Product not found');
 
@@ -661,7 +661,7 @@ const getProductsByCategory = async (categoryIdOrSlug, options = {}) => {
     orderBy,
     skip,
     take: Number(limit),
-    include: { images: true }
+    include: { images: true, metalDetails: true, stoneDetails: true, category: true }
   });
 
   const total = await prisma.product.count({ where });
@@ -693,7 +693,7 @@ const getFeaturedProducts = async (options = {}) => {
     orderBy,
     skip,
     take: Number(limit),
-    include: { images: true }
+    include: { images: true, metalDetails: true, stoneDetails: true, category: true }
   });
 
   const total = await prisma.product.count({ where });
@@ -726,7 +726,7 @@ const getTrendingProducts = async (options = {}) => {
     orderBy,
     skip,
     take: Number(limit),
-    include: { images: true }
+    include: { images: true, metalDetails: true, stoneDetails: true, category: true }
   });
 
   const total = await prisma.product.count({ where });
