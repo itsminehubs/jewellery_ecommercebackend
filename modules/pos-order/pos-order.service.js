@@ -971,7 +971,12 @@ const getStoreOrders = async (shop_id, query = {}) => {
     const where = { storeId: storeId };
 
     if (startDate && endDate) {
-        where.createdAt = { gte: new Date(startDate), lte: new Date(endDate) };
+        let s = new Date(startDate);
+        let e = new Date(endDate);
+        if (isNaN(s.getTime())) s = new Date();
+        if (isNaN(e.getTime())) e = new Date();
+        if (s > e) { const tmp = s; s = e; e = tmp; }
+        where.createdAt = { gte: s, lte: e };
     }
 
     if (search) {
@@ -1029,10 +1034,20 @@ const getStoreAnalytics = async (shop_id, startDate, endDate, includeOnline = fa
         }
     }
 
+    let startDateTime = new Date(startDate);
+    let endDateTime = new Date(endDate);
+    if (isNaN(startDateTime.getTime())) startDateTime = new Date();
+    if (isNaN(endDateTime.getTime())) endDateTime = new Date();
+    if (startDateTime > endDateTime) {
+        const temp = startDateTime;
+        startDateTime = endDateTime;
+        endDateTime = temp;
+    }
+
     const stats = await prisma.pOSOrder.aggregate({
         where: {
             ...(storeId ? { storeId: storeId } : {}),
-            createdAt: { gte: new Date(startDate), lte: new Date(endDate) },
+            createdAt: { gte: startDateTime, lte: endDateTime },
             status: 'completed'
         },
         _sum: {
@@ -1046,7 +1061,7 @@ const getStoreAnalytics = async (shop_id, startDate, endDate, includeOnline = fa
 
     const imitationStats = await prisma.imitationSale.aggregate({
         where: {
-            createdAt: { gte: new Date(startDate), lte: new Date(endDate) }
+            createdAt: { gte: startDateTime, lte: endDateTime }
         },
         _sum: { grandTotal: true },
         _count: { id: true }
@@ -1054,89 +1069,177 @@ const getStoreAnalytics = async (shop_id, startDate, endDate, includeOnline = fa
 
     const creditMemoStats = await prisma.creditMemo.aggregate({
         where: {
-            createdAt: { gte: new Date(startDate), lte: new Date(endDate) }
+            createdAt: { gte: startDateTime, lte: endDateTime }
         },
         _sum: { originalAmount: true },
         _count: { id: true }
     });
 
-    // Dynamic Chart Grouping Logic
-    const diffTime = Math.abs(new Date(endDate) - new Date(startDate));
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
+    // Fetch full POS Orders with line items, metalDetails and stoneDetails
     const posOrdersRaw = await prisma.pOSOrder.findMany({
-        where: { ...(storeId ? { storeId: storeId } : {}), createdAt: { gte: new Date(startDate), lte: new Date(endDate) }, status: 'completed' },
-        select: { createdAt: true, grandTotal: true, customerId: true },
+        where: {
+            ...(storeId ? { storeId: storeId } : {}),
+            createdAt: { gte: startDateTime, lte: endDateTime },
+            status: 'completed'
+        },
+        include: {
+            items: {
+                include: {
+                    product: {
+                        include: {
+                            metalDetails: true,
+                            stoneDetails: true
+                        }
+                    }
+                }
+            }
+        },
         orderBy: { createdAt: 'asc' }
     });
 
-    const uniqueCustomerIds = new Set();
-    posOrdersRaw.forEach(order => {
-        if (order.customerId) {
-            uniqueCustomerIds.add(order.customerId);
-        }
+    // Fetch Gold Bar Sales
+    const goldBarSalesRaw = await prisma.goldBarSale.findMany({
+        where: {
+            createdAt: { gte: startDateTime, lte: endDateTime },
+            status: { not: 'cancelled' }
+        },
+        orderBy: { createdAt: 'asc' }
     });
-    const totalCustomers = uniqueCustomerIds.size;
-
 
     const imitationSalesRaw = await prisma.imitationSale.findMany({
-        where: { createdAt: { gte: new Date(startDate), lte: new Date(endDate) } },
+        where: { createdAt: { gte: startDateTime, lte: endDateTime } },
         select: { createdAt: true, grandTotal: true },
         orderBy: { createdAt: 'asc' }
     });
 
     const creditMemosRaw = await prisma.creditMemo.findMany({
-        where: { createdAt: { gte: new Date(startDate), lte: new Date(endDate) } },
+        where: { createdAt: { gte: startDateTime, lte: endDateTime } },
         select: { createdAt: true, originalAmount: true },
         orderBy: { createdAt: 'asc' }
     });
 
     const onlineOrdersRaw = includeOnline ? await prisma.order.findMany({
-        where: { createdAt: { gte: new Date(startDate), lte: new Date(endDate) }, paymentStatus: 'completed' },
+        where: { createdAt: { gte: startDateTime, lte: endDateTime }, paymentStatus: 'completed' },
         select: { createdAt: true, grandTotal: true },
         orderBy: { createdAt: 'asc' }
     }) : [];
 
-    const groupMultiData = (posData, onlineData) => {
-        const map = new Map();
+    // Customer tracking
+    const uniqueCustomerIds = new Set();
+    posOrdersRaw.forEach(order => {
+        if (order.customerId) uniqueCustomerIds.add(order.customerId);
+    });
+    const totalCustomers = uniqueCustomerIds.size;
 
-        const processData = (data, key) => {
-            data.forEach(item => {
-                const date = new Date(item.createdAt);
-                let label = '';
-                if (diffDays <= 1) {
-                    const hr = date.getHours();
-                    label = `${hr % 12 || 12}${hr < 12 ? 'am' : 'pm'}`;
-                } else if (diffDays <= 7) {
-                    label = date.toLocaleDateString('en-US', { weekday: 'short' });
-                } else if (diffDays <= 31) {
-                    label = date.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+    // Detailed categorization: Gold Products vs Diamond Products
+    let goldProductSalesTotal = 0;
+    let goldProductCount = 0;
+    let goldProductWeightTotal = 0;
+
+    let diamondProductSalesTotal = 0;
+    let diamondProductCount = 0;
+    let diamondProductCaratTotal = 0;
+
+    // Data lists for timeline grouping
+    const goldTimePoints = [];
+    const diamondTimePoints = [];
+    const overallTimePoints = [];
+
+    posOrdersRaw.forEach(order => {
+        let orderRawGold = 0;
+        let orderRawDiamond = 0;
+        const grandTotal = Number(order.grandTotal || 0);
+
+        if (order.items && order.items.length > 0) {
+            order.items.forEach(item => {
+                const prod = item.product;
+                const itemTotal = Number(item.totalPrice != null ? item.totalPrice : (Number(item.unitPrice || 0) * (item.quantity || 1)));
+                const qty = Number(item.quantity || 1);
+
+                // Identify if product is a genuine Diamond product
+                const hasDiamonds = (prod?.stoneDetails || []).some(s =>
+                    (s.stoneType || '').trim().toLowerCase() === 'diamond'
+                ) || (prod?.productType || '').toLowerCase().includes('diamond');
+
+                if (hasDiamonds) {
+                    orderRawDiamond += itemTotal;
+                    diamondProductCount += qty;
+                    const carats = (prod?.stoneDetails || []).reduce((c, s) => {
+                        const isDia = (s.stoneType || '').trim().toLowerCase() === 'diamond';
+                        return c + (isDia ? Number(s.carat || 0) : 0);
+                    }, 0);
+                    diamondProductCaratTotal += carats * qty;
                 } else {
-                    label = date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+                    orderRawGold += itemTotal;
+                    goldProductCount += qty;
+                    const wt = Number(prod?.metalDetails?.netWeight || prod?.metalDetails?.grossWeight || 0);
+                    goldProductWeightTotal += wt * qty;
                 }
-
-                if (!map.has(label)) {
-                    map.set(label, { name: label, sales: 0, onlineSales: 0 });
-                }
-                map.get(label)[key] += Number(item.grandTotal || 0);
             });
-        };
 
-        processData(posData, 'sales');
-        if (onlineData) {
-            processData(onlineData, 'onlineSales');
+            // Reconcile order level grandTotal into gold vs diamond revenue
+            const totalRaw = orderRawGold + orderRawDiamond;
+            let orderGold = 0;
+            let orderDiamond = 0;
+
+            if (totalRaw > 0) {
+                orderDiamond = Number((grandTotal * (orderRawDiamond / totalRaw)).toFixed(2));
+                orderGold = Number((grandTotal - orderDiamond).toFixed(2));
+            } else if (orderRawDiamond > 0) {
+                orderDiamond = grandTotal;
+            } else {
+                orderGold = grandTotal;
+            }
+
+            diamondProductSalesTotal += orderDiamond;
+            goldProductSalesTotal += orderGold;
+
+            if (orderGold > 0) goldTimePoints.push({ createdAt: order.createdAt, amount: orderGold });
+            if (orderDiamond > 0) diamondTimePoints.push({ createdAt: order.createdAt, amount: orderDiamond });
+        } else {
+            // Fallback for orders without item breakdown: attribute to Gold
+            goldProductSalesTotal += grandTotal;
+            goldProductCount += 1;
+            if (grandTotal > 0) goldTimePoints.push({ createdAt: order.createdAt, amount: grandTotal });
         }
 
-        const arr = Array.from(map.values());
-        return arr.length > 0 ? arr : [{ name: 'No Data', sales: 0, onlineSales: 0 }];
-    };
+        overallTimePoints.push({ createdAt: order.createdAt, amount: grandTotal });
+    });
 
-    const groupData = (data, valueKey) => {
-        const map = new Map(); // using Map to preserve insertion order
+    // Gold Bar totals & time points
+    let goldBarSalesTotal = 0;
+    let goldBarCount = goldBarSalesRaw.length;
+    let goldBarWeightTotal = 0;
+    let goldBarQuantityTotal = 0;
+    const goldBarTimePoints = [];
+
+    goldBarSalesRaw.forEach(sale => {
+        const amt = Number(sale.grandTotal || 0);
+        const wt = Number(sale.netWeight || sale.grossWeight || 0);
+        const qty = Number(sale.quantity || 1);
+
+        goldBarSalesTotal += amt;
+        goldBarWeightTotal += wt;
+        goldBarQuantityTotal += qty;
+
+        goldBarTimePoints.push({ createdAt: sale.createdAt, amount: amt });
+        overallTimePoints.push({ createdAt: sale.createdAt, amount: amt });
+    });
+
+    // Imitation time points into overall
+    imitationSalesRaw.forEach(sale => {
+        overallTimePoints.push({ createdAt: sale.createdAt, amount: Number(sale.grandTotal || 0) });
+    });
+
+    // Dynamic Chart Grouping Logic
+    const diffTime = Math.abs(endDateTime - startDateTime);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    const groupDataByTime = (data) => {
+        const map = new Map();
         data.forEach(item => {
             const date = new Date(item.createdAt);
             let label = '';
-
             if (diffDays <= 1) {
                 const hr = date.getHours();
                 label = `${hr % 12 || 12}${hr < 12 ? 'am' : 'pm'}`;
@@ -1148,27 +1251,58 @@ const getStoreAnalytics = async (shop_id, startDate, endDate, includeOnline = fa
                 label = date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
             }
 
-            map.set(label, (map.get(label) || 0) + Number(item[valueKey] || 0));
+            map.set(label, (map.get(label) || 0) + Number(item.amount || item.grandTotal || item.originalAmount || 0));
         });
 
-        const arr = Array.from(map, ([name, sales]) => ({ name, sales }));
+        const arr = Array.from(map, ([name, sales]) => ({ name, sales: Math.round(sales) }));
         return arr.length > 0 ? arr : [{ name: 'No Data', sales: 0 }];
     };
 
     const charts = {
-        gold: groupMultiData(posOrdersRaw, onlineOrdersRaw),
-        imitation: groupData(imitationSalesRaw, 'grandTotal'),
-        credit: groupData(creditMemosRaw, 'originalAmount')
+        gold: groupDataByTime(goldTimePoints),
+        diamond: groupDataByTime(diamondTimePoints),
+        goldBar: groupDataByTime(goldBarTimePoints),
+        overall: groupDataByTime(overallTimePoints),
+        imitation: groupDataByTime(imitationSalesRaw),
+        credit: groupDataByTime(creditMemosRaw)
     };
 
+    // Safe Numeric Conversions (Prisma Decimal handles safely)
+    const posOrdersTotalNum = Number(stats._sum.grandTotal || 0);
+    const posTaxTotalNum = Number(stats._sum.taxTotal || 0);
+    const imitationTotalNum = Number(imitationStats._sum.grandTotal || 0);
+    const creditMemoTotalNum = Number(creditMemoStats._sum.originalAmount || 0);
+
+    const combinedTotalSales = posOrdersTotalNum + Number(goldBarSalesTotal || 0) + imitationTotalNum;
+
     return [{
-        totalSales: stats._sum.grandTotal || 0,
-        orderCount: stats._count.id || 0,
-        totalGST: stats._sum.taxTotal || 0,
-        imitationSalesTotal: imitationStats._sum.grandTotal || 0,
+        totalSales: Number(combinedTotalSales.toFixed(2)),
+        posOrdersTotal: Number(posOrdersTotalNum.toFixed(2)),
+        orderCount: (stats._count.id || 0) + goldBarCount + (imitationStats._count.id || 0),
+        totalGST: Number(posTaxTotalNum.toFixed(2)),
+
+        // Gold Products
+        goldProductSalesTotal: Number(goldProductSalesTotal.toFixed(2)),
+        goldProductCount,
+        goldProductWeightTotal: Number(goldProductWeightTotal.toFixed(3)),
+
+        // Diamond Products
+        diamondProductSalesTotal: Number(diamondProductSalesTotal.toFixed(2)),
+        diamondProductCount,
+        diamondProductCaratTotal: Number(diamondProductCaratTotal.toFixed(3)),
+
+        // Gold Bars
+        goldBarSalesTotal: Number(goldBarSalesTotal.toFixed(2)),
+        goldBarCount,
+        goldBarWeightTotal: Number(goldBarWeightTotal.toFixed(3)),
+        goldBarQuantityTotal,
+
+        // Imitation & Credit Memos
+        imitationSalesTotal: Number(imitationTotalNum.toFixed(2)),
         imitationCount: imitationStats._count.id || 0,
-        creditMemoTotal: creditMemoStats._sum.originalAmount || 0,
+        creditMemoTotal: Number(creditMemoTotalNum.toFixed(2)),
         creditMemoCount: creditMemoStats._count.id || 0,
+
         totalCustomers: totalCustomers || 0,
         charts
     }];

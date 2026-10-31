@@ -67,13 +67,23 @@ const creategoldBarSale = async (req, res) => {
 
 const getgoldBarSales = async (req, res) => {
   try {
-    const { page = 1, limit = 10, search = '', date = '' } = req.query;
+    const { page = 1, limit = 10, search = '', date = '', startDate = '', endDate = '' } = req.query;
     const skip = (page - 1) * limit;
 
     const where = {};
 
-    // Date filter
-    if (date) {
+    // Date range filter
+    if (startDate && endDate) {
+      let start = new Date(startDate);
+      let end = new Date(endDate);
+      if (isNaN(start.getTime())) start = new Date();
+      if (isNaN(end.getTime())) end = new Date();
+      if (typeof endDate === 'string' && endDate.length <= 10) {
+        end.setHours(23, 59, 59, 999);
+      }
+      if (start > end) { const tmp = start; start = end; end = tmp; }
+      where.createdAt = { gte: start, lte: end };
+    } else if (date) {
       const start = new Date(date);
       start.setHours(0, 0, 0, 0);
       const end = new Date(date);

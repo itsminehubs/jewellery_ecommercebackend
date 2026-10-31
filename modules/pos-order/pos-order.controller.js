@@ -40,9 +40,12 @@ const getStoreAnalytics = asyncHandler(async (req, res) => {
     if (shop_id === 'all' || shop_id === 'undefined' || !shop_id) {
         shop_id = null;
     }
-    const { startDate, endDate, includeOnline } = req.query;
+    let { startDate, endDate, includeOnline } = req.query;
     if (!startDate || !endDate) {
-        throw new ApiError(400, 'startDate and endDate are required');
+        startDate = new Date(0).toISOString();
+        const now = new Date();
+        now.setHours(23, 59, 59, 999);
+        endDate = now.toISOString();
     }
     const analytics = await posOrderService.getStoreAnalytics(shop_id, startDate, endDate, includeOnline === 'true');
     ApiResponse.success(analytics, 'Analytics fetched successfully').send(res);
