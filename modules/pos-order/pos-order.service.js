@@ -1235,28 +1235,105 @@ const getStoreAnalytics = async (shop_id, startDate, endDate, includeOnline = fa
     const diffTime = Math.abs(endDateTime - startDateTime);
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-    const groupDataByTime = (data) => {
-        const map = new Map();
-        data.forEach(item => {
-            const date = new Date(item.createdAt);
-            let label = '';
-            if (diffDays <= 1) {
-                const hr = date.getHours();
-                label = `${hr % 12 || 12}${hr < 12 ? 'am' : 'pm'}`;
-            } else if (diffDays <= 7) {
-                label = date.toLocaleDateString('en-US', { weekday: 'short' });
-            } else if (diffDays <= 31) {
-                label = date.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
-            } else {
-                label = date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
-            }
+    const getTimeLabel = (dateObj) => {
+        if (diffDays <= 1) {
+            const hr = dateObj.getHours();
+            return `${hr % 12 || 12}${hr < 12 ? 'am' : 'pm'}`;
+        } else if (diffDays <= 7) {
+            return dateObj.toLocaleDateString('en-US', { weekday: 'short' });
+        } else if (diffDays <= 31) {
+            return dateObj.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+        } else {
+            return dateObj.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+        }
+    };
 
+    const sortByTime = (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+
+    const groupDataByTime = (data) => {
+        const sorted = [...(data || [])].sort(sortByTime);
+        const map = new Map();
+        sorted.forEach(item => {
+            const date = new Date(item.createdAt);
+            const label = getTimeLabel(date);
             map.set(label, (map.get(label) || 0) + Number(item.amount || item.grandTotal || item.originalAmount || 0));
         });
 
         const arr = Array.from(map, ([name, sales]) => ({ name, sales: Math.round(sales) }));
-        return arr.length > 0 ? arr : [{ name: 'No Data', sales: 0 }];
+        return arr;
     };
+
+    // Multi-series All Products chart data (chronologically ordered)
+    const combinedProductEvents = [
+        ...goldTimePoints.map(p => ({ createdAt: p.createdAt, category: 'gold', amount: p.amount })),
+        ...diamondTimePoints.map(p => ({ createdAt: p.createdAt, category: 'diamond', amount: p.amount })),
+        ...goldBarTimePoints.map(p => ({ createdAt: p.createdAt, category: 'goldBar', amount: p.amount })),
+        ...imitationSalesRaw.map(p => ({ createdAt: p.createdAt, category: 'imitation', amount: Number(p.grandTotal || 0) }))
+    ].sort(sortByTime);
+
+    const allProductsMap = new Map();
+    combinedProductEvents.forEach(evt => {
+        const date = new Date(evt.createdAt);
+        const label = getTimeLabel(date);
+
+        if (!allProductsMap.has(label)) {
+            allProductsMap.set(label, { name: label, gold: 0, diamond: 0, goldBar: 0, imitation: 0, total: 0 });
+        }
+        const entry = allProductsMap.get(label);
+        const val = Math.round(Number(evt.amount || 0));
+        entry[evt.category] = (entry[evt.category] || 0) + val;
+        entry.total = (entry.total || 0) + val;
+    });
+    const allProductsChart = Array.from(allProductsMap.values());
+
+    // Month-wise aggregation chart
+    const monthMap = new Map();
+    overallTimePoints.sort(sortByTime).forEach(item => {
+        const date = new Date(item.createdAt);
+        const monthLabel = date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+        if (!monthMap.has(monthLabel)) {
+            monthMap.set(monthLabel, { name: monthLabel, sales: 0, orders: 0 });
+        }
+        const mEntry = monthMap.get(monthLabel);
+        mEntry.sales += Math.round(Number(item.amount || 0));
+        mEntry.orders += 1;
+    });
+    const monthWiseChart = Array.from(monthMap.values());
+
+    // Year-wise chart grouping
+    const yearMap = new Map();
+    overallTimePoints.sort(sortByTime).forEach(item => {
+        const date = new Date(item.createdAt);
+        const yr = String(date.getFullYear());
+        if (!yearMap.has(yr)) {
+            yearMap.set(yr, { name: yr, sales: 0, orders: 0 });
+        }
+        const yrEntry = yearMap.get(yr);
+        yrEntry.sales += Math.round(Number(item.amount || 0));
+        yrEntry.orders += 1;
+    });
+    const yearWiseChart = Array.from(yearMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+
+    // Date-wise granular timeline chart
+    const dateWiseMap = new Map();
+    overallTimePoints.sort(sortByTime).forEach(item => {
+        const date = new Date(item.createdAt);
+        let label = '';
+        if (diffDays <= 1) {
+            const hr = date.getHours();
+            label = `${hr % 12 || 12}${hr < 12 ? 'am' : 'pm'}`;
+        } else {
+            label = date.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+        }
+
+        if (!dateWiseMap.has(label)) {
+            dateWiseMap.set(label, { name: label, sales: 0, orders: 0 });
+        }
+        const dEntry = dateWiseMap.get(label);
+        dEntry.sales += Math.round(Number(item.amount || 0));
+        dEntry.orders += 1;
+    });
+    const dateWiseChart = Array.from(dateWiseMap.values());
 
     const charts = {
         gold: groupDataByTime(goldTimePoints),
@@ -1264,7 +1341,11 @@ const getStoreAnalytics = async (shop_id, startDate, endDate, includeOnline = fa
         goldBar: groupDataByTime(goldBarTimePoints),
         overall: groupDataByTime(overallTimePoints),
         imitation: groupDataByTime(imitationSalesRaw),
-        credit: groupDataByTime(creditMemosRaw)
+        credit: groupDataByTime(creditMemosRaw),
+        allProducts: allProductsChart,
+        dateWise: dateWiseChart,
+        monthWise: monthWiseChart,
+        yearWise: yearWiseChart
     };
 
     // Safe Numeric Conversions (Prisma Decimal handles safely)
