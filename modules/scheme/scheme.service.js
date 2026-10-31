@@ -1,11 +1,82 @@
 const prisma = require('../../config/prisma');
 const { validateAndCheckDuplicateUtr } = require('../../utils/utrValidator');
 const { generateSchemeNumber } = require('../../utils/invoiceNumberGenerator');
+const { hashPassword } = require('../../utils/hash');
 const { cacheHelper } = require('../../config');
 const crypto = require('crypto');
 const ApiError = require('../../utils/ApiError');
 const { createRazorpayOrder, fetchPayment } = require('../../config/razorpay');
+const { sendEmail } = require('../../jobs/email.job');
+const { generateSchemePassbookPdf } = require('../../utils/schemePdfGenerator');
+const { generateSchemeEnrollmentEmail, generateSchemeInstallmentEmail } = require('../../utils/schemeEmailTemplates');
+const logger = require('../../utils/logger');
 const MANAGEMENT_PHONE = process.env.MANAGEMENT_SCHEME_OTP_PHONE || '7887973088';
+
+const dispatchSchemeEnrollmentEmail = async (parsedScheme, customer, firstInstallment = null) => {
+    try {
+        const targetEmail = customer?.email || parsedScheme.customer?.email;
+        if (!targetEmail) return;
+
+        let store = null;
+        if (parsedScheme.shopId && parsedScheme.shopId !== 'ONLINE') {
+            store = await prisma.store.findUnique({ where: { shop_id: parsedScheme.shopId } }).catch(() => null);
+        }
+
+        const pdfBuffer = await generateSchemePassbookPdf(parsedScheme, store || {});
+        const emailContent = generateSchemeEnrollmentEmail(parsedScheme, customer, firstInstallment);
+
+        await sendEmail({
+            to: targetEmail,
+            emailType: 'customer',
+            subject: emailContent.subject,
+            text: emailContent.text,
+            html: emailContent.html,
+            attachments: [
+                {
+                    filename: `CarbonSmith_Passbook_${parsedScheme.schemeId || 'CS-SCH'}.pdf`,
+                    content: pdfBuffer,
+                    contentType: 'application/pdf'
+                }
+            ]
+        });
+        logger.info(`[Scheme] Enrollment certificate email dispatched to ${targetEmail}`);
+    } catch (err) {
+        logger.error(`[Scheme] Failed to dispatch enrollment email to ${customer?.email}: ${err.message}`);
+    }
+};
+
+const dispatchSchemeInstallmentEmail = async (parsedScheme, installment, customer) => {
+    try {
+        const targetEmail = customer?.email || parsedScheme.customer?.email;
+        if (!targetEmail) return;
+
+        let store = null;
+        if (parsedScheme.shopId && parsedScheme.shopId !== 'ONLINE') {
+            store = await prisma.store.findUnique({ where: { shop_id: parsedScheme.shopId } }).catch(() => null);
+        }
+
+        const pdfBuffer = await generateSchemePassbookPdf(parsedScheme, store || {});
+        const emailContent = generateSchemeInstallmentEmail(parsedScheme, installment, customer);
+
+        await sendEmail({
+            to: targetEmail,
+            emailType: 'customer',
+            subject: emailContent.subject,
+            text: emailContent.text,
+            html: emailContent.html,
+            attachments: [
+                {
+                    filename: `CarbonSmith_Passbook_${parsedScheme.schemeId || 'CS-SCH'}.pdf`,
+                    content: pdfBuffer,
+                    contentType: 'application/pdf'
+                }
+            ]
+        });
+        logger.info(`[Scheme] Installment receipt email dispatched to ${targetEmail}`);
+    } catch (err) {
+        logger.error(`[Scheme] Failed to dispatch installment email: ${err.message}`);
+    }
+};
 
 const parseSchemeDetails = (scheme) => {
     if (!scheme) return null;
@@ -148,11 +219,76 @@ const enrollCustomer = async (data) => {
         throw new Error(`Monthly installment cannot be less than the minimum installment of ₹${minMonthlyInstallment.toLocaleString('en-IN')} configured by Admin.`);
     }
 
-    // Individual vs Firm validation
-    const customer = await prisma.user.findUnique({
-        where: { id: data.customerId }
-    });
-    if (!customer) throw new Error('Customer not found');
+    // 1. Resolve Customer: by customerId OR by customerPhone (inline lookup/creation)
+    let customer = null;
+    if (data.customerId && data.customerId !== 'new') {
+        customer = await prisma.user.findUnique({
+            where: { id: data.customerId }
+        });
+    }
+
+    if (!customer && data.customerPhone) {
+        const cleanPhone = String(data.customerPhone).trim().replace(/\D/g, '');
+        if (cleanPhone) {
+            customer = await prisma.user.findUnique({
+                where: { phone: cleanPhone }
+            });
+
+            if (!customer) {
+                // Auto-create walk-in customer profile
+                const randomPassword = Math.random().toString(36).slice(-12);
+                const hashedPassword = await hashPassword(randomPassword);
+                customer = await prisma.user.create({
+                    data: {
+                        name: data.customerName?.trim() || 'Walk-in Customer',
+                        phone: cleanPhone,
+                        email: data.customerEmail?.trim() || null,
+                        password: hashedPassword,
+                        panNumber: data.panNumber?.trim().toUpperCase() || null,
+                        role: 'user',
+                        ...(data.address ? {
+                            addresses: {
+                                create: [{
+                                    name: data.customerName?.trim() || 'Walk-in Customer',
+                                    phone: cleanPhone,
+                                    addressLine1: typeof data.address === 'string'
+                                        ? (data.address || 'Showroom Walk-in')
+                                        : (data.address.addressLine1 || data.address.street || 'Showroom Walk-in'),
+                                    addressLine2: (typeof data.address === 'object' ? data.address.addressLine2 : null) || null,
+                                    city: (typeof data.address === 'object' ? data.address.city : '') || 'Pune',
+                                    state: (typeof data.address === 'object' ? data.address.state : '') || 'Maharashtra',
+                                    pincode: (typeof data.address === 'object' ? data.address.pincode : '') || '411027',
+                                    country: 'India',
+                                    type: 'home',
+                                    isDefault: true
+                                }]
+                            }
+                        } : {})
+                    }
+                });
+            } else {
+                // Update customer profile with any newly provided info
+                const updateData = {};
+                if ((!customer.name || customer.name === 'Walk-in Customer') && data.customerName?.trim()) {
+                    updateData.name = data.customerName.trim();
+                }
+                if (!customer.panNumber && data.panNumber?.trim()) {
+                    updateData.panNumber = data.panNumber.trim().toUpperCase();
+                }
+                if (!customer.email && data.customerEmail?.trim()) {
+                    updateData.email = data.customerEmail.trim();
+                }
+                if (Object.keys(updateData).length > 0) {
+                    customer = await prisma.user.update({
+                        where: { id: customer.id },
+                        data: updateData
+                    });
+                }
+            }
+        }
+    }
+
+    if (!customer) throw new Error('Customer information (valid Customer ID or Phone & Name) is required.');
 
     if (data.isFirm || (customer.gstNumber && data.enrollmentType === 'FIRM')) {
         throw new Error('Scheme enrollment is permitted only in an individual name. Enrollment in a firm name is strictly prohibited.');
@@ -186,7 +322,6 @@ const enrollCustomer = async (data) => {
         ? Number(data.bonusPercentage)
         : (storeSchemeSettings.bonusPercentage != null ? Number(storeSchemeSettings.bonusPercentage) : 100);
 
-
     // Update PAN on customer profile if supplied and not already present
     if (panNumber && !customer.panNumber) {
         await prisma.user.update({
@@ -201,7 +336,7 @@ const enrollCustomer = async (data) => {
     // Auto-generate Scheme Invoice Number (Format: CS-SCH-001, CS-SCH-002, etc.)
     const schemeId = await generateSchemeNumber(prisma);
 
-    // Bank details are optional (especially if paying via Razorpay)
+    // Bank and Nominee details
     const metadata = {
         minMonthlyInstallment: minMonthlyInstallment || monthlyInstallment,
         applicablePurities,
@@ -215,14 +350,20 @@ const enrollCustomer = async (data) => {
         paymentGateway: data.paymentMethod === 'razorpay' ? 'RAZORPAY' : (data.paymentGateway || 'ONLINE_OR_CASH'),
         enrolledAs: 'INDIVIDUAL',
         agreedTerms: true,
-        enrolledByRole: data.enrolledByRole || 'admin'
+        enrolledByRole: data.enrolledByRole || 'staff',
+        enrolledByName: data.performedByName || data.enrolledByName || null,
+        nominee: {
+            name: data.nomineeName?.trim() || null,
+            relation: data.nomineeRelation?.trim() || null,
+            phone: data.nomineePhone?.trim() || null
+        }
     };
 
     const scheme = await prisma.scheme.create({
         data: {
             schemeId,
             shopId: data.shop_id || 'ONLINE',
-            customerId: data.customerId,
+            customerId: customer.id,
             schemeType,
             purity,
             monthlyInstallment,
@@ -239,7 +380,7 @@ const enrollCustomer = async (data) => {
         data: {
             schemeId: scheme.id,
             action: 'ENROLLMENT',
-            description: `Enrolled in ${schemeType} Scheme (${purity || 'N/A'}) for ${totalMonths} months. Min EMI: ₹${minMonthlyInstallment}. Applicable Purities: ${applicablePurities.join(', ')}. KYC: ${metadata.kycProvided}.`,
+            description: `Enrolled in ${schemeType} Scheme (${purity || 'N/A'}) for ${totalMonths} months. Min EMI: ₹${minMonthlyInstallment}. Applicable Purities: ${applicablePurities.join(', ')}. KYC: ${metadata.kycProvided}.${data.performedByName ? ` Enrolled by ${data.performedByName}.` : ''}`,
             details: { 
                 monthlyInstallment, 
                 minMonthlyInstallment,
@@ -250,13 +391,55 @@ const enrollCustomer = async (data) => {
                     pan: panNumber ? `****${panNumber.slice(-4)}` : null, 
                     aadhaar: aadhaarNumber ? `****${aadhaarNumber.slice(-4)}` : null 
                 },
+                nominee: metadata.nominee,
                 metadata
             },
             performedById: data.performedBy
         }
     });
 
-    return parseSchemeDetails(scheme);
+    // Optional 1st installment payment right at enrollment
+    if (data.payFirstInstallment || data.firstInstallment) {
+        const payAmount = Number(data.firstInstallmentAmount || monthlyInstallment);
+        const payMethod = data.paymentMethod || data.method || 'cash';
+        const transId = data.transactionId || null;
+        
+        const recordedResult = await recordInstallment(
+            scheme.id,
+            {
+                amount: payAmount,
+                method: payMethod,
+                transactionId: transId,
+                notes: 'First installment collected at showroom enrollment'
+            },
+            data.performedBy || customer.id,
+            data.enrolledByRole || 'staff'
+        );
+
+        // Also dispatch enrollment certificate with 1st payment acknowledgement
+        const firstInst = recordedResult.installments?.find(i => i.transactionId === transId) || recordedResult.installments?.[0];
+        dispatchSchemeEnrollmentEmail(recordedResult, customer, firstInst).catch(err => {
+            logger.error(`Error in dispatchSchemeEnrollmentEmail: ${err.message}`);
+        });
+
+        return recordedResult;
+    }
+
+    const fullScheme = await prisma.scheme.findUnique({
+        where: { id: scheme.id },
+        include: {
+            customer: { select: { id: true, name: true, phone: true, email: true, panNumber: true } },
+            installments: { orderBy: { createdAt: 'desc' } },
+            activityLogs: { orderBy: { createdAt: 'desc' }, take: 5 }
+        }
+    });
+
+    const parsedScheme = parseSchemeDetails(fullScheme);
+    dispatchSchemeEnrollmentEmail(parsedScheme, customer, null).catch(err => {
+        logger.error(`Error in dispatchSchemeEnrollmentEmail: ${err.message}`);
+    });
+
+    return parsedScheme;
 };
 
 const recordInstallment = async (schemeId, paymentData, performedBy, userRole = 'staff') => {
@@ -428,13 +611,17 @@ const recordInstallment = async (schemeId, paymentData, performedBy, userRole = 
         if (isStaff && activeShopId && activeShopId !== 'ONLINE' && ['cash', 'upi', 'card', 'bank_transfer', 'neft_rtgs', 'neft', 'rtgs'].includes(paymentData.method)) {
             const cashbookService = require('../accounting/cashbook.service');
             if (cashbookService.updateCashbookOnEventPrisma) {
-                await cashbookService.updateCashbookOnEventPrisma(
-                    activeShopId, 
-                    amount, 
-                    paymentData.method, 
-                    'sale',
-                    tx
-                );
+                try {
+                    await cashbookService.updateCashbookOnEventPrisma(
+                        activeShopId, 
+                        amount, 
+                        paymentData.method, 
+                        'sale',
+                        tx
+                    );
+                } catch (cashErr) {
+                    logger.warn(`Cashbook update skipped for ${activeShopId}: ${cashErr.message}`);
+                }
             }
         }
 
@@ -447,7 +634,17 @@ const recordInstallment = async (schemeId, paymentData, performedBy, userRole = 
             }
         });
 
-        return parseSchemeDetails(fullUpdatedScheme);
+        const parsedScheme = parseSchemeDetails(fullUpdatedScheme);
+
+        // Dispatch updated installment receipt email with updated passbook PDF in background
+        dispatchSchemeInstallmentEmail(parsedScheme, newInstallment, fullUpdatedScheme.customer).catch(err => {
+            logger.error(`Error in dispatchSchemeInstallmentEmail: ${err.message}`);
+        });
+
+        return parsedScheme;
+    }, {
+        maxWait: 15000,
+        timeout: 30000
     });
 };
 

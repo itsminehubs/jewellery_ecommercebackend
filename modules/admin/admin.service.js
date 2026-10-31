@@ -12,12 +12,32 @@ const { generateEmployeeWelcomeEmail } = require('../../utils/emailTemplates');
 const getDashboardStats = async (shopId = null) => {
   const filter = {}; // Order model doesn't have storeId, so global stats only
   const totalUsers = await prisma.user.count({ where: { role: 'user' } });
+  
+  // Total of all products in catalog
   const totalProducts = await prisma.product.count({
     where: {
-      deletedAt: null,
-      carbonsmithworld: false // Exclude Carbonsmith World products
+      deletedAt: null
     }
   });
+
+  // Physical in-store products (excluding Made for Order, Carbonsmith World, and items in repair)
+  const inStoreProducts = await prisma.product.count({
+    where: {
+      deletedAt: null,
+      carbonsmithworld: false,
+      makeForOrder: false,
+      NOT: { internalState: 'IN_REPAIR' }
+    }
+  });
+
+  // Internal/store products currently in repair
+  const repairProducts = await prisma.product.count({
+    where: {
+      deletedAt: null,
+      internalState: 'IN_REPAIR'
+    }
+  });
+
   const totalOrders = await prisma.order.count({ where: filter });
   const pendingOrders = await prisma.order.count({ where: { ...filter, orderStatus: 'pending' } });
 
@@ -51,6 +71,8 @@ const getDashboardStats = async (shopId = null) => {
   return {
     totalUsers,
     totalProducts,
+    inStoreProducts,
+    repairProducts,
     totalOrders,
     pendingOrders,
     totalRevenue,
@@ -510,13 +532,104 @@ const getStockAnalytics = async () => {
     value: Number(c.value || 0)
   }));
 
+  // Official diamond stone filter matching product.service.js
+  const diamondStoneFilter = {
+    AND: [
+      { rate: { gt: 0 } },
+      {
+        OR: [
+          {
+            AND: [
+              { stoneType: { equals: 'Diamond', mode: 'insensitive' } },
+              {
+                OR: [
+                  { clarity: { not: null, not: '' } },
+                  { cut: { not: null, not: '' } },
+                  { color: { not: null, not: '' } }
+                ]
+              }
+            ]
+          },
+          {
+            AND: [
+              { color: { not: null, not: '' } },
+              { clarity: { not: null, not: '' } },
+              { cut: { not: null, not: '' } }
+            ]
+          }
+        ]
+      }
+    ]
+  };
+
+  // Plain Gold stock grouped by category: Gold metal and NO diamond details
+  const goldProducts = await prisma.product.findMany({
+    where: {
+      deletedAt: null,
+      carbonsmithworld: false,
+      metalDetails: { metalType: { in: ['Gold', 'gold'] } },
+      stoneDetails: { none: diamondStoneFilter }
+    },
+    select: {
+      stock: true,
+      finalPrice: true,
+      category: {
+        select: {
+          id: true,
+          name: true
+        }
+      }
+    }
+  });
+
+  // Diamond stock grouped by category: Gold or Platinum metal and WITH diamond details
+  const diamondProducts = await prisma.product.findMany({
+    where: {
+      deletedAt: null,
+      carbonsmithworld: false,
+      metalDetails: { metalType: { in: ['Gold', 'gold', 'Platinum', 'platinum'] } },
+      stoneDetails: { some: diamondStoneFilter }
+    },
+    select: {
+      stock: true,
+      finalPrice: true,
+      category: {
+        select: {
+          id: true,
+          name: true
+        }
+      }
+    }
+  });
+
+  const aggregateByCategory = (products) => {
+    const map = {};
+    for (const p of products) {
+      const catId = p.category?.id || 'uncategorized';
+      const catName = p.category?.name || 'Unknown';
+      if (!map[catId]) {
+        map[catId] = { categoryId: catId, name: catName, count: 0, value: 0 };
+      }
+      map[catId].count += Number(p.stock || 0);
+      map[catId].value += (Number(p.stock || 0) * Number(p.finalPrice || 0));
+    }
+    return Object.values(map)
+      .filter(c => c.count > 0)
+      .sort((a, b) => b.count - a.count);
+  };
+
+  const goldCategoryStock = aggregateByCategory(goldProducts);
+  const diamondCategoryStock = aggregateByCategory(diamondProducts);
+
   return {
     totalStock: stats._sum.stock || 0,
     totalValue: Number(totalValue),
     lowStockCount,
     repairCount,
     dispatchedOrders,
-    categoryStock
+    categoryStock,
+    goldCategoryStock,
+    diamondCategoryStock
   };
 };
 

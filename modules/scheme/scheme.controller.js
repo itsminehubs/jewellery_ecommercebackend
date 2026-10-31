@@ -49,15 +49,17 @@ const enrollCustomer = asyncHandler(async (req, res) => {
     // For staff enrolling in-store, use passed store or primary store
     const shopId = await resolveShopId(req, !isStaff);
 
-    // If staff provided customerId, use it; otherwise, the authenticated user is enrolling themselves
-    const customerId = (isStaff && req.body.customerId) ? req.body.customerId : req.user.id;
+    // If staff provided customerId, use it; if staff enrolling new customer, pass null so schemeService creates/finds by phone; otherwise customer enrolling themselves
+    const customerId = (isStaff && req.body.customerId) ? req.body.customerId : (isStaff ? null : req.user.id);
 
     const schemeData = {
         ...req.body,
         shop_id: shopId,
         customerId,
         enrolledByRole: isStaff ? req.user.role : 'customer',
-        performedBy: req.user.id
+        enrolledByName: isStaff ? (req.user.name || 'Sales Staff') : req.user.name,
+        performedBy: req.user.id,
+        performedByName: req.user.name || null
     };
 
     const scheme = await schemeService.enrollCustomer(schemeData);
@@ -129,6 +131,30 @@ const getScheme = asyncHandler(async (req, res) => {
     }
 
     ApiResponse.success(scheme, 'Scheme fetched successfully').send(res);
+});
+
+const downloadPassbookPdf = asyncHandler(async (req, res) => {
+    const schemeId = req.params.id;
+    const isStaff = isStaffUser(req.user);
+    const scheme = await schemeService.getSchemeById(schemeId);
+    if (!scheme) return ApiResponse.error('Scheme not found', 404).send(res);
+
+    if (!isStaff && scheme.customerId !== req.user.id) {
+        return ApiResponse.error('Access denied: You can only download your own passbook', 403).send(res);
+    }
+
+    let store = null;
+    if (scheme.shopId && scheme.shopId !== 'ONLINE') {
+        store = await prisma.store.findUnique({ where: { shop_id: scheme.shopId } }).catch(() => null);
+    }
+
+    const { generateSchemePassbookPdf } = require('../../utils/schemePdfGenerator');
+    const pdfBuffer = await generateSchemePassbookPdf(scheme, store || {});
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="CarbonSmith_Passbook_${scheme.schemeId || 'CS-SCH'}.pdf"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+    res.end(pdfBuffer);
 });
 
 const updateScheme = asyncHandler(async (req, res) => {
@@ -393,6 +419,7 @@ module.exports = {
     getStoreSchemes,
     getUserStatements,
     getScheme,
+    downloadPassbookPdf,
     updateScheme,
     deleteScheme,
     getSchemeTerms,

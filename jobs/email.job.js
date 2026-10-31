@@ -3,7 +3,12 @@ const nodemailer = require('nodemailer');
 const logger = require('../utils/logger');
 
 const emailQueue = new Queue('email-queue', {
-  redis: { host: process.env.REDIS_HOST, port: process.env.REDIS_PORT }
+  redis: { host: process.env.REDIS_HOST || 'localhost', port: process.env.REDIS_PORT || 6379 }
+});
+
+// Suppress uncaught redis connection crashes
+emailQueue.on('error', (err) => {
+  logger.warn(`Bull email queue connection notice: ${err.message}`);
 });
 
 const customerTransporter = nodemailer.createTransport({
@@ -11,7 +16,7 @@ const customerTransporter = nodemailer.createTransport({
   port: process.env.SMTP_PORT || 465,
   secure: true, // Use true for 465, false for other ports
   auth: {
-    user: process.env.SMTP_USER_CUSTOMER,
+    user: process.env.SMTP_USER_CUSTOMER || 'donotreply@thecarbonsmith.com',
     pass: process.env.SMTP_PASS_CUSTOMER
   }
 });
@@ -21,14 +26,14 @@ const opsTransporter = nodemailer.createTransport({
   port: process.env.SMTP_PORT || 465,
   secure: true,
   auth: {
-    user: process.env.SMTP_USER_OPS,
+    user: process.env.SMTP_USER_OPS || 'Operations@thecarbonsmith.com',
     pass: process.env.SMTP_PASS_OPS
   }
 });
 
-emailQueue.process(async (job) => {
-  const { to, cc, subject, text, html, emailType, attachments } = job.data;
-  
+const sendDirectEmail = async (emailData) => {
+  const { to, cc, subject, text, html, emailType, attachments } = emailData;
+
   let transporter;
   let fromAddress;
   let finalCc = cc ? cc : '';
@@ -36,15 +41,11 @@ emailQueue.process(async (job) => {
   if (emailType === 'ops') {
     transporter = opsTransporter;
     fromAddress = process.env.SMTP_USER_OPS || 'Operations@thecarbonsmith.com';
-    // Append piyush for ops emails
     const opsUniversalCc = 'piyush.pradeep@thecarbonsmith.com';
     finalCc = finalCc ? `${finalCc}, ${opsUniversalCc}` : opsUniversalCc;
   } else {
-    // Default to customer email
     transporter = customerTransporter;
     fromAddress = process.env.SMTP_USER_CUSTOMER || 'donotreply@thecarbonsmith.com';
-    
-    // Always append sales and akshay to customer emails
     const customerUniversalCc = 'sales@thecarbonsmith.com, akshay.gondhali@thecarbonsmith.com';
     finalCc = finalCc ? `${finalCc}, ${customerUniversalCc}` : customerUniversalCc;
   }
@@ -55,36 +56,38 @@ emailQueue.process(async (job) => {
     finalCc = Array.from(ccSet).join(', ');
   }
 
-  try {
-    const mailOptions = {
-      from: fromAddress,
-      to,
-      cc: finalCc,
-      subject,
-      text,
-      html
-    };
+  const mailOptions = {
+    from: `"CarbonSmith" <${fromAddress}>`,
+    to,
+    cc: finalCc,
+    subject,
+    text,
+    html
+  };
 
-    if (attachments) {
-      mailOptions.attachments = attachments;
-    }
-
-    await transporter.sendMail(mailOptions);
-
-    logger.info(`[${emailType || 'customer'}] Email sent to ${to}`);
-    return { success: true };
-  } catch (error) {
-    logger.error(`[${emailType || 'customer'}] Email failed to ${to}: ${error.message}`);
-    throw error;
+  if (attachments) {
+    mailOptions.attachments = attachments;
   }
+
+  await transporter.sendMail(mailOptions);
+  logger.info(`[${emailType || 'customer'}] Email sent directly to ${to}`);
+  return { success: true };
+};
+
+emailQueue.process(async (job) => {
+  return await sendDirectEmail(job.data);
 });
 
 const sendEmail = async (emailData) => {
-  // emailData should now optionally include emailType (e.g. 'ops')
-  await emailQueue.add(emailData, {
-    attempts: 3,
-    backoff: { type: 'exponential', delay: 2000 }
-  });
+  try {
+    await emailQueue.add(emailData, {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 2000 }
+    });
+  } catch (queueErr) {
+    logger.warn(`Email queue add failed (${queueErr.message}), sending directly...`);
+    await sendDirectEmail(emailData);
+  }
 };
 
-module.exports = { emailQueue, sendEmail };
+module.exports = { emailQueue, sendEmail, sendDirectEmail };
