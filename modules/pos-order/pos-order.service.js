@@ -530,9 +530,12 @@ const createOrder = async (orderData) => {
                     throw new Error('Rule 9 Mandatory Requirement: PAN card is required for jewellery purchases exceeding ₹2,00,000.');
                 }
 
-                // Rule 18 & 19: No additional offers or vouchers can be combined with scheme benefit
-                if (orderData.couponCode || orderData.voucherCode || (orderData.discount && Number(orderData.discount) > 0)) {
-                    throw new Error('Rule 18 & 19 Restriction: Additional offers or vouchers cannot be combined with scheme benefit redemption.');
+                // Rule 18 & 19: No additional promotional coupons or vouchers can be combined with scheme benefit
+                if (orderData.couponCode || orderData.voucherCode) {
+                    throw new Error('Rule 18 & 19 Restriction: Additional promotional coupons or vouchers cannot be combined with scheme benefit redemption.');
+                }
+                if (orderData.discount && Number(orderData.discount) > 0 && !orderData.isSchemeDiscount) {
+                    throw new Error('Rule 18 & 19 Restriction: Additional manual discounts cannot be combined with scheme benefit redemption.');
                 }
 
                 // Rule 26 & Management Authorization: Dual OTP Verification

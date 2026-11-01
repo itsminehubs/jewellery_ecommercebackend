@@ -44,7 +44,7 @@ function generateSchemePassbookPdf(scheme, store = {}) {
                 : Math.min(totalMonths, Math.floor(totalPaid / (monthlyInstallment > 0 ? monthlyInstallment : 1)));
 
             // Sort installments chronologically (oldest to newest)
-            const sortedInsts = [...installments].sort((a, b) => new Date(a.date || a.createdAt || 0) - new Date(b.date || b.createdAt || 0));
+            const sortedInsts = [...installments].sort((a, b) => new Date(a.date || a.paymentDate || a.paidAt || a.createdAt || 0) - new Date(b.date || b.paymentDate || b.paidAt || b.createdAt || 0));
 
             // Map each month index (0 to totalMonths - 1) to covering installment
             const monthCoverageMap = {};
@@ -220,7 +220,7 @@ function generateSchemePassbookPdf(scheme, store = {}) {
                 cx += colDefs[3].w;
 
                 // Col 5: Paid Date
-                const pDate = inst ? formatDate(inst.date || inst.createdAt) : '-';
+                const pDate = inst ? formatDate(inst.date || inst.paymentDate || inst.paidAt || inst.createdAt) : '-';
                 doc.font('Helvetica').text(pDate, cx + 2, y + 3, { width: colDefs[4].w - 4, align: 'center' });
                 cx += colDefs[4].w;
 
@@ -251,7 +251,7 @@ function generateSchemePassbookPdf(scheme, store = {}) {
             doc.fillColor('#000000').fontSize(7.5).font('Helvetica-Bold');
             doc.text('ACCUMULATED TOTAL: ' + formatCurrency(totalPaid), left + 8, y + 4);
             doc.text(`TOTAL GOLD CREDITED: ${accumulatedGrams.toFixed(4)} g`, left + 200, y + 4);
-            doc.text(`${calculatedMonthsPaid} of ${totalMonths} Months Completed (${installments.length} Receipts)`, left + 370, y + 4, { align: 'right', width: 155 });
+            doc.text(`${calculatedMonthsPaid} of ${totalMonths} Months Completed (${installments.length} Receipts${calculatedMonthsPaid > installments.length ? `, ${calculatedMonthsPaid - installments.length} in Advance` : ''})`, left + 340, y + 4, { align: 'right', width: 185 });
 
             // 7. Terms & Regulatory Notes
             y += 20;
