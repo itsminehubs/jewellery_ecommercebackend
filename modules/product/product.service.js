@@ -39,7 +39,9 @@ const getAllProducts = async (filters = {}, options = {}) => {
     where.id = { not: exclude };
   }
 
-  if (status && status !== 'all') {
+  if (status === 'in_repair') {
+    where.internalState = 'IN_REPAIR';
+  } else if (status && status !== 'all') {
     where.status = status;
   } else if (Object.keys(filters).length === 0 && status !== 'all') {
     // Default to active, out_of_stock, and sold for public store
@@ -226,6 +228,10 @@ const getProductById = async (productId) => {
     });
 
     if (!product) throw ApiError.notFound('Product not found');
+
+  if (product.internalState === 'IN_REPAIR') {
+    throw ApiError.badRequest('Cannot delete a product that is currently in repair at the workshop. Please receive it back from repair first.');
+  }
 
     productData = product;
     // Cache for 10 minutes
