@@ -488,11 +488,13 @@ const getStockAnalytics = async () => {
     _sum: { stock: true }
   });
 
-  // For total value, we need db.$queryRaw because it's stock * price
+  // For total value, we need db.$queryRaw because it's stock * price (excluding items in repair)
   const queryResult = await prisma.$queryRaw`
     SELECT SUM(p.stock * p."finalPrice") as "totalValue" 
     FROM "Product" p
-    WHERE p."deletedAt" IS NULL AND p.carbonsmithworld = false
+    WHERE p."deletedAt" IS NULL 
+      AND p.carbonsmithworld = false 
+      AND (p."internalState" IS NULL OR p."internalState" != 'IN_REPAIR')
   `;
   const totalValue = queryResult[0]?.totalValue || 0;
 
@@ -500,7 +502,8 @@ const getStockAnalytics = async () => {
     where: {
       stock: { lt: 5 },
       deletedAt: null,
-      carbonsmithworld: false
+      carbonsmithworld: false,
+      NOT: { internalState: 'IN_REPAIR' }
     }
   });
 
@@ -516,6 +519,7 @@ const getStockAnalytics = async () => {
     where: { orderStatus: { in: ['shipped', 'delivered'] } }
   });
 
+  // Stock grouped by category for products not in repair
   const categoryStockRaw = await prisma.$queryRaw`
     SELECT 
       c.id as "categoryId",
@@ -524,7 +528,9 @@ const getStockAnalytics = async () => {
       SUM(p.stock * p."finalPrice") as value
     FROM "Product" p
     LEFT JOIN "Category" c ON p."categoryId" = c.id
-    WHERE p."deletedAt" IS NULL AND p.carbonsmithworld = false
+    WHERE p."deletedAt" IS NULL 
+      AND p.carbonsmithworld = false 
+      AND (p."internalState" IS NULL OR p."internalState" != 'IN_REPAIR')
     GROUP BY c.id, c.name
   `;
 
@@ -565,11 +571,12 @@ const getStockAnalytics = async () => {
     ]
   };
 
-  // Plain Gold stock grouped by category: Gold metal and NO diamond details
+  // Plain Gold stock grouped by category: Gold metal and NO diamond details (excludes items in repair)
   const goldProducts = await prisma.product.findMany({
     where: {
       deletedAt: null,
       carbonsmithworld: false,
+      NOT: { internalState: 'IN_REPAIR' },
       metalDetails: { metalType: { in: ['Gold', 'gold'] } },
       stoneDetails: { none: diamondStoneFilter }
     },
@@ -585,11 +592,12 @@ const getStockAnalytics = async () => {
     }
   });
 
-  // Diamond stock grouped by category: Gold or Platinum metal and WITH diamond details
+  // Diamond stock grouped by category: Gold or Platinum metal and WITH diamond details (excludes items in repair)
   const diamondProducts = await prisma.product.findMany({
     where: {
       deletedAt: null,
       carbonsmithworld: false,
+      NOT: { internalState: 'IN_REPAIR' },
       metalDetails: { metalType: { in: ['Gold', 'gold', 'Platinum', 'platinum'] } },
       stoneDetails: { some: diamondStoneFilter }
     },
