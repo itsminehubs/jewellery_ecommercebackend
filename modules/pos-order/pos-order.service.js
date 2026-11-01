@@ -117,10 +117,15 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
         });
 
         for (const s of foundSchemes) {
+            const monthlyInst = Number(s.monthlyInstallment || 1);
+            const totalPaid = Number(s.totalPaid || 0);
+            const totalMonths = Number(s.totalMonths || 11);
+            const paidInstallmentCount = Math.min(totalMonths, Math.floor(totalPaid / (monthlyInst > 0 ? monthlyInst : 1)));
+
             const enrollmentDate = new Date(s.startDate || s.createdAt);
             const daysSinceEnrollment = Math.floor((new Date() - enrollmentDate) / (1000 * 60 * 60 * 24));
-            const isFullTenure = s.status === 'matured' || (daysSinceEnrollment >= 330 && daysSinceEnrollment <= 365);
-            const isHalfTenure = !isFullTenure && (daysSinceEnrollment >= 180 && daysSinceEnrollment < 330);
+            const isFullTenure = s.status === 'matured' || s.status === 'completed' || (paidInstallmentCount >= totalMonths) || (daysSinceEnrollment >= 330 && daysSinceEnrollment <= 365);
+            const isHalfTenure = !isFullTenure && ((paidInstallmentCount >= Math.ceil(totalMonths / 2)) || (daysSinceEnrollment >= 180 && daysSinceEnrollment < 330));
 
             let metadata = {};
             try {
@@ -677,23 +682,31 @@ const createOrder = async (orderData) => {
                 }
 
                 // Rule 5, 13 & 22: Tiered Benefit Ratio (4 Tiers)
+                const monthlyInst = Number(scheme.monthlyInstallment || 1);
+                const totalPaid = Number(scheme.totalPaid || 0);
+                const totalMonths = Number(scheme.totalMonths || 11);
+                const paidInstallmentCount = Math.min(totalMonths, Math.floor(totalPaid / (monthlyInst > 0 ? monthlyInst : 1)));
+
                 const enrollmentDate = new Date(scheme.startDate || scheme.createdAt);
                 const daysSinceEnrollment = Math.floor((new Date() - enrollmentDate) / (1000 * 60 * 60 * 24));
 
                 let benefitRatio = 0;
                 let benefitTier = 'NO_BENEFIT';
-                if (scheme.status === 'matured' || (daysSinceEnrollment >= 330 && daysSinceEnrollment <= 365)) {
+                const isFullTenure = scheme.status === 'matured' || scheme.status === 'completed' || (paidInstallmentCount >= totalMonths) || (daysSinceEnrollment >= 330 && daysSinceEnrollment <= 365);
+                const isHalfTenure = !isFullTenure && ((paidInstallmentCount >= Math.ceil(totalMonths / 2)) || (daysSinceEnrollment >= 180 && daysSinceEnrollment < 330));
+
+                if (isFullTenure) {
                     benefitRatio = 1.0;
                     benefitTier = 'FULL_TENURE_100_PERCENT_BENEFIT';
-                } else if (daysSinceEnrollment >= 365) {
+                } else if (!isFullTenure && daysSinceEnrollment >= 365) {
                     benefitRatio = 0;
                     benefitTier = 'EXPIRED_365_DAYS_ZERO_BENEFIT';
-                } else if (daysSinceEnrollment < 180) {
-                    benefitRatio = 0;
-                    benefitTier = 'TENURE_UNDER_6_MONTHS_ZERO_BENEFIT';
-                } else if (daysSinceEnrollment >= 180 && daysSinceEnrollment < 330) {
+                } else if (isHalfTenure) {
                     benefitRatio = 0.5;
                     benefitTier = 'TENURE_6_TO_11_MONTHS_PARTIAL_BENEFIT';
+                } else {
+                    benefitRatio = 0;
+                    benefitTier = 'TENURE_UNDER_6_MONTHS_ZERO_BENEFIT';
                 }
 
                 // Rule 9: PAN card mandatory for purchases exceeding ₹2,00,000
