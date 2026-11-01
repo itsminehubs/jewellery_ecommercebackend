@@ -67,19 +67,54 @@ exports.createRepair = asyncHandler(async (req, res, next) => {
 });
 
 exports.getAllRepairs = asyncHandler(async (req, res, next) => {
-    const filter = {};
+    const andConditions = [];
+
     if (req.headers['x-shop-id'] && req.headers['x-shop-id'] !== 'MAIN') {
         let shopIdFilter = req.headers['x-shop-id'];
         if (!/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(shopIdFilter)) {
             const store = await prisma.store.findUnique({ where: { shop_id: shopIdFilter } });
             if (store) shopIdFilter = store.id;
         }
-        filter.storeId = shopIdFilter;
+        andConditions.push({ storeId: shopIdFilter });
     }
     
     if (req.query.customer) {
-        filter.customerId = req.query.customer;
+        andConditions.push({ customerId: req.query.customer });
     }
+
+    // Filter by repair type: 'internal' | 'customer' | 'all'
+    if (req.query.type === 'internal') {
+        andConditions.push({ repairDetails: { contains: '"isInternal":true' } });
+    } else if (req.query.type === 'customer') {
+        andConditions.push({
+            NOT: { repairDetails: { contains: '"isInternal":true' } }
+        });
+    }
+
+    // Filter by status
+    if (req.query.status && req.query.status !== 'all') {
+        if (req.query.status === 'in-progress' || req.query.status === 'in_progress') {
+            andConditions.push({ status: { in: ['in-progress', 'in_progress', 'received'] } });
+        } else {
+            andConditions.push({ status: req.query.status });
+        }
+    }
+
+    // Search query across voucher, item description, customer, and internal details
+    if (req.query.search && req.query.search.trim()) {
+        const s = req.query.search.trim();
+        andConditions.push({
+            OR: [
+                { receiptVoucher: { contains: s, mode: 'insensitive' } },
+                { itemDescription: { contains: s, mode: 'insensitive' } },
+                { repairDetails: { contains: s, mode: 'insensitive' } },
+                { notes: { contains: s, mode: 'insensitive' } },
+                { customer: { name: { contains: s, mode: 'insensitive' } } },
+                { customer: { phone: { contains: s, mode: 'insensitive' } } }
+            ]
+        });
+    }
+
     if (req.query.startDate && req.query.endDate) {
         let start = new Date(req.query.startDate);
         let end = new Date(req.query.endDate);
@@ -89,14 +124,16 @@ exports.getAllRepairs = asyncHandler(async (req, res, next) => {
             end.setHours(23, 59, 59, 999);
         }
         if (start > end) { const tmp = start; start = end; end = tmp; }
-        filter.createdAt = { gte: start, lte: end };
+        andConditions.push({ createdAt: { gte: start, lte: end } });
     } else if (req.query.date) {
         const start = new Date(req.query.date);
         start.setHours(0, 0, 0, 0);
         const end = new Date(req.query.date);
         end.setHours(23, 59, 59, 999);
-        filter.createdAt = { gte: start, lte: end };
+        andConditions.push({ createdAt: { gte: start, lte: end } });
     }
+
+    const where = andConditions.length > 0 ? { AND: andConditions } : {};
 
     const page = parseInt(req.query.page, 10) || 1;
     const limit = parseInt(req.query.limit, 10) || 10;
@@ -104,17 +141,17 @@ exports.getAllRepairs = asyncHandler(async (req, res, next) => {
 
     const [repairs, total] = await Promise.all([
         prisma.repair.findMany({
-            where: filter,
+            where,
             include: {
                 customer: { select: { id: true, name: true, phone: true, email: true, addresses: true } },
                 store: { select: { id: true, name: true, address: true, phone: true } },
-                billedBy: { select: { id: true, name: true } }
+                billedBy: { select: { id: true, name: true, email: true, role: true } }
             },
             orderBy: { createdAt: 'desc' },
             skip,
             take: limit
         }),
-        prisma.repair.count({ where: filter })
+        prisma.repair.count({ where })
     ]);
 
     const formattedRepairs = repairs.map(r => {
@@ -129,10 +166,15 @@ exports.getAllRepairs = asyncHandler(async (req, res, next) => {
             productName: details.productName,
             sku: details.sku,
             tagId: details.tagId,
+            metal: details.metal,
+            purity: details.purity,
+            category: details.category,
             reason: details.reason,
+            notes: details.notes || r.notes || '',
             sentBy: details.sentBy,
             receivedBy: details.receivedBy,
-            isReceived: Boolean(details.isReceived),
+            isReceived: Boolean(details.isReceived || r.status === 'delivered'),
+            receiveNotes: details.receiveNotes || details.receivedBy?.notes || '',
             items: details.items || [],
             repairBagNumber: details.repairBagNumber || '',
             remarks: details.remarks || r.notes || ''
@@ -256,12 +298,44 @@ exports.deleteRepair = asyncHandler(async (req, res, next) => {
         return next(ApiError.notFound('No repair found with that ID'));
     }
 
+    // Safety edge case: If this was an active internal store repair, restore product internalState to AVAILABLE so it isn't orphaned
+    if (repairExists.repairDetails) {
+        try {
+            const details = JSON.parse(repairExists.repairDetails);
+            if (details.isInternal && details.productId && !details.isReceived && repairExists.status !== 'delivered') {
+                const product = await prisma.product.findUnique({ where: { id: details.productId } });
+                if (product && product.internalState === 'IN_REPAIR') {
+                    await prisma.product.update({
+                        where: { id: details.productId },
+                        data: { internalState: 'AVAILABLE' }
+                    });
+
+                    const auditService = require('../audit/audit.service');
+                    await auditService.logStockChange({
+                        productId: product.id,
+                        type: 'repair_in',
+                        action: 'INTERNAL_REPAIR_CANCELLED',
+                        beforeQuantity: product.stock,
+                        afterQuantity: product.stock,
+                        quantityChanged: 0,
+                        referenceId: repairExists.receiptVoucher,
+                        notes: `Internal repair record removed by ${req.user.name || 'Admin'}. Product restored to AVAILABLE stock.`,
+                        performedById: req.user.id
+                    });
+                }
+            }
+        } catch (e) {
+            console.error('Error handling product revert on repair deletion:', e);
+        }
+    }
+
     await prisma.repair.delete({
         where: { id: req.params.id }
     });
 
-    res.status(204).json({
+    res.status(200).json({
         status: 'success',
+        message: 'Repair record deleted successfully',
         data: null
     });
 });
@@ -284,10 +358,15 @@ exports.createInternalRepair = asyncHandler(async (req, res, next) => {
         return next(ApiError.notFound('Product not found.'));
     }
 
+    if (product.internalState === 'IN_REPAIR') {
+        return next(ApiError.badRequest(`Product "${product.name}" (SKU: ${product.sku}) is already in repair at the workshop.`));
+    }
+
     const receiptVoucher = await generateVoucher();
     const sender = {
         id: req.user.id,
         name: req.user.name || 'Staff Member',
+        email: req.user.email || '',
         role: req.user.role || 'staff',
         phone: req.user.phone || '',
         sentAt: new Date().toISOString()
@@ -370,10 +449,15 @@ exports.receiveInternalRepair = asyncHandler(async (req, res, next) => {
         try { details = JSON.parse(repair.repairDetails); } catch(e){}
     }
 
+    if (details.isReceived || repair.status === 'delivered') {
+        return next(ApiError.badRequest('This repair item has already been received back into inventory.'));
+    }
+
     const productId = details.productId;
     const receiver = {
         id: req.user.id,
         name: req.user.name || 'Staff Member',
+        email: req.user.email || '',
         role: req.user.role || 'staff',
         phone: req.user.phone || '',
         receivedAt: new Date().toISOString(),
@@ -382,6 +466,7 @@ exports.receiveInternalRepair = asyncHandler(async (req, res, next) => {
 
     details.receivedBy = receiver;
     details.isReceived = true;
+    details.receiveNotes = notes || '';
 
     // 1. If product exists, mark internalState back to AVAILABLE
     if (productId) {
@@ -402,7 +487,7 @@ exports.receiveInternalRepair = asyncHandler(async (req, res, next) => {
                 afterQuantity: product.stock,
                 quantityChanged: 0,
                 referenceId: repair.receiptVoucher,
-                notes: `Received back from repair by ${receiver.name} (${receiver.role}). Notes: ${notes || 'Repaired & verified'}`,
+                notes: `Received back from repair by ${receiver.name} (${receiver.role}). Inspection: ${notes || 'Repaired & verified'}`,
                 performedById: req.user.id
             });
         }
