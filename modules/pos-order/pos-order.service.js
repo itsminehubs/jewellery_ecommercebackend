@@ -22,6 +22,7 @@ const roundTo4 = (num) => Math.round((num + Number.EPSILON) * 10000) / 10000;
  * Calculate the exact price of a POS cart based on live rates and dynamic credit memo rate locking
  */
 const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditMemoRef = null, schemeRef = null) => {
+    let cartGrossSubtotal = 0;
     let cartSubtotal = 0;
     let cartGst = 0;
     let cartTotal = 0;
@@ -440,6 +441,8 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
         // 8. Totals
         const finalTotal = roundTo2(subtotal + gst);
 
+        const itemGross = roundTo2((metalValue + makingValue + stoneValue) * qty);
+        cartGrossSubtotal = roundTo2(cartGrossSubtotal + itemGross);
         cartSubtotal = roundTo2(cartSubtotal + subtotal);
         cartGst = roundTo2(cartGst + gst);
         cartTotal = roundTo2(cartTotal + finalTotal);
@@ -491,6 +494,7 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
     return {
         items: calculatedItems,
         summary: {
+            grossSubtotal: roundTo2(cartGrossSubtotal),
             subtotal: roundTo2(cartSubtotal),
             gst: roundTo2(cartGst),
             total: roundTo2(cartSubtotal + cartGst),
@@ -888,7 +892,7 @@ const createOrder = async (orderData) => {
 
                 redeemedSchemeIds.push(scheme.id);
                 // Append Scheme tag to order notes so printable invoice and reprints can parse it
-                orderData.notes = (orderData.notes ? orderData.notes + '||' : '') + `PAYMENT_REF:scheme:${scheme.schemeId || scheme.id}:${thisSchemeAppliedAmount}`;
+                orderData.notes = (orderData.notes ? orderData.notes + '||' : '') + `PAYMENT_REF:scheme:${scheme.schemeId || scheme.id}:${thisSchemeAppliedAmount}:GRAMS:${gramsDebited}:TYPE:${scheme.schemeType}:DISC:${schemeRedemptionAudit?.makingDiscountPercent || 0}`;
             }
         }
 
