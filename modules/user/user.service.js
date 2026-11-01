@@ -273,6 +273,10 @@ const getCart = async (userId) => {
 
 const addToCart = async (userId, productId, quantity) => {
   const q = quantity || 1;
+  const product = await prisma.product.findUnique({ where: { id: productId } });
+  if (product && product.internalState === 'IN_REPAIR') {
+    throw ApiError.badRequest('This product is currently under repair / workshop maintenance and cannot be added to cart.');
+  }
   
   await prisma.cartItem.upsert({
     where: {
