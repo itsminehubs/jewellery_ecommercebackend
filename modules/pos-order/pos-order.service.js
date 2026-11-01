@@ -21,7 +21,7 @@ const roundTo4 = (num) => Math.round((num + Number.EPSILON) * 10000) / 10000;
 /**
  * Calculate the exact price of a POS cart based on live rates and dynamic credit memo rate locking
  */
-const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditMemoRef = null) => {
+const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditMemoRef = null, schemeRef = null) => {
     let cartSubtotal = 0;
     let cartGst = 0;
     let cartTotal = 0;
@@ -95,6 +95,79 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
         });
     }
 
+    // 2. Resolve active Schemes (supports single ID, array of IDs, or comma-separated string)
+    let schemeLookupIds = [];
+    if (Array.isArray(schemeRef)) {
+        schemeLookupIds = schemeRef.map(id => String(id).trim()).filter(Boolean);
+    } else if (typeof schemeRef === 'string' && schemeRef.trim()) {
+        schemeLookupIds = schemeRef.split(',').map(id => id.trim()).filter(Boolean);
+    }
+
+    let activeSchemes = [];
+    if (schemeLookupIds.length > 0) {
+        const foundSchemes = await prisma.scheme.findMany({
+            where: {
+                OR: [
+                    { schemeId: { in: schemeLookupIds } },
+                    { id: { in: schemeLookupIds } }
+                ],
+                status: { notIn: ['closed', 'cancelled'] }
+            }
+        });
+
+        for (const s of foundSchemes) {
+            const enrollmentDate = new Date(s.startDate || s.createdAt);
+            const daysSinceEnrollment = Math.floor((new Date() - enrollmentDate) / (1000 * 60 * 60 * 24));
+            const isFullTenure = s.status === 'matured' || (daysSinceEnrollment >= 330 && daysSinceEnrollment <= 365);
+            const isHalfTenure = !isFullTenure && (daysSinceEnrollment >= 180 && daysSinceEnrollment < 330);
+
+            let metadata = {};
+            try {
+                if (s.notes && s.notes.trim().startsWith('{')) {
+                    metadata = JSON.parse(s.notes);
+                }
+            } catch (e) {}
+
+            let makingDiscountPercent = 0;
+            let diamondDiscountPercent = 0;
+            let diamondMakingDiscountPercent = 0;
+
+            if (s.schemeType === 'GOLD') {
+                if (isFullTenure) makingDiscountPercent = Number(metadata.goldMakingDiscountFull || metadata.goldMakingDiscountUpToFull || 100);
+                else if (isHalfTenure) makingDiscountPercent = Number(metadata.goldMakingDiscountUpToHalf || 50);
+                else makingDiscountPercent = 0;
+            } else if (s.schemeType === 'DIAMOND') {
+                if (isFullTenure) {
+                    diamondDiscountPercent = Number(metadata.diamondFlatDiscountFull || 40);
+                    diamondMakingDiscountPercent = Number(metadata.diamondMakingFlatDiscountFull || metadata.diamondMakingDiscountFull || 40);
+                } else if (isHalfTenure) {
+                    diamondDiscountPercent = Number(metadata.diamondFlatDiscountHalf || 20);
+                    diamondMakingDiscountPercent = Number(metadata.diamondMakingFlatDiscountHalf || metadata.diamondMakingDiscountHalf || 20);
+                }
+            }
+
+            const totalAccum = Number(s.accumulatedGrams || 0);
+            const alreadyRedeemed = Number(s.redeemedGrams || 0);
+            const availableGrams = s.remainingGrams != null ? Number(s.remainingGrams) : Math.max(0, totalAccum - alreadyRedeemed);
+
+            activeSchemes.push({
+                id: s.id,
+                schemeId: s.schemeId,
+                schemeType: s.schemeType,
+                purity: s.purity || '22K',
+                refKarat: parseKarat(s.purity || '22K'),
+                initialGrams: roundTo4(availableGrams),
+                availableGrams: roundTo4(availableGrams),
+                consumedGrams: 0,
+                consumedValue: 0,
+                daysSinceEnrollment,
+                makingDiscountPercent,
+                diamondDiscountPercent,
+                diamondMakingDiscountPercent
+            });
+        }
+    }
+
     let totalLockedGoldValue = 0;
     let totalCustomerSavings = 0;
 
@@ -163,7 +236,14 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
         }
 
         const manualStoneCharges = productData.stoneCharges ? Number(productData.stoneCharges) : 0;
-        const stoneValue = roundTo2(dynamicStoneValue > 0 ? dynamicStoneValue : manualStoneCharges);
+        let stoneValue = roundTo2(dynamicStoneValue > 0 ? dynamicStoneValue : manualStoneCharges);
+
+        const activeDiamondScheme = activeSchemes.find(s => s.schemeType === 'DIAMOND' && s.diamondDiscountPercent > 0);
+        let diamondDiscountAmount = 0;
+        if (activeDiamondScheme && stoneValue > 0) {
+            diamondDiscountAmount = roundTo2(stoneValue * (activeDiamondScheme.diamondDiscountPercent / 100));
+            stoneValue = Math.max(0, roundTo2(stoneValue - diamondDiscountAmount));
+        }
 
         // 2. Net Gold Weight and Wastage
         const netWeight = roundTo3(Math.max(0, grossWeight - totalStoneWeight));
@@ -268,6 +348,50 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
             rateUsed = currentPurityRate;
         }
 
+        // Apply Gold Scheme: Deduct saved gold weight directly, charge rest gold at today's rate
+        let schemeGoldDeductedGrams = 0;
+        let schemeItemBreakdown = [];
+
+        if (metalType === 'gold' && activeSchemes.some(s => s.schemeType === 'GOLD' && s.availableGrams > 0)) {
+            let itemWeightNeeded = remainingProductGrams;
+
+            for (const sch of activeSchemes.filter(s => s.schemeType === 'GOLD')) {
+                if (sch.availableGrams <= 0 || itemWeightNeeded <= 0) continue;
+
+                const coverableProductGrams = (sch.availableGrams * sch.refKarat) / prodKarat;
+                const applyGrams = roundTo3(Math.min(coverableProductGrams, itemWeightNeeded));
+                if (applyGrams <= 0) continue;
+
+                const refGramsConsumed = roundTo4((applyGrams * prodKarat) / sch.refKarat);
+                sch.availableGrams = Math.max(0, roundTo4(sch.availableGrams - refGramsConsumed));
+                sch.consumedGrams = roundTo4(sch.consumedGrams + refGramsConsumed);
+
+                schemeGoldDeductedGrams = roundTo3(schemeGoldDeductedGrams + applyGrams);
+                itemWeightNeeded = roundTo3(Math.max(0, itemWeightNeeded - applyGrams));
+
+                const savedGoldValue = roundTo2(applyGrams * currentPurityRate);
+                sch.consumedValue = roundTo2((sch.consumedValue || 0) + savedGoldValue);
+
+                schemeItemBreakdown.push({
+                    schemeId: sch.schemeId,
+                    schemeType: 'GOLD',
+                    purity: sch.purity,
+                    appliedProductGrams: applyGrams,
+                    consumedRefGrams: refGramsConsumed,
+                    savedGoldValue,
+                    makingDiscountPercent: sch.makingDiscountPercent
+                });
+            }
+
+            remainingProductGrams = itemWeightNeeded; // Rest Gold
+            remainingPortionValue = roundTo2(remainingProductGrams * currentPurityRate); // Rest Gold @ Today Rate
+            metalValue = roundTo2(lockedPortionValue + remainingPortionValue);
+
+            const savedGoldSavings = roundTo2(schemeGoldDeductedGrams * currentPurityRate);
+            itemSavings = Math.max(0, roundTo2(itemSavings + savedGoldSavings));
+            totalCustomerSavings = roundTo2(totalCustomerSavings + savedGoldSavings);
+        }
+
         // 5. Calculate Making Charges & Apply Discount
         let makingValue = 0;
         let makingCharges = productData.makingCharges ? Number(productData.makingCharges) : 0;
@@ -287,7 +411,19 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
             makingValue = roundTo2(makingCharges);
         }
 
-        const discountAmount = Number(item.discount || 0);
+        let schemeMakingDiscountPercent = 0;
+        if (schemeItemBreakdown.length > 0) {
+            schemeMakingDiscountPercent = schemeItemBreakdown[0].makingDiscountPercent || 0;
+        } else if (activeSchemes.some(s => s.schemeType === 'DIAMOND' && s.diamondMakingDiscountPercent > 0)) {
+            schemeMakingDiscountPercent = activeSchemes.find(s => s.schemeType === 'DIAMOND')?.diamondMakingDiscountPercent || 0;
+        }
+
+        let schemeMakingDiscountAmount = 0;
+        if (schemeMakingDiscountPercent > 0) {
+            schemeMakingDiscountAmount = roundTo2(makingValue * (schemeMakingDiscountPercent / 100));
+        }
+
+        const discountAmount = Number(item.discount || 0) + schemeMakingDiscountAmount;
         let discountedMakingValue = makingValue;
         if (discountAmount > 0) {
             discountedMakingValue = Math.max(0, makingValue - discountAmount);
@@ -334,7 +470,19 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
                     savings: itemSavings,
                     lockedRate: itemConsumedBreakdown[0]?.lockedRate || activeMemos[0]?.lockedRate || 0,
                     breakdown: itemConsumedBreakdown
-                }
+                },
+                schemeLock: schemeItemBreakdown.length > 0 ? {
+                    schemeId: schemeItemBreakdown[0].schemeId,
+                    schemeType: 'GOLD',
+                    purity: schemeItemBreakdown[0].purity,
+                    initialGoldWeight: totalItemGoldWeight,
+                    savedGoldDeducted: schemeGoldDeductedGrams,
+                    restGoldWeight: remainingProductGrams,
+                    todayRate: currentPurityRate,
+                    restGoldValue: remainingPortionValue,
+                    makingDiscountPercent: schemeMakingDiscountPercent,
+                    savings: roundTo2(schemeGoldDeductedGrams * currentPurityRate)
+                } : null
             },
             quantity: qty
         });
@@ -364,6 +512,22 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
                     remainingRefGrams: roundTo3(m.availableGrams),
                     consumedValue: roundTo2(m.consumedValue)
                 }))
+            } : null,
+            scheme: activeSchemes.length > 0 && activeSchemes.some(s => s.consumedGrams > 0 || s.consumedValue > 0) ? {
+                schemes: activeSchemes.map(s => ({
+                    schemeId: s.schemeId,
+                    schemeType: s.schemeType,
+                    purity: s.purity,
+                    initialGrams: s.initialGrams,
+                    consumedRefGrams: roundTo4(s.consumedGrams),
+                    remainingRefGrams: roundTo4(s.availableGrams),
+                    consumedValue: roundTo2(s.consumedValue || 0),
+                    makingDiscountPercent: s.makingDiscountPercent,
+                    diamondDiscountPercent: s.diamondDiscountPercent
+                })),
+                consumedRefGrams: roundTo4(activeSchemes.reduce((s, sch) => s + sch.consumedGrams, 0)),
+                remainingRefGrams: roundTo4(activeSchemes.reduce((s, sch) => s + sch.availableGrams, 0)),
+                totalCustomerSavings: roundTo2(activeSchemes.reduce((s, sch) => s + (sch.consumedValue || 0), 0))
             } : null
         }
     };
@@ -439,15 +603,19 @@ const createOrder = async (orderData) => {
 
         // 2. Handle Scheme Redemption (with SECURITY VALIDATION & 27 RULES)
         const redeemedSchemeIds = [];
-        if (totalSchemeRedemption > 0) {
+        const schemePayments = (orderData.payments || []).filter(p => p.method === 'scheme_redemption');
+        const hasSchemesToRedeem = schemePayments.length > 0 || totalSchemeRedemption > 0 || (orderData.redeemedSchemeIds && orderData.redeemedSchemeIds.length > 0) || orderData.redeemedSchemeId;
+
+        if (hasSchemesToRedeem) {
             const totalOrderAmount = Number(orderData.grandTotal || 0);
             if (!orderData.customerId) throw new ApiError(400, 'Customer ID is required to redeem a scheme');
 
-            // Find all scheme redemption payment entries
-            const schemePayments = (orderData.payments || []).filter(p => p.method === 'scheme_redemption');
-            const schemeTasks = schemePayments.length > 0 
-                ? schemePayments 
-                : (orderData.redeemedSchemeId ? [{ schemeId: orderData.redeemedSchemeId, amount: totalSchemeRedemption }] : []);
+            // Find all scheme redemption payment entries or redeemed scheme IDs
+            let schemeTasks = schemePayments;
+            if (schemeTasks.length === 0) {
+                const rawIds = orderData.redeemedSchemeIds || (orderData.redeemedSchemeId ? [orderData.redeemedSchemeId] : []);
+                schemeTasks = (Array.isArray(rawIds) ? rawIds : [rawIds]).map(id => ({ schemeId: id, amount: 0 }));
+            }
 
             if (schemeTasks.length === 0) {
                 throw new ApiError(400, 'Scheme ID is required for scheme redemption');
@@ -510,7 +678,10 @@ const createOrder = async (orderData) => {
 
                 let benefitRatio = 0;
                 let benefitTier = 'NO_BENEFIT';
-                if (daysSinceEnrollment >= 365) {
+                if (scheme.status === 'matured' || (daysSinceEnrollment >= 330 && daysSinceEnrollment <= 365)) {
+                    benefitRatio = 1.0;
+                    benefitTier = 'FULL_TENURE_100_PERCENT_BENEFIT';
+                } else if (daysSinceEnrollment >= 365) {
                     benefitRatio = 0;
                     benefitTier = 'EXPIRED_365_DAYS_ZERO_BENEFIT';
                 } else if (daysSinceEnrollment < 180) {
@@ -519,9 +690,6 @@ const createOrder = async (orderData) => {
                 } else if (daysSinceEnrollment >= 180 && daysSinceEnrollment < 330) {
                     benefitRatio = 0.5;
                     benefitTier = 'TENURE_6_TO_11_MONTHS_PARTIAL_BENEFIT';
-                } else if (daysSinceEnrollment >= 330 && daysSinceEnrollment < 365) {
-                    benefitRatio = 1.0;
-                    benefitTier = 'FULL_TENURE_100_PERCENT_BENEFIT';
                 }
 
                 // Rule 9: PAN card mandatory for purchases exceeding ₹2,00,000
@@ -683,13 +851,17 @@ const createOrder = async (orderData) => {
                 }
 
                 // Update scheme status and grams balance
+                const recordedRedemptionAmount = thisSchemeAppliedAmount > 0 
+                    ? thisSchemeAppliedAmount 
+                    : (scheme.schemeType === 'GOLD' ? roundTo2(gramsDebited * (schemeGoldRateUsed || 0)) : Number(scheme.totalPaid || 0));
+
                 await tx.scheme.update({
                     where: { id: scheme.id },
                     data: {
                         redeemedGrams: newRedeemedGrams,
                         status: newStatus,
                         redemptionDate: new Date(),
-                        redemptionValue: (Number(scheme.redemptionValue || 0) + thisSchemeAppliedAmount)
+                        redemptionValue: (Number(scheme.redemptionValue || 0) + recordedRedemptionAmount)
                     }
                 });
 
@@ -698,7 +870,7 @@ const createOrder = async (orderData) => {
                     data: {
                         schemeId: scheme.id,
                         action: 'REDEMPTION',
-                        description: `Scheme redeemed on order ${orderNumber}. Applied: ₹${thisSchemeAppliedAmount.toLocaleString('en-IN')}.${scheme.schemeType === 'GOLD' ? ` Debited: ${gramsDebited}g, Leftover: ${leftoverGrams}g.` : ''}`,
+                        description: `Scheme redeemed on order ${orderNumber}. Applied: ₹${recordedRedemptionAmount.toLocaleString('en-IN')}.${scheme.schemeType === 'GOLD' ? ` Debited: ${gramsDebited}g, Leftover: ${leftoverGrams}g.` : ''}`,
                         details: {
                             orderNumber,
                             totalOrderAmount,
@@ -1121,6 +1293,15 @@ const getStoreAnalytics = async (shop_id, startDate, endDate, includeOnline = fa
         orderBy: { createdAt: 'asc' }
     });
 
+    const repairsRaw = await prisma.repair.findMany({
+        where: {
+            createdAt: { gte: startDateTime, lte: endDateTime },
+            ...(storeId ? { storeId: storeId } : {})
+        },
+        select: { createdAt: true, actualCost: true, estimatedCost: true, status: true },
+        orderBy: { createdAt: 'asc' }
+    });
+
     const onlineOrdersRaw = includeOnline ? await prisma.order.findMany({
         where: { createdAt: { gte: startDateTime, lte: endDateTime }, paymentStatus: 'completed' },
         select: { createdAt: true, grandTotal: true },
@@ -1234,6 +1415,20 @@ const getStoreAnalytics = async (shop_id, startDate, endDate, includeOnline = fa
         overallTimePoints.push({ createdAt: sale.createdAt, amount: Number(sale.grandTotal || 0) });
     });
 
+    // Repair services totals & time points
+    let repairSalesTotal = 0;
+    let repairCount = (repairsRaw || []).length;
+    const repairTimePoints = [];
+
+    (repairsRaw || []).forEach(r => {
+        const amt = Number(r.actualCost != null && Number(r.actualCost) > 0 ? r.actualCost : (r.estimatedCost || 0));
+        repairSalesTotal += amt;
+        repairTimePoints.push({ createdAt: r.createdAt, amount: amt });
+        if (amt > 0) {
+            overallTimePoints.push({ createdAt: r.createdAt, amount: amt });
+        }
+    });
+
     // Dynamic Chart Grouping Logic
     const diffTime = Math.abs(endDateTime - startDateTime);
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
@@ -1271,7 +1466,8 @@ const getStoreAnalytics = async (shop_id, startDate, endDate, includeOnline = fa
         ...goldTimePoints.map(p => ({ createdAt: p.createdAt, category: 'gold', amount: p.amount })),
         ...diamondTimePoints.map(p => ({ createdAt: p.createdAt, category: 'diamond', amount: p.amount })),
         ...goldBarTimePoints.map(p => ({ createdAt: p.createdAt, category: 'goldBar', amount: p.amount })),
-        ...imitationSalesRaw.map(p => ({ createdAt: p.createdAt, category: 'imitation', amount: Number(p.grandTotal || 0) }))
+        ...imitationSalesRaw.map(p => ({ createdAt: p.createdAt, category: 'imitation', amount: Number(p.grandTotal || 0) })),
+        ...repairTimePoints.map(p => ({ createdAt: p.createdAt, category: 'repair', amount: p.amount }))
     ].sort(sortByTime);
 
     const allProductsMap = new Map();
@@ -1280,7 +1476,7 @@ const getStoreAnalytics = async (shop_id, startDate, endDate, includeOnline = fa
         const label = getTimeLabel(date);
 
         if (!allProductsMap.has(label)) {
-            allProductsMap.set(label, { name: label, gold: 0, diamond: 0, goldBar: 0, imitation: 0, total: 0 });
+            allProductsMap.set(label, { name: label, gold: 0, diamond: 0, goldBar: 0, imitation: 0, repair: 0, total: 0 });
         }
         const entry = allProductsMap.get(label);
         const val = Math.round(Number(evt.amount || 0));
@@ -1345,6 +1541,7 @@ const getStoreAnalytics = async (shop_id, startDate, endDate, includeOnline = fa
         overall: groupDataByTime(overallTimePoints),
         imitation: groupDataByTime(imitationSalesRaw),
         credit: groupDataByTime(creditMemosRaw),
+        repair: groupDataByTime(repairTimePoints),
         allProducts: allProductsChart,
         dateWise: dateWiseChart,
         monthWise: monthWiseChart,
@@ -1357,12 +1554,12 @@ const getStoreAnalytics = async (shop_id, startDate, endDate, includeOnline = fa
     const imitationTotalNum = Number(imitationStats._sum.grandTotal || 0);
     const creditMemoTotalNum = Number(creditMemoStats._sum.originalAmount || 0);
 
-    const combinedTotalSales = posOrdersTotalNum + Number(goldBarSalesTotal || 0) + imitationTotalNum;
+    const combinedTotalSales = posOrdersTotalNum + Number(goldBarSalesTotal || 0) + imitationTotalNum + repairSalesTotal;
 
     return [{
         totalSales: Number(combinedTotalSales.toFixed(2)),
         posOrdersTotal: Number(posOrdersTotalNum.toFixed(2)),
-        orderCount: (stats._count.id || 0) + goldBarCount + (imitationStats._count.id || 0),
+        orderCount: (stats._count.id || 0) + goldBarCount + (imitationStats._count.id || 0) + repairCount,
         totalGST: Number(posTaxTotalNum.toFixed(2)),
 
         // Gold Products
@@ -1381,11 +1578,13 @@ const getStoreAnalytics = async (shop_id, startDate, endDate, includeOnline = fa
         goldBarWeightTotal: Number(goldBarWeightTotal.toFixed(3)),
         goldBarQuantityTotal,
 
-        // Imitation & Credit Memos
+        // Imitation & Credit Memos & Repairs
         imitationSalesTotal: Number(imitationTotalNum.toFixed(2)),
         imitationCount: imitationStats._count.id || 0,
         creditMemoTotal: Number(creditMemoTotalNum.toFixed(2)),
         creditMemoCount: creditMemoStats._count.id || 0,
+        repairSalesTotal: Number(repairSalesTotal.toFixed(2)),
+        repairCount,
 
         totalCustomers: totalCustomers || 0,
         charts
