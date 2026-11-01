@@ -97,7 +97,8 @@ const searchCustomers = async (query, limit = 10) => {
       OR: [
         { phone: { contains: clean, mode: 'insensitive' } },
         { name: { contains: clean, mode: 'insensitive' } },
-        { email: { contains: clean, mode: 'insensitive' } }
+        { email: { contains: clean, mode: 'insensitive' } },
+        { panNumber: { contains: clean, mode: 'insensitive' } }
       ]
     },
     take: limit,
