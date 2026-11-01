@@ -864,7 +864,7 @@ const calculateRedemptionValue = (schemeRaw, quoteGoldRate = null, storeSettings
 
     const monthlyInstallment = Number(scheme.monthlyInstallment || 1);
     const totalPaid = Number(scheme.totalPaid || 0);
-    const totalMonths = scheme.totalMonths || 11;
+    const totalMonths = Number(scheme.totalMonths || 11);
     const paidInstallmentCount = Math.min(totalMonths, Math.floor(totalPaid / (monthlyInstallment > 0 ? monthlyInstallment : 1)));
 
     // Calculate days elapsed since enrollment
@@ -872,11 +872,13 @@ const calculateRedemptionValue = (schemeRaw, quoteGoldRate = null, storeSettings
     const today = new Date();
     const daysSinceEnrollment = Math.floor((today - enrollmentDate) / (1000 * 60 * 60 * 24));
 
-    // 4 Duration Tiers
-    const isPast365Days = daysSinceEnrollment >= 365;
-    const isUnder6Months = daysSinceEnrollment < 180;
-    const isHalfTenure = daysSinceEnrollment >= 180 && daysSinceEnrollment < 330;
-    const isFullTenure = daysSinceEnrollment >= 330 && daysSinceEnrollment < 365;
+    // 4 Duration Tiers - Evaluates both completed installments/status AND elapsed calendar days
+    // A scheme is Full Tenure (100% benefit) if status is matured/completed, all 11 installments paid, OR >= 330 days elapsed
+    const isCompletedOrMatured = scheme.status === 'matured' || scheme.status === 'completed' || (paidInstallmentCount >= totalMonths);
+    const isFullTenure = isCompletedOrMatured || (daysSinceEnrollment >= 330 && daysSinceEnrollment < 365);
+    const isHalfTenure = !isFullTenure && ((paidInstallmentCount >= Math.ceil(totalMonths / 2)) || (daysSinceEnrollment >= 180 && daysSinceEnrollment < 330));
+    const isPast365Days = !isFullTenure && daysSinceEnrollment >= 365;
+    const isUnder6Months = !isFullTenure && !isHalfTenure;
 
     // Configurable discounts from management (store settings or scheme metadata defaults)
     const settings = {
@@ -896,11 +898,14 @@ const calculateRedemptionValue = (schemeRaw, quoteGoldRate = null, storeSettings
     let diamondDiscount = 0;
     let diamondMakingDiscount = 0;
 
-    if (isPast365Days) {
+    if (isFullTenure) {
+        benefitTier = 'FULL_TENURE_FULL_BENEFIT';
+        benefitRatio = 1.0;
+        goldMakingDiscount = Number(settings.goldMakingDiscountUpToFull || 100);
+        diamondDiscount = Number(settings.diamondFlatDiscountFull || 40);
+        diamondMakingDiscount = Number(settings.diamondMakingFlatDiscountFull || 40);
+    } else if (isPast365Days) {
         benefitTier = 'EXPIRED_AFTER_365_DAYS_NO_BENEFIT';
-        benefitRatio = 0;
-    } else if (isUnder6Months) {
-        benefitTier = 'TENURE_UNDER_6_MONTHS_ZERO_BENEFIT';
         benefitRatio = 0;
     } else if (isHalfTenure) {
         benefitTier = 'TENURE_6_TO_11_MONTHS_PARTIAL_BENEFIT';
@@ -908,12 +913,9 @@ const calculateRedemptionValue = (schemeRaw, quoteGoldRate = null, storeSettings
         goldMakingDiscount = Number(settings.goldMakingDiscountUpToHalf || 50);
         diamondDiscount = Number(settings.diamondFlatDiscountHalf || 20);
         diamondMakingDiscount = Number(settings.diamondMakingFlatDiscountHalf || 20);
-    } else if (isFullTenure) {
-        benefitTier = 'FULL_TENURE_FULL_BENEFIT';
-        benefitRatio = 1.0;
-        goldMakingDiscount = Number(settings.goldMakingDiscountUpToFull || 100);
-        diamondDiscount = Number(settings.diamondFlatDiscountFull || 40);
-        diamondMakingDiscount = Number(settings.diamondMakingFlatDiscountFull || 40);
+    } else {
+        benefitTier = 'TENURE_UNDER_6_MONTHS_ZERO_BENEFIT';
+        benefitRatio = 0;
     }
 
     const canPurchaseNow = true; // Redemptions before 6 months are allowed according to rules, not strictly blocked!
