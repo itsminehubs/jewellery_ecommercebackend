@@ -133,7 +133,20 @@ const createOrder = async (userId, orderData) => {
                 const user = await tx.user.findUnique({ where: { id: userId } });
                 const fullOrderForEmail = await tx.order.findUnique({
                     where: { id: order.id },
-                    include: { items: { include: { product: true } } }
+                    include: {
+                        shippingAddress: true,
+                        items: {
+                            include: {
+                                product: {
+                                    include: {
+                                        metalDetails: true,
+                                        stoneDetails: true,
+                                        images: true
+                                    }
+                                }
+                            }
+                        }
+                    }
                 });
                 
                 if (user && user.email) {

@@ -70,6 +70,12 @@ const generateSchemeEnrollmentEmail = (scheme, customer = {}, firstInstallment =
     </head>
     <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 24px; color: #1e293b;">
         <div style="max-width: 640px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+            <!-- Brand Logo Header -->
+            <div style="background-color: #ffffff; padding: 20px 24px 16px 24px; text-align: center; border-bottom: 1px solid #e2e8f0;">
+                <a href="https://thecarbonsmith.com" target="_blank" style="text-decoration: none; display: inline-block;">
+                    <img src="https://www.thecarbonsmith.com/assets/cslogo3-cIe_cQLB.png" alt="CarbonSmith" style="max-height: 42px; width: auto; max-width: 220px; display: block; margin: 0 auto; border: 0;" />
+                </a>
+            </div>
             <!-- Header -->
             <div style="background-color: #0f172a; padding: 28px 24px; text-align: center; color: #ffffff;">
                 <h1 style="margin: 0; font-size: 20px; font-weight: bold; letter-spacing: 1.5px; text-transform: uppercase;">CARBONSMITH</h1>
@@ -200,6 +206,12 @@ const generateSchemeInstallmentEmail = (scheme, installment, customer = {}) => {
     </head>
     <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 24px; color: #1e293b;">
         <div style="max-width: 640px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+            <!-- Brand Logo Header -->
+            <div style="background-color: #ffffff; padding: 20px 24px 16px 24px; text-align: center; border-bottom: 1px solid #e2e8f0;">
+                <a href="https://thecarbonsmith.com" target="_blank" style="text-decoration: none; display: inline-block;">
+                    <img src="https://www.thecarbonsmith.com/assets/cslogo3-cIe_cQLB.png" alt="CarbonSmith" style="max-height: 42px; width: auto; max-width: 220px; display: block; margin: 0 auto; border: 0;" />
+                </a>
+            </div>
             <!-- Header -->
             <div style="background-color: #0f172a; padding: 26px 24px; text-align: center; color: #ffffff;">
                 <h1 style="margin: 0; font-size: 20px; font-weight: bold; letter-spacing: 1.5px; text-transform: uppercase;">CARBONSMITH</h1>
