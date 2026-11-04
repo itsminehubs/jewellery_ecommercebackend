@@ -399,6 +399,10 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
         }
 
         // 5. Calculate Making Charges & Apply Discount
+        // CRITICAL USER RULE: Making charge is calculated on GROSS WEIGHT ONLY when a scheme is applied!
+        const isSchemeActive = activeSchemes.length > 0 || schemeItemBreakdown.length > 0;
+        const weightForMaking = isSchemeActive ? (grossWeight > 0 ? grossWeight : netWeight) : netWeight;
+
         let makingValue = 0;
         let makingCharges = productData.makingCharges ? Number(productData.makingCharges) : 0;
         const makingPercentage = productData.makingPercentage ? Number(productData.makingPercentage) : 0;
@@ -406,13 +410,13 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
         if (makingPercentage > 0 && rateUsed > 0) {
             if (productData.makingChargeType === 'per_gram') {
                 makingCharges = roundTo2((makingPercentage / 100) * rateUsed);
-                makingValue = roundTo2(makingCharges * netWeight);
+                makingValue = roundTo2(makingCharges * weightForMaking);
             } else {
                 makingValue = roundTo2(metalValue * (makingPercentage / 100));
                 makingCharges = makingValue;
             }
         } else if (productData.makingChargeType === 'per_gram') {
-            makingValue = roundTo2(makingCharges * netWeight);
+            makingValue = roundTo2(makingCharges * weightForMaking);
         } else {
             makingValue = roundTo2(makingCharges);
         }
@@ -649,8 +653,19 @@ const createOrder = async (orderData) => {
                     }
 
                     const itemNetWeight = Number(item.netWeight || product.netWeight || product.weight || 0) * (item.quantity || 1);
+                    const itemGrossWeight = Number(item.grossWeight || product.metalDetails?.grossWeight || product.grossWeight || product.weight || itemNetWeight) * (item.quantity || 1);
                     totalNetGoldWeightRequired += itemNetWeight;
-                    const itemMaking = Number(item.makingCharge || product.makingCharges || 0) * (item.quantity || 1);
+
+                    let itemMaking = Number(item.makingCharge || 0) * (item.quantity || 1);
+                    if (!itemMaking) {
+                        const unitMaking = Number(product.makingCharges || 0);
+                        if (product.makingChargeType === 'per_gram') {
+                            const w = hasSchemesToRedeem ? (itemGrossWeight > 0 ? itemGrossWeight : itemNetWeight) : itemNetWeight;
+                            itemMaking = unitMaking * w;
+                        } else {
+                            itemMaking = unitMaking * (item.quantity || 1);
+                        }
+                    }
                     eligibleMakingCharges += itemMaking;
 
                     const itemDiamondVal = Number(item.stoneCharges || product.stoneCharges || 0) * (item.quantity || 1);
@@ -1037,7 +1052,19 @@ const createOrder = async (orderData) => {
                     }))
                 }
             },
-            include: { items: { include: { product: true } } }
+            include: {
+                items: {
+                    include: {
+                        product: {
+                            include: {
+                                metalDetails: true,
+                                stoneDetails: true,
+                                images: true
+                            }
+                        }
+                    }
+                }
+            }
         });
 
         // Link Scheme Redemption to Order
@@ -1118,29 +1145,30 @@ const createOrder = async (orderData) => {
         }
 
         // 8. Award loyalty points & send Email
+        let user = null;
         if (orderData.customerId) {
-            const user = await tx.user.findUnique({ where: { id: orderData.customerId } });
-            if (user) {
-                // Not in same tx if using external mongoose service, but assuming it uses Prisma now
-                if (loyaltyService.awardPointsPrisma) {
-                    await loyaltyService.awardPointsPrisma(user.id, orderData.grandTotal, tx);
-                }
+            user = await tx.user.findUnique({ where: { id: orderData.customerId } });
+            if (user && loyaltyService.awardPointsPrisma) {
+                await loyaltyService.awardPointsPrisma(user.id, orderData.grandTotal, tx);
+            }
+        }
 
-                // Dispatch Email
-                if (user.email) {
-                    try {
-                        const emailContent = generatePOSBillEmail(order, user.name || 'Valued Customer');
-                        await sendEmail({
-                            to: user.email,
-                            emailType: 'customer',
-                            subject: emailContent.subject,
-                            text: emailContent.text,
-                            html: emailContent.html
-                        });
-                    } catch (err) {
-                        console.error(`Failed to queue POS email for ${user.email}: ${err.message}`);
-                    }
-                }
+        const recipientEmail = (user && user.email) || orderData.customerEmail || orderData.customer?.email;
+        if (recipientEmail) {
+            try {
+                order.payments = orderData.payments || [];
+                order.customer = user || orderData.customer || null;
+                const recipientName = (user && user.name) || orderData.customerName || orderData.customer?.name || 'Valued Customer';
+                const emailContent = generatePOSBillEmail(order, recipientName);
+                await sendEmail({
+                    to: recipientEmail,
+                    emailType: 'customer',
+                    subject: emailContent.subject,
+                    text: emailContent.text,
+                    html: emailContent.html
+                });
+            } catch (err) {
+                console.error(`Failed to queue POS email for ${recipientEmail}: ${err.message}`);
             }
         }
 
@@ -1612,7 +1640,19 @@ const processReturn = async (orderId, returnData, performedBy) => {
     return await prisma.$transaction(async (tx) => {
         const order = await tx.pOSOrder.findUnique({
             where: { id: orderId },
-            include: { items: { include: { product: true } } }
+            include: {
+                items: {
+                    include: {
+                        product: {
+                            include: {
+                                metalDetails: true,
+                                stoneDetails: true,
+                                images: true
+                            }
+                        }
+                    }
+                }
+            }
         });
 
         if (!order) throw new Error('Order not found');

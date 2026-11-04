@@ -6,6 +6,8 @@ const ApiResponse = require('../../utils/ApiResponse');
 const { asyncHandler } = require('../../middlewares/error.middleware');
 const { validateAndCheckDuplicateUtr, isNeftOrBankTransfer } = require('../../utils/utrValidator');
 const { generateCreditMemoNumber } = require('../../utils/invoiceNumberGenerator');
+const { sendEmail } = require('../../jobs/email.job');
+const { generateCreditMemoEmail } = require('../../utils/emailTemplates');
 
 // Get all Credit Memos (Admin)
 const getAllCreditMemos = asyncHandler(async (req, res) => {
@@ -289,6 +291,25 @@ const createCreditMemo = asyncHandler(async (req, res) => {
                 notes: notes || 'Advance deposit for Credit Memo',
                 performedBy: req.user.id
             }, tx);
+        }
+
+        // Dispatch Credit Memo confirmation email
+        try {
+            const customerUser = await tx.user.findUnique({ where: { id: customer } });
+            const recipientEmail = customerUser?.email || req.body.customerEmail || req.body.email;
+            if (recipientEmail) {
+                const recipientName = customerUser?.name || req.body.customerName || 'Valued Customer';
+                const memoEmail = generateCreditMemoEmail(creditMemo, { name: recipientName, email: recipientEmail });
+                sendEmail({
+                    to: recipientEmail,
+                    emailType: 'customer',
+                    subject: memoEmail.subject,
+                    text: memoEmail.text,
+                    html: memoEmail.html
+                }).catch(err => console.error(`Failed to send Credit Memo email: ${err.message}`));
+            }
+        } catch (e) {
+            console.error(`Error checking customer for Credit Memo email: ${e.message}`);
         }
 
         ApiResponse.created(creditMemo, 'Credit Memo created successfully').send(res);
