@@ -36,7 +36,7 @@ const calculateProductPrice = async (productData, metalDetails, stoneDetails) =>
                 : 0;
             stone.rate = rate;
 
-            if (stone.stoneType === 'Diamond') {
+            if ((stone.stoneType || '').trim().toLowerCase() === 'diamond') {
                 const query = {
                     cut: stone.cut || 'All',
                     color: stone.color || 'All',
@@ -71,7 +71,8 @@ const calculateProductPrice = async (productData, metalDetails, stoneDetails) =>
     }
 
     const manualStoneCharges = productData.stoneCharges ? Number(productData.stoneCharges) : 0;
-    const stoneValue = roundTo2(dynamicStoneValue > 0 ? dynamicStoneValue : manualStoneCharges);
+    // Manual stone charges override dynamic rates when provided
+    const stoneValue = roundTo2(manualStoneCharges > 0 ? manualStoneCharges : dynamicStoneValue);
 
     // 2. Net Gold Weight
     const netWeight = roundTo3(Math.max(0, grossWeight - totalStoneWeight));
@@ -156,7 +157,16 @@ const calculateProductPrice = async (productData, metalDetails, stoneDetails) =>
     // 8. Totals
     const totalCalculatedPrice = roundTo2(subtotal + gst);
 
-    if (subtotal > 0) {
+    const isManual = Boolean(
+        productData.isManualPrice || 
+        productData.isPriceManual || 
+        productData.basicDetails?.isManualPrice
+    );
+
+    if (isManual && Number(productData.price) > 0) {
+        price = Number(productData.price);
+        finalPrice = Number(productData.price);
+    } else if (subtotal > 0) {
         price = Math.round(totalCalculatedPrice);
         finalPrice = Math.round(totalCalculatedPrice);
     }
@@ -226,7 +236,9 @@ const recalculatePricesForDiamond = async (diamondRate) => {
     const products = await prisma.product.findMany({
         where: {
             stoneDetails: {
-                some: { stoneType: 'Diamond' }
+                some: {
+                    stoneType: { in: ['Diamond', 'diamond', 'DIAMOND'] }
+                }
             }
         },
         include: { metalDetails: true, stoneDetails: true }

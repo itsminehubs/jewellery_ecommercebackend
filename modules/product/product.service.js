@@ -26,6 +26,7 @@ const getAllProducts = async (filters = {}, options = {}) => {
     forHer,
     carbonsmithworld,
     status,
+    stockStatus,
     exclude,
     productType,
     featured,
@@ -39,11 +40,26 @@ const getAllProducts = async (filters = {}, options = {}) => {
     where.id = { not: exclude };
   }
 
+  // Stock status filter (in_stock, low_stock, out_of_stock)
+  if (stockStatus && stockStatus !== 'all') {
+    if (stockStatus === 'in_stock') {
+      where.stock = { gt: 0 };
+    } else if (stockStatus === 'low_stock') {
+      where.stock = { gt: 0, lte: 2 };
+    } else if (stockStatus === 'out_of_stock') {
+      where.stock = 0;
+    }
+  }
+
   if (status === 'in_repair') {
     where.internalState = 'IN_REPAIR';
-  } else if (status && status !== 'all') {
+  } else if (status === 'out_of_stock') {
+    where.status = { in: ['out_of_stock', 'sold'] };
+  } else if (status === 'all') {
+    // Show all product statuses (used by Admin)
+  } else if (status) {
     where.status = status;
-  } else if (Object.keys(filters).length === 0 && status !== 'all') {
+  } else if (Object.keys(filters).length === 0) {
     // Default to active, out_of_stock, and sold for public store
     where.status = { in: ['active', 'out_of_stock', 'sold'] };
   }
@@ -53,21 +69,84 @@ const getAllProducts = async (filters = {}, options = {}) => {
     where.OR = [
       { name: { contains: search, mode: 'insensitive' } },
       { description: { contains: search, mode: 'insensitive' } },
-      { sku: { contains: search, mode: 'insensitive' } }
+      { sku: { contains: search, mode: 'insensitive' } },
+      { huid: { contains: search, mode: 'insensitive' } },
+      { tagId: { contains: search, mode: 'insensitive' } }
     ];
   }
-  if (category) {
+  if (category && category !== 'all') {
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(category);
     if (isUUID) {
       where.categoryId = category;
     } else {
-      where.category = { slug: category };
+      where.category = {
+        OR: [
+          { slug: { equals: category, mode: 'insensitive' } },
+          { parent: { slug: { equals: category, mode: 'insensitive' } } }
+        ]
+      };
     }
   }
   if (minPrice || maxPrice) {
     where.finalPrice = {};
     if (minPrice) where.finalPrice.gte = Number(minPrice);
     if (maxPrice) where.finalPrice.lte = Number(maxPrice);
+  }
+
+  // Material & Stone Filter (Gold, Diamond, Gold & Diamond, Plain Gold, Silver, Platinum)
+  if (metalType && metalType !== 'all') {
+    const mtLower = metalType.trim().toLowerCase();
+
+    if (mtLower === 'diamond') {
+      // Products with diamonds
+      where.stoneDetails = {
+        some: {
+          stoneType: { equals: 'diamond', mode: 'insensitive' }
+        }
+      };
+    } else if (mtLower === 'gold') {
+      // Products made of Gold
+      where.metalDetails = {
+        metalType: { in: ['gold', 'Gold', 'GOLD', 'rose_gold', 'white_gold', 'two_tone'] }
+      };
+    } else if (mtLower === 'gold_diamond') {
+      // Both Gold Metal AND Diamond Stones
+      where.metalDetails = {
+        metalType: { in: ['gold', 'Gold', 'GOLD', 'rose_gold', 'white_gold', 'two_tone'] }
+      };
+      where.stoneDetails = {
+        some: {
+          stoneType: { equals: 'diamond', mode: 'insensitive' }
+        }
+      };
+    } else if (mtLower === 'plain_gold') {
+      // Gold Metal with NO Diamond Stones
+      where.metalDetails = {
+        metalType: { in: ['gold', 'Gold', 'GOLD', 'rose_gold', 'white_gold', 'two_tone'] }
+      };
+      where.stoneDetails = {
+        none: {
+          stoneType: { equals: 'diamond', mode: 'insensitive' }
+        }
+      };
+    } else if (mtLower === 'silver') {
+      where.metalDetails = {
+        metalType: { in: ['silver', 'Silver', 'SILVER'] }
+      };
+    } else if (mtLower === 'platinum') {
+      where.metalDetails = {
+        metalType: { in: ['platinum', 'Platinum', 'PLATINUM'] }
+      };
+    } else {
+      where.metalDetails = {
+        metalType: { equals: metalType, mode: 'insensitive' }
+      };
+    }
+  }
+
+  if (purity) {
+    if (!where.metalDetails) where.metalDetails = {};
+    where.metalDetails.purity = { in: purity.split(',').map(p => p.trim()) };
   }
 
   if (productType) {
@@ -124,16 +203,6 @@ const getAllProducts = async (filters = {}, options = {}) => {
 
     if (conditions.length > 0) {
       where.AND = [...(where.AND || []), { OR: conditions }];
-    }
-  }
-
-  if (metalType || purity) {
-    if (!where.metalDetails) where.metalDetails = {};
-    if (metalType) {
-      where.metalDetails.metalType = { in: metalType.split(',').map(m => m.trim()) };
-    }
-    if (purity) {
-      where.metalDetails.purity = { in: purity.split(',').map(p => p.trim()) };
     }
   }
 
@@ -229,9 +298,9 @@ const getProductById = async (productId) => {
 
     if (!product) throw ApiError.notFound('Product not found');
 
-  if (product.internalState === 'IN_REPAIR') {
-    throw ApiError.badRequest('Cannot delete a product that is currently in repair at the workshop. Please receive it back from repair first.');
-  }
+    if (product.internalState === 'IN_REPAIR') {
+      throw ApiError.badRequest('Cannot Edit/delete a product that is currently in repair at the workshop. Please receive it back from repair first.');
+    }
 
     productData = product;
     // Cache for 10 minutes
@@ -308,10 +377,23 @@ const createProduct = async (productData, imagePaths = [], userId = null) => {
 
   // Normalize unique fields to prevent Prisma constraint errors on empty strings
   if (baseProductData.huid === "") baseProductData.huid = null;
+  delete baseProductData.isManualPrice;
+  delete baseProductData.isPriceManual;
+
+  // Handle specifications (embed into categoryAttributes since it is not a direct Prisma column)
+  if (baseProductData.specifications !== undefined) {
+    if (baseProductData.specifications && typeof baseProductData.specifications === 'object' && Object.keys(baseProductData.specifications).length > 0) {
+      baseProductData.categoryAttributes = {
+        ...(baseProductData.categoryAttributes || {}),
+        specifications: baseProductData.specifications
+      };
+    }
+    delete baseProductData.specifications;
+  }
 
   // Set initial status based on initial stock
-  if (!baseProductData.status || baseProductData.status === 'active' || baseProductData.status === 'sold') {
-    baseProductData.status = initialStock > 0 ? 'active' : 'sold';
+  if (!baseProductData.status || baseProductData.status === 'active' || baseProductData.status === 'out_of_stock' || baseProductData.status === 'sold') {
+    baseProductData.status = initialStock > 0 ? 'active' : 'out_of_stock';
   }
 
   let product;
@@ -456,9 +538,25 @@ const updateProduct = async (productId, updateData, imagePaths = [], imagesToDel
   if (baseProductData.imagesToDelete !== undefined) {
     delete baseProductData.imagesToDelete; // Prevent Prisma unknown argument error
   }
+  delete baseProductData.isManualPrice;
+  delete baseProductData.isPriceManual;
+
+  // Handle specifications (embed into categoryAttributes since it is not a direct Prisma column)
+  if (baseProductData.specifications !== undefined) {
+    if (baseProductData.specifications && typeof baseProductData.specifications === 'object' && Object.keys(baseProductData.specifications).length > 0) {
+      baseProductData.categoryAttributes = {
+        ...(existingProduct.categoryAttributes || {}),
+        ...(baseProductData.categoryAttributes || {}),
+        specifications: baseProductData.specifications
+      };
+    }
+    delete baseProductData.specifications;
+  }
 
   // Normalize unique fields
   if (baseProductData.huid === "") baseProductData.huid = null;
+  if (baseProductData.tagId === "") delete baseProductData.tagId;
+  if (baseProductData.sku === "") delete baseProductData.sku;
 
   const activeMakingPct = baseProductData.makingPercentage !== undefined
     ? Number(baseProductData.makingPercentage || 0)
@@ -740,6 +838,34 @@ const getTrendingProducts = async (options = {}) => {
   return { products, total, page: Number(page), limit: Number(limit) };
 };
 
+const updateProductStock = async (productId, data, userId = null) => {
+  const existingProduct = await prisma.product.findUnique({ where: { id: productId } });
+  if (!existingProduct) throw require('../../utils/ApiError').notFound('Product not found');
+
+  let delta = 0;
+  if (data.quantityChange !== undefined && data.quantityChange !== null && data.quantityChange !== '') {
+    delta = Number(data.quantityChange);
+  } else if (data.stock !== undefined && data.stock !== null && data.stock !== '') {
+    delta = Number(data.stock) - existingProduct.stock;
+  }
+
+  if (delta === 0) {
+    return existingProduct;
+  }
+
+  const updatedProduct = await inventoryService.updateStock(productId, delta, {
+    type: delta > 0 ? 'purchase' : 'adjustment',
+    action: 'ADMIN_STOCK_UPDATE',
+    performedBy: userId,
+    notes: data.notes || 'Stock updated from admin panel'
+  });
+
+  await cacheHelper.del(`${CACHE_KEYS.PRODUCT_DETAIL}:${productId}`);
+  await cacheHelper.delPattern(`${CACHE_KEYS.PRODUCT_DETAIL}:*`);
+
+  return updatedProduct;
+};
+
 // Also expose pricing recalculators directly on product service since other modules expect them here
 const recalculatePricesForMetal = pricingService.recalculatePricesForMetal;
 const recalculatePricesForDiamond = pricingService.recalculatePricesForDiamond;
@@ -749,6 +875,7 @@ module.exports = {
   getProductById,
   createProduct,
   updateProduct,
+  updateProductStock,
   deleteProduct,
   getProductByScannedCode,
   getProductsByCategory,
