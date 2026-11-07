@@ -64,15 +64,18 @@ const getAllProducts = async (filters = {}, options = {}) => {
     where.status = { in: ['active', 'out_of_stock', 'sold'] };
   }
 
-  if (sku) where.sku = sku;
+  if (sku) where.sku = typeof sku === 'string' ? sku.trim() : sku;
   if (search) {
-    where.OR = [
-      { name: { contains: search, mode: 'insensitive' } },
-      { description: { contains: search, mode: 'insensitive' } },
-      { sku: { contains: search, mode: 'insensitive' } },
-      { huid: { contains: search, mode: 'insensitive' } },
-      { tagId: { contains: search, mode: 'insensitive' } }
-    ];
+    const cleanSearch = typeof search === 'string' ? search.trim() : search;
+    if (cleanSearch) {
+      where.OR = [
+        { name: { contains: cleanSearch, mode: 'insensitive' } },
+        { description: { contains: cleanSearch, mode: 'insensitive' } },
+        { sku: { contains: cleanSearch, mode: 'insensitive' } },
+        { huid: { contains: cleanSearch, mode: 'insensitive' } },
+        { tagId: { contains: cleanSearch, mode: 'insensitive' } }
+      ];
+    }
   }
   if (category && category !== 'all') {
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(category);
@@ -93,34 +96,27 @@ const getAllProducts = async (filters = {}, options = {}) => {
     if (maxPrice) where.finalPrice.lte = Number(maxPrice);
   }
 
-  // Material & Stone Filter (Gold, Diamond, Gold & Diamond, Plain Gold, Silver, Platinum)
+  // Material & Stone Filter (Diamond = Gold + Diamond with price & details, Gold = Plain Gold only, Silver = Plain Silver only)
   if (metalType && metalType !== 'all') {
     const mtLower = metalType.trim().toLowerCase();
 
-    if (mtLower === 'diamond') {
-      // Products with diamonds
-      where.stoneDetails = {
-        some: {
-          stoneType: { equals: 'diamond', mode: 'insensitive' }
-        }
-      };
-    } else if (mtLower === 'gold') {
-      // Products made of Gold
-      where.metalDetails = {
-        metalType: { in: ['gold', 'Gold', 'GOLD', 'rose_gold', 'white_gold', 'two_tone'] }
-      };
-    } else if (mtLower === 'gold_diamond') {
-      // Both Gold Metal AND Diamond Stones
+    if (mtLower === 'diamond' || mtLower === 'gold_diamond') {
+      // Diamond: Gold base with Diamond stones that have diamond price/rate and diamond details
       where.metalDetails = {
         metalType: { in: ['gold', 'Gold', 'GOLD', 'rose_gold', 'white_gold', 'two_tone'] }
       };
       where.stoneDetails = {
         some: {
-          stoneType: { equals: 'diamond', mode: 'insensitive' }
+          stoneType: { equals: 'diamond', mode: 'insensitive' },
+          OR: [
+            { rate: { gt: 0 } },
+            { carat: { not: null } },
+            { netWeight: { gt: 0 } }
+          ]
         }
       };
-    } else if (mtLower === 'plain_gold') {
-      // Gold Metal with NO Diamond Stones
+    } else if (mtLower === 'gold' || mtLower === 'plain_gold') {
+      // Gold: Plain Gold with zero diamonds
       where.metalDetails = {
         metalType: { in: ['gold', 'Gold', 'GOLD', 'rose_gold', 'white_gold', 'two_tone'] }
       };
@@ -130,12 +126,14 @@ const getAllProducts = async (filters = {}, options = {}) => {
         }
       };
     } else if (mtLower === 'silver') {
+      // Silver: Plain Silver with zero diamonds
       where.metalDetails = {
         metalType: { in: ['silver', 'Silver', 'SILVER'] }
       };
-    } else if (mtLower === 'platinum') {
-      where.metalDetails = {
-        metalType: { in: ['platinum', 'Platinum', 'PLATINUM'] }
+      where.stoneDetails = {
+        none: {
+          stoneType: { equals: 'diamond', mode: 'insensitive' }
+        }
       };
     } else {
       where.metalDetails = {
@@ -240,7 +238,9 @@ const getAllProducts = async (filters = {}, options = {}) => {
     where.makeForOrder = false;
   }
 
-  const skip = (page - 1) * limit;
+  const pageNum = Math.max(1, parseInt(page, 10) || 1);
+  const limitNum = Math.max(1, Math.min(10000, parseInt(limit, 10) || 20));
+  const skip = (pageNum - 1) * limitNum;
 
   // Sorting translation
   let primarySort = { createdAt: 'desc' };
@@ -253,9 +253,10 @@ const getAllProducts = async (filters = {}, options = {}) => {
   if (sort === 'discount') primarySort = { discount: 'desc' };
   if (sort === 'recommended') primarySort = { featured: 'desc' };
 
-  // If no single productType is specified or 'all' is passed, prioritize diamond (stoneDetails > 0) above gold (0 stones)
+  // If no single productType is specified or 'all' is passed on public storefront, prioritize diamond above gold
   let orderBy = [primarySort];
-  if (!productType || productType === 'all' || (productType.includes('diamond') && productType.includes('gold'))) {
+  const isAdminOrPos = carbonsmithworld === 'all' || makeForOrder === 'all';
+  if (!isAdminOrPos && (!productType || productType === 'all' || (productType.includes('diamond') && productType.includes('gold')))) {
     orderBy = [{ stoneDetails: { _count: 'desc' } }, primarySort];
   }
 
@@ -263,7 +264,7 @@ const getAllProducts = async (filters = {}, options = {}) => {
     where,
     orderBy,
     skip,
-    take: Number(limit),
+    take: limitNum,
     include: {
       category: true,
       metalDetails: true,
@@ -274,7 +275,7 @@ const getAllProducts = async (filters = {}, options = {}) => {
 
   const total = await prisma.product.count({ where });
 
-  return { products, total, page: Number(page), limit: Number(limit) };
+  return { products, total, page: pageNum, limit: limitNum };
 };
 
 const getProductById = async (productId) => {
@@ -297,10 +298,6 @@ const getProductById = async (productId) => {
     });
 
     if (!product) throw ApiError.notFound('Product not found');
-
-    if (product.internalState === 'IN_REPAIR') {
-      throw ApiError.badRequest('Cannot Edit/delete a product that is currently in repair at the workshop. Please receive it back from repair first.');
-    }
 
     productData = product;
     // Cache for 10 minutes
@@ -469,6 +466,10 @@ const updateProduct = async (productId, updateData, imagePaths = [], imagesToDel
 
   if (!existingProduct) throw ApiError.notFound('Product not found');
 
+  if (existingProduct.internalState === 'IN_REPAIR') {
+    throw ApiError.badRequest('Cannot edit a product that is currently in repair at the workshop. Please receive it back from repair first.');
+  }
+
   // Handle image deletions
   if (imagesToDelete && imagesToDelete.length > 0) {
     for (const imageId of imagesToDelete) {
@@ -633,6 +634,10 @@ const deleteProduct = async (productId, userId = null) => {
     include: { images: true, metalDetails: true, stoneDetails: true, category: true }
   });
   if (!product) throw ApiError.notFound('Product not found');
+
+  if (product.internalState === 'IN_REPAIR') {
+    throw ApiError.badRequest('Cannot delete a product that is currently in repair at the workshop. Please receive it back from repair first.');
+  }
 
   // Delete images from Cloudinary
   for (const image of product.images) {
@@ -841,6 +846,10 @@ const getTrendingProducts = async (options = {}) => {
 const updateProductStock = async (productId, data, userId = null) => {
   const existingProduct = await prisma.product.findUnique({ where: { id: productId } });
   if (!existingProduct) throw require('../../utils/ApiError').notFound('Product not found');
+
+  if (existingProduct.internalState === 'IN_REPAIR') {
+    throw require('../../utils/ApiError').badRequest('Cannot adjust stock of a product currently in repair at the workshop. Please receive it back from repair first.');
+  }
 
   let delta = 0;
   if (data.quantityChange !== undefined && data.quantityChange !== null && data.quantityChange !== '') {
