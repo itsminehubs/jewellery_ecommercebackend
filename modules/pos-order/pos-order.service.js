@@ -195,7 +195,7 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
 
         const metalDetails = productData.metalDetails;
         const stoneDetails = productData.stoneDetails;
-        const grossWeight = metalDetails?.grossWeight ? Number(metalDetails.grossWeight) : 0;
+        const grossWeight = metalDetails?.grossWeight ? Number(metalDetails.grossWeight) : (productData.grossWeight ? Number(productData.grossWeight) : 0);
         let totalStoneWeight = 0;
         let dynamicStoneValue = 0;
 
@@ -404,7 +404,7 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
         const weightForMaking = isSchemeActive ? (grossWeight > 0 ? grossWeight : netWeight) : netWeight;
 
         let makingValue = 0;
-        let makingCharges = productData.makingCharges ? Number(productData.makingCharges) : 0;
+        let makingCharges = productData.makingCharges ? Number(productData.makingCharges) : (productData.makingCharge ? Number(productData.makingCharge) : 0);
         const makingPercentage = productData.makingPercentage ? Number(productData.makingPercentage) : 0;
 
         if (makingPercentage > 0 && rateUsed > 0) {
