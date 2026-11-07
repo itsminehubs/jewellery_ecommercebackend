@@ -32,6 +32,7 @@ router.get('/category/:category', productController.getProductsByCategory);
 
 router.post('/', authenticate, checkPermission(PERMISSIONS.PRODUCT_CREATE), productImageUpload, parseProductData, validate(productValidation.createProduct), productController.createProduct);
 router.put('/:id', authenticate, checkPermission(PERMISSIONS.PRODUCT_EDIT), productImageUpload, parseProductData, validate(productValidation.updateProduct), productController.updateProduct);
+router.patch('/:id/stock', authenticate, checkPermission(PERMISSIONS.PRODUCT_EDIT), productController.updateStock);
 router.delete('/:id', authenticate, checkPermission(PERMISSIONS.PRODUCT_DELETE), productController.deleteProduct);
 
 

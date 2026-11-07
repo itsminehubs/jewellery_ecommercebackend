@@ -34,22 +34,25 @@ const createProduct = {
             gender: Joi.string().allow('', null),
             brand: Joi.string().allow('', null),
             occasion: Joi.string().allow('', null),
-        }),
+            isManualPrice: Joi.boolean().optional(),
+        }).unknown(true).optional(),
 
-        categoryAttributes: Joi.object().pattern(Joi.string(), Joi.string()),
+        categoryAttributes: Joi.object().pattern(Joi.string(), Joi.any()).optional().allow(null),
 
         // PRICING & STOCK
         price: Joi.number().required().min(0),
         discount: Joi.number().min(0).max(100).default(0),
         stock: Joi.number().integer().min(0).default(0),
-        status: Joi.string().valid(...Object.values(PRODUCT_STATUS)).default(PRODUCT_STATUS.ACTIVE),
+        status: Joi.string().valid(...Object.values(PRODUCT_STATUS), 'in_repair').default(PRODUCT_STATUS.ACTIVE),
         featured: Joi.boolean().default(false),
         trending: Joi.boolean().default(false),
         forHer: Joi.boolean().default(false),
         carbonsmithworld: Joi.boolean().default(false),
         makeForOrder: Joi.boolean().default(false),
+        isManualPrice: Joi.boolean().optional(),
+        isPriceManual: Joi.boolean().optional(),
         sku: Joi.string().allow('', null),
-        specifications: Joi.object().pattern(Joi.string(), Joi.string()),
+        specifications: Joi.object().pattern(Joi.string(), Joi.any()).optional().allow(null),
 
         // POS/Jewellery Specific (Maintained for legacy/internal logic if needed, but made optional)
         makingCharges: Joi.number().min(0).default(0),
@@ -105,21 +108,24 @@ const updateProduct = {
             gender: Joi.string().allow('', null),
             brand: Joi.string().allow('', null),
             occasion: Joi.string().allow('', null),
-        }),
+            isManualPrice: Joi.boolean().optional(),
+        }).unknown(true).optional(),
 
-        categoryAttributes: Joi.object().pattern(Joi.string(), Joi.string()),
+        categoryAttributes: Joi.object().pattern(Joi.string(), Joi.any()).optional().allow(null),
 
         price: Joi.number().min(0),
         discount: Joi.number().min(0).max(100),
         stock: Joi.number().integer().min(0),
-        status: Joi.string().valid(...Object.values(PRODUCT_STATUS)),
+        status: Joi.string().valid(...Object.values(PRODUCT_STATUS), 'in_repair'),
         internalState: Joi.string().valid('AVAILABLE', 'IN_REPAIR', 'IN_TRANSIT').optional(),
         featured: Joi.boolean(),
         trending: Joi.boolean(),
         forHer: Joi.boolean(),
         carbonsmithworld: Joi.boolean(),
         makeForOrder: Joi.boolean(),
-        specifications: Joi.object().pattern(Joi.string(), Joi.string()),
+        isManualPrice: Joi.boolean().optional(),
+        isPriceManual: Joi.boolean().optional(),
+        specifications: Joi.object().pattern(Joi.string(), Joi.any()).optional().allow(null),
 
         makingCharges: Joi.number().min(0),
         makingPercentage: Joi.number().min(0).max(100).allow(null, '').optional(),
@@ -148,16 +154,19 @@ const getProducts = {
         page: Joi.number().integer().min(1),
         limit: Joi.number().integer().min(1).max(100),
         sort: Joi.string(),
-        category: Joi.string(),
-        metalType: Joi.string().valid(...Object.values(METAL_TYPES)),
-        search: Joi.string(),
-        sku: Joi.string(),
+        category: Joi.string().allow('', null),
+        metalType: Joi.string().allow('', null),
+        stockStatus: Joi.string().allow('', null),
+        status: Joi.string().allow('', null),
+        search: Joi.string().allow('', null),
+        sku: Joi.string().allow('', null),
         minPrice: Joi.number().min(0),
         maxPrice: Joi.number().min(0),
         featured: Joi.boolean(),
         trending: Joi.boolean(),
+        carbonsmithworld: Joi.string().allow('', null),
         makeForOrder: Joi.alternatives().try(Joi.boolean(), Joi.string())
-    })
+    }).unknown(true)
 };
 
 module.exports = {
