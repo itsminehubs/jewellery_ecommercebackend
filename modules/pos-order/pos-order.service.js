@@ -1053,6 +1053,8 @@ const createOrder = async (orderData) => {
                 }
             },
             include: {
+                staff: { select: { name: true } },
+                customer: { select: { id: true, name: true, phone: true, email: true, addresses: true } },
                 items: {
                     include: {
                         product: {
@@ -1153,11 +1155,12 @@ const createOrder = async (orderData) => {
             }
         }
 
+        order.payments = orderData.payments || [];
+        order.customer = order.customer || user || orderData.customer || null;
+
         const recipientEmail = (user && user.email) || orderData.customerEmail || orderData.customer?.email;
         if (recipientEmail) {
             try {
-                order.payments = orderData.payments || [];
-                order.customer = user || orderData.customer || null;
                 const recipientName = (user && user.name) || orderData.customerName || orderData.customer?.name || 'Valued Customer';
                 const emailContent = generatePOSBillEmail(order, recipientName);
                 await sendEmail({
@@ -1231,12 +1234,12 @@ const getStoreOrders = async (shop_id, query = {}) => {
     };
 };
 
-const getOrderById = async (id) => {
-    return await prisma.pOSOrder.findUnique({
+const getOrderById = async (id, db = prisma) => {
+    return await db.pOSOrder.findUnique({
         where: { id },
         include: {
             staff: { select: { name: true } },
-            customer: true,
+            customer: { select: { id: true, name: true, phone: true, email: true, addresses: true } },
             items: { include: { product: { include: { metalDetails: true, stoneDetails: true } } } }
         }
     });
@@ -1641,6 +1644,8 @@ const processReturn = async (orderId, returnData, performedBy) => {
         const order = await tx.pOSOrder.findUnique({
             where: { id: orderId },
             include: {
+                staff: { select: { name: true } },
+                customer: { select: { id: true, name: true, phone: true, email: true, addresses: true } },
                 items: {
                     include: {
                         product: {
@@ -1838,7 +1843,7 @@ const updateOrder = async (orderId, orderData) => {
             }
         }
 
-        return await getOrderById(existingOrder.id);
+        return await getOrderById(existingOrder.id, tx);
     }, { maxWait: 10000, timeout: 30000 });
 };
 
