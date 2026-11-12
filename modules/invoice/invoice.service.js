@@ -8,7 +8,21 @@ const { generateInvoiceEmail } = require('../../utils/emailTemplates');
 const generateInvoice = async (orderId, adminId) => {
     let order = await prisma.order.findUnique({
         where: { id: orderId },
-        include: { user: { include: { addresses: true } }, items: { include: { product: true } } }
+        include: {
+            user: { include: { addresses: true } },
+            shippingAddress: true,
+            items: {
+                include: {
+                    product: {
+                        include: {
+                            metalDetails: true,
+                            stoneDetails: true,
+                            images: true
+                        }
+                    }
+                }
+            }
+        }
     });
 
     let isPosOrder = false;
@@ -16,7 +30,20 @@ const generateInvoice = async (orderId, adminId) => {
     if (!order) {
         order = await prisma.pOSOrder.findUnique({
             where: { id: orderId },
-            include: { customer: { include: { addresses: true } }, items: { include: { product: true } } }
+            include: {
+                customer: { include: { addresses: true } },
+                items: {
+                    include: {
+                        product: {
+                            include: {
+                                metalDetails: true,
+                                stoneDetails: true,
+                                images: true
+                            }
+                        }
+                    }
+                }
+            }
         });
         if (order) {
             isPosOrder = true;
@@ -30,7 +57,7 @@ const generateInvoice = async (orderId, adminId) => {
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth();
-    
+
     let startYear, endYear;
     if (currentMonth >= 3) {
         startYear = currentYear;
@@ -39,13 +66,13 @@ const generateInvoice = async (orderId, adminId) => {
         startYear = currentYear - 1;
         endYear = currentYear;
     }
-    
+
     const startYearStr = startYear.toString().slice(-2);
     const endYearStr = endYear.toString().slice(-2);
     const fyString = `${startYearStr}/${endYearStr}`;
 
     const fyStartDate = new Date(startYear, 3, 1);
-    
+
     const lastInvoice = await prisma.invoice.findFirst({
         where: { createdAt: { gte: fyStartDate } },
         orderBy: { createdAt: 'desc' }
@@ -58,7 +85,7 @@ const generateInvoice = async (orderId, adminId) => {
         if (!isNaN(lastNum)) {
             nextNumber = lastNum + 1;
         }
-    } else if (!lastInvoice) {
+    } else {
         const count = await prisma.invoice.count({ where: { createdAt: { gte: fyStartDate } } });
         nextNumber = count + 1;
     }
@@ -120,9 +147,9 @@ const downloadInvoice = async (invoiceId) => {
 
     const invoice = await prisma.invoice.findUnique({
         where: { id: invoiceId },
-        include: { 
-            order: { include: { user: { include: { addresses: true } }, items: { include: { product: true } } } },
-            posOrder: { include: { customer: { include: { addresses: true } }, items: { include: { product: true } } } }
+        include: {
+            order: { include: { user: { include: { addresses: true } }, items: { include: { product: { include: { metalDetails: true, stoneDetails: true } } } } } },
+            posOrder: { include: { customer: { include: { addresses: true } }, items: { include: { product: { include: { metalDetails: true, stoneDetails: true } } } } } }
         }
     });
 

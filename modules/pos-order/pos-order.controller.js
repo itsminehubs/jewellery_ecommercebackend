@@ -40,9 +40,12 @@ const getStoreAnalytics = asyncHandler(async (req, res) => {
     if (shop_id === 'all' || shop_id === 'undefined' || !shop_id) {
         shop_id = null;
     }
-    const { startDate, endDate, includeOnline } = req.query;
+    let { startDate, endDate, includeOnline } = req.query;
     if (!startDate || !endDate) {
-        throw new ApiError(400, 'startDate and endDate are required');
+        startDate = new Date(0).toISOString();
+        const now = new Date();
+        now.setHours(23, 59, 59, 999);
+        endDate = now.toISOString();
     }
     const analytics = await posOrderService.getStoreAnalytics(shop_id, startDate, endDate, includeOnline === 'true');
     ApiResponse.success(analytics, 'Analytics fetched successfully').send(res);
@@ -61,13 +64,15 @@ const processReturn = asyncHandler(async (req, res) => {
 });
 
 const calculateCart = asyncHandler(async (req, res) => {
-    const { items, storeId } = req.body;
+    const { items, storeId, lockedGoldRate, creditMemoId, memoId, creditMemoIds, memoIds, schemeId, schemeIds, schemeRef, schemeRefs } = req.body;
     
     if (!items || !Array.isArray(items)) {
         throw new ApiError(400, 'Items array is required');
     }
 
-    const calculatedCart = await posOrderService.calculateCartPrice(items, storeId);
+    const memoRefs = creditMemoIds || memoIds || creditMemoId || memoId;
+    const activeSchemeRefs = schemeRefs || schemeIds || schemeId || schemeRef;
+    const calculatedCart = await posOrderService.calculateCartPrice(items, storeId, lockedGoldRate, memoRefs, activeSchemeRefs);
     ApiResponse.success(calculatedCart, 'Cart calculated successfully').send(res);
 });
 
@@ -86,6 +91,15 @@ const updateOrder = asyncHandler(async (req, res) => {
     ApiResponse.success(order, 'Order updated successfully').send(res);
 });
 
+const checkUtr = asyncHandler(async (req, res) => {
+    const { utr } = req.query;
+    if (!utr) {
+        throw new ApiError(400, 'UTR parameter is required');
+    }
+    const result = await posOrderService.checkUtrAvailability(utr);
+    ApiResponse.success(result, 'UTR verification result').send(res);
+});
+
 module.exports = {
     createOrder,
     updateOrder,
@@ -93,6 +107,7 @@ module.exports = {
     getOrderById,
     getStoreAnalytics,
     processReturn,
-    calculateCart
+    calculateCart,
+    checkUtr
 };
 

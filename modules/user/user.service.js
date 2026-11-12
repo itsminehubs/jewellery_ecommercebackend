@@ -1,10 +1,24 @@
 const prisma = require('../../config/prisma');
 const ApiError = require('../../utils/ApiError');
 const { cacheHelper } = require('../../config');
-const { CACHE_KEYS, CACHE_TTL } = require('../../utils/constants');
+const { CACHE_KEYS, CACHE_TTL, USER_ROLES } = require('../../utils/constants');
 const { uploadImage, deleteImage } = require('../../config/s3');
 const logger = require('../../utils/logger');
 const { hashPassword } = require('../../utils/hash');
+
+// Staff / Employee roles that must NEVER be returned in customer searches or POS billing lookups
+const EMPLOYEE_ROLES = [
+  USER_ROLES.SUPER_ADMIN,
+  USER_ROLES.ADMIN,
+  USER_ROLES.STORE_MANAGER,
+  USER_ROLES.SALES_STAFF,
+  USER_ROLES.INVENTORY_STAFF,
+  USER_ROLES.CUSTOMER_SUPPORT,
+  USER_ROLES.MARKETING_EXECUTIVE,
+  USER_ROLES.ACCOUNTS_FINANCE,
+  'staff',
+  'employee'
+];
 
 const getUser = async (userId) => {
   const cachedUser = await cacheHelper.get(`${CACHE_KEYS.USER}${userId}`);
@@ -39,8 +53,8 @@ const getUserByPhone = async (phone) => {
     where: { phone },
     include: { addresses: true }
   });
-  if (!user) {
-    throw ApiError.notFound('User not found');
+  if (!user || user.deletedAt || EMPLOYEE_ROLES.includes(user.role) || (user.role !== 'user' && user.role !== 'customer')) {
+    throw ApiError.notFound('Customer not found');
   }
 
   // Fetch recent purchases (up to 50 for complete POS history)
@@ -68,6 +82,40 @@ const getUserByPhone = async (phone) => {
   delete userJson.refreshToken;
 
   return { ...userJson, recentOrders: mappedOrders };
+};
+
+const searchCustomers = async (query, limit = 10) => {
+  if (!query || !query.trim()) return [];
+  const clean = query.trim();
+  const users = await prisma.user.findMany({
+    where: {
+      deletedAt: null,
+      role: {
+        notIn: EMPLOYEE_ROLES,
+        in: ['user', 'customer']
+      },
+      OR: [
+        { phone: { contains: clean, mode: 'insensitive' } },
+        { name: { contains: clean, mode: 'insensitive' } },
+        { email: { contains: clean, mode: 'insensitive' } },
+        { panNumber: { contains: clean, mode: 'insensitive' } }
+      ]
+    },
+    take: limit,
+    select: {
+      id: true,
+      name: true,
+      phone: true,
+      email: true,
+      role: true,
+      panNumber: true,
+      gstNumber: true,
+      loyaltyPoints: true,
+      loyaltyTier: true,
+      addresses: true
+    }
+  });
+  return users;
 };
 
 const createQuickCustomer = async (customerData) => {
@@ -226,6 +274,10 @@ const getCart = async (userId) => {
 
 const addToCart = async (userId, productId, quantity) => {
   const q = quantity || 1;
+  const product = await prisma.product.findUnique({ where: { id: productId } });
+  if (product && product.internalState === 'IN_REPAIR') {
+    throw ApiError.badRequest('This product is currently under repair / workshop maintenance and cannot be added to cart.');
+  }
   
   await prisma.cartItem.upsert({
     where: {
@@ -379,6 +431,7 @@ const updateFcmToken = async (userId, fcmToken) => {
 module.exports = {
   getUser,
   getUserByPhone,
+  searchCustomers,
   createQuickCustomer,
   updateProfile,
   uploadProfileImage,

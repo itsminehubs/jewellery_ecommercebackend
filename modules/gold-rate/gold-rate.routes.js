@@ -12,5 +12,10 @@ router.get('/latest', goldRateController.getLatestRate);
 router.post('/', authenticate, checkPermission(PERMISSIONS.SET_GOLD_RATES), goldRateController.updateRate);
 router.delete('/:metal/:purity', authenticate, checkPermission(PERMISSIONS.SET_GOLD_RATES), goldRateController.deleteRate);
 
+// Scheme Replica Routes
+router.get('/scheme-current', goldRateController.getSchemeCurrentRates);
+router.post('/scheme', authenticate, checkPermission(PERMISSIONS.SET_GOLD_RATES), goldRateController.updateSchemeRate);
+router.delete('/scheme/:metal/:purity', authenticate, checkPermission(PERMISSIONS.SET_GOLD_RATES), goldRateController.deleteSchemeRate);
+
 
 module.exports = router;

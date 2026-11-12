@@ -20,6 +20,13 @@ const getUserByPhone = asyncHandler(async (req, res) => {
   ApiResponse.success(user, 'User fetched successfully').send(res);
 });
 
+const searchCustomers = asyncHandler(async (req, res) => {
+  const query = req.query.query || req.query.q || req.query.search || req.query.phone;
+  const limit = parseInt(req.query.limit, 10) || 10;
+  const customers = await userService.searchCustomers(query, limit);
+  ApiResponse.success(customers, 'Customers found').send(res);
+});
+
 const createQuickCustomer = asyncHandler(async (req, res) => {
   const user = await userService.createQuickCustomer(req.body);
   ApiResponse.created(user, 'Quick customer created successfully').send(res);
@@ -116,9 +123,12 @@ const requestAccountDeletion = asyncHandler(async (req, res) => {
   const user = req.user;
   const otp = await otpService.generateAndStoreOTP(user.phone);
 
+  const isSandbox = process.env.IS_SANDBOX === 'true' || process.env.NODE_ENV !== 'production';
+
   ApiResponse.success({
-    message: 'OTP sent to your registered phone number',
-    otp: process.env.NODE_ENV === 'development' ? otp : undefined
+    message: isSandbox ? `[SANDBOX] OTP is: ${otp} (or enter 123456)` : 'OTP sent to your registered phone number',
+    otp: isSandbox ? otp : undefined,
+    sandboxOtp: isSandbox ? otp : undefined
   }, 'OTP Sent').send(res);
 });
 
@@ -154,6 +164,7 @@ const updateFcmToken = asyncHandler(async (req, res) => {
 module.exports = {
   getProfile,
   getUserByPhone,
+  searchCustomers,
   createQuickCustomer,
   updateProfile,
   uploadProfileImage,

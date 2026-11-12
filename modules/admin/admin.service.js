@@ -12,12 +12,35 @@ const { generateEmployeeWelcomeEmail } = require('../../utils/emailTemplates');
 const getDashboardStats = async (shopId = null) => {
   const filter = {}; // Order model doesn't have storeId, so global stats only
   const totalUsers = await prisma.user.count({ where: { role: 'user' } });
+  
+  const productWhere = { deletedAt: null };
+  if (shopId && shopId !== 'all') {
+    productWhere.shopId = shopId;
+  }
+
+  // Total of all products in catalog
   const totalProducts = await prisma.product.count({
+    where: productWhere
+  });
+
+  // Physical in-store products (excluding Made for Order, Carbonsmith World, and items in repair)
+  const inStoreProducts = await prisma.product.count({
     where: {
-      deletedAt: null,
-      carbonsmithworld: false // Exclude Carbonsmith World products
+      ...productWhere,
+      carbonsmithworld: false,
+      makeForOrder: false,
+      NOT: { internalState: 'IN_REPAIR' }
     }
   });
+
+  // Internal/store products currently in repair
+  const repairProducts = await prisma.product.count({
+    where: {
+      ...productWhere,
+      internalState: 'IN_REPAIR'
+    }
+  });
+
   const totalOrders = await prisma.order.count({ where: filter });
   const pendingOrders = await prisma.order.count({ where: { ...filter, orderStatus: 'pending' } });
 
@@ -51,6 +74,8 @@ const getDashboardStats = async (shopId = null) => {
   return {
     totalUsers,
     totalProducts,
+    inStoreProducts,
+    repairProducts,
     totalOrders,
     pendingOrders,
     totalRevenue,
@@ -457,22 +482,34 @@ const getStockAnalytics = async () => {
   const stats = await prisma.product.aggregate({
     where: {
       deletedAt: null,
-      carbonsmithworld: false // Exclude Carbonsmith World
+      carbonsmithworld: false, // Exclude Carbonsmith World
+      NOT: { internalState: 'IN_REPAIR' }
     },
     _sum: { stock: true }
   });
 
-  // For total value, we need db.$queryRaw because it's stock * price
+  // For total value, we need db.$queryRaw because it's stock * price (excluding items in repair)
   const queryResult = await prisma.$queryRaw`
     SELECT SUM(p.stock * p."finalPrice") as "totalValue" 
     FROM "Product" p
-    WHERE p."deletedAt" IS NULL AND p.carbonsmithworld = false
+    WHERE p."deletedAt" IS NULL 
+      AND p.carbonsmithworld = false 
+      AND (p."internalState" IS NULL OR p."internalState" != 'IN_REPAIR')
   `;
   const totalValue = queryResult[0]?.totalValue || 0;
 
   const lowStockCount = await prisma.product.count({
     where: {
       stock: { lt: 5 },
+      deletedAt: null,
+      carbonsmithworld: false,
+      NOT: { internalState: 'IN_REPAIR' }
+    }
+  });
+
+  const repairCount = await prisma.product.count({
+    where: {
+      internalState: 'IN_REPAIR',
       deletedAt: null,
       carbonsmithworld: false
     }
@@ -482,6 +519,7 @@ const getStockAnalytics = async () => {
     where: { orderStatus: { in: ['shipped', 'delivered'] } }
   });
 
+  // Stock grouped by category for products not in repair
   const categoryStockRaw = await prisma.$queryRaw`
     SELECT 
       c.id as "categoryId",
@@ -490,7 +528,9 @@ const getStockAnalytics = async () => {
       SUM(p.stock * p."finalPrice") as value
     FROM "Product" p
     LEFT JOIN "Category" c ON p."categoryId" = c.id
-    WHERE p."deletedAt" IS NULL AND p.carbonsmithworld = false
+    WHERE p."deletedAt" IS NULL 
+      AND p.carbonsmithworld = false 
+      AND (p."internalState" IS NULL OR p."internalState" != 'IN_REPAIR')
     GROUP BY c.id, c.name
   `;
 
@@ -501,12 +541,106 @@ const getStockAnalytics = async () => {
     value: Number(c.value || 0)
   }));
 
+  // Official diamond stone filter matching product.service.js
+  const diamondStoneFilter = {
+    AND: [
+      { rate: { gt: 0 } },
+      {
+        OR: [
+          {
+            AND: [
+              { stoneType: { equals: 'Diamond', mode: 'insensitive' } },
+              {
+                OR: [
+                  { clarity: { not: null, not: '' } },
+                  { cut: { not: null, not: '' } },
+                  { color: { not: null, not: '' } }
+                ]
+              }
+            ]
+          },
+          {
+            AND: [
+              { color: { not: null, not: '' } },
+              { clarity: { not: null, not: '' } },
+              { cut: { not: null, not: '' } }
+            ]
+          }
+        ]
+      }
+    ]
+  };
+
+  // Plain Gold stock grouped by category: Gold metal and NO diamond details (excludes items in repair)
+  const goldProducts = await prisma.product.findMany({
+    where: {
+      deletedAt: null,
+      carbonsmithworld: false,
+      NOT: { internalState: 'IN_REPAIR' },
+      metalDetails: { metalType: { in: ['Gold', 'gold'] } },
+      stoneDetails: { none: diamondStoneFilter }
+    },
+    select: {
+      stock: true,
+      finalPrice: true,
+      category: {
+        select: {
+          id: true,
+          name: true
+        }
+      }
+    }
+  });
+
+  // Diamond stock grouped by category: Gold or Platinum metal and WITH diamond details (excludes items in repair)
+  const diamondProducts = await prisma.product.findMany({
+    where: {
+      deletedAt: null,
+      carbonsmithworld: false,
+      NOT: { internalState: 'IN_REPAIR' },
+      metalDetails: { metalType: { in: ['Gold', 'gold', 'Platinum', 'platinum'] } },
+      stoneDetails: { some: diamondStoneFilter }
+    },
+    select: {
+      stock: true,
+      finalPrice: true,
+      category: {
+        select: {
+          id: true,
+          name: true
+        }
+      }
+    }
+  });
+
+  const aggregateByCategory = (products) => {
+    const map = {};
+    for (const p of products) {
+      const catId = p.category?.id || 'uncategorized';
+      const catName = p.category?.name || 'Unknown';
+      if (!map[catId]) {
+        map[catId] = { categoryId: catId, name: catName, count: 0, value: 0 };
+      }
+      map[catId].count += Number(p.stock || 0);
+      map[catId].value += (Number(p.stock || 0) * Number(p.finalPrice || 0));
+    }
+    return Object.values(map)
+      .filter(c => c.count > 0)
+      .sort((a, b) => b.count - a.count);
+  };
+
+  const goldCategoryStock = aggregateByCategory(goldProducts);
+  const diamondCategoryStock = aggregateByCategory(diamondProducts);
+
   return {
     totalStock: stats._sum.stock || 0,
     totalValue: Number(totalValue),
     lowStockCount,
+    repairCount,
     dispatchedOrders,
-    categoryStock
+    categoryStock,
+    goldCategoryStock,
+    diamondCategoryStock
   };
 };
 
@@ -536,7 +670,7 @@ const getSalesReports = async (period, shopId = null) => {
   const result = await prisma.$queryRawUnsafe(query);
 
   return result.map(r => ({
-    _id: r.id,
+    _id: r._id,
     totalSales: Number(r.totalSales),
     orderCount: Number(r.orderCount)
   }));
@@ -564,11 +698,12 @@ const getStockList = async (options = {}) => {
     if (status === 'low_stock') where.stock = { lte: 5, gt: 0 };
     else if (status === 'out_of_stock') where.stock = 0;
     else if (status === 'in_stock') where.stock = { gt: 5 };
+    else if (status === 'in_repair') where.internalState = 'IN_REPAIR';
   }
 
   const products = await prisma.product.findMany({
     where,
-    select: { id: true, name: true, sku: true, categoryId: true, metalDetails: true, stock: true, price: true, purchasePrice: true, finalPrice: true, status: true, images: true },
+    select: { id: true, name: true, sku: true, categoryId: true, metalDetails: true, stock: true, price: true, purchasePrice: true, finalPrice: true, status: true, internalState: true, images: true },
     orderBy: status === 'low_stock' ? { stock: 'asc' } : { updatedAt: 'desc' },
     skip,
     take: Number(limit)
@@ -681,7 +816,34 @@ const deleteOrder = async (orderId, adminId) => {
     where: { id: orderId },
     include: { items: true }
   });
+
+  const restoreCreditMemos = async (notes) => {
+    if (notes && notes.includes('PAYMENT_REF:credit_memo:')) {
+      const notesArray = notes.split('||');
+      for (const note of notesArray) {
+        if (note.startsWith('PAYMENT_REF:credit_memo:')) {
+          const parts = note.split(':');
+          if (parts.length >= 4) {
+            const memoId = parts[2];
+            const amount = Number(parts[3]);
+            if (memoId && !isNaN(amount)) {
+              const memo = await prisma.creditMemo.findFirst({ where: { memoId } });
+              if (memo) {
+                await prisma.creditMemo.update({
+                  where: { id: memo.id },
+                  data: { balance: Number(memo.balance) + amount, status: 'active' }
+                });
+                logger.info(`Restored ₹${amount} to Credit Memo ${memoId} from deleted order ${orderId}`);
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+
   if (order) {
+    await restoreCreditMemos(order.notes);
     for (const item of order.items) {
       if (item.productId) {
         try {
@@ -707,6 +869,7 @@ const deleteOrder = async (orderId, adminId) => {
     include: { items: true }
   });
   if (posOrder) {
+    await restoreCreditMemos(posOrder.notes);
     for (const item of posOrder.items) {
       if (item.productId) {
         try {

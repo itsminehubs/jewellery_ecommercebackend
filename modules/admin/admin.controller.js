@@ -67,7 +67,11 @@ const getAllUsers = asyncHandler(async (req, res) => {
   const { page = 1, limit = 20, role, isActive, search } = req.query;
 
   const filters = {};
-  if (role) filters.role = role;
+  if (role === 'staff' || role === 'employee' || role === 'non_user') {
+    filters.role = { notIn: ['user', 'USER'] };
+  } else if (role && role !== 'all') {
+    filters.role = role;
+  }
   if (isActive !== undefined) filters.isActive = isActive === 'true';
   
   if (search) {

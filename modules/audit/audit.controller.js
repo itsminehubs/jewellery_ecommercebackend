@@ -9,14 +9,11 @@ const getGlobalAudits = asyncHandler(async (req, res) => {
     const filters = {};
     if (req.query.type) filters.type = req.query.type;
     if (req.query.action) filters.action = req.query.action;
+    if (req.query.search) filters.search = req.query.search;
     
     // Date filtering logic
-    if (req.query.startDate && req.query.endDate) {
-        filters.createdAt = {
-            $gte: new Date(req.query.startDate),
-            $lte: new Date(req.query.endDate)
-        };
-    }
+    if (req.query.startDate) filters.startDate = req.query.startDate;
+    if (req.query.endDate) filters.endDate = req.query.endDate;
 
     const { page, limit } = req.query;
     const result = await auditService.getGlobalAudits(filters, { page, limit });

@@ -20,6 +20,25 @@ router.use(authenticate);
 // Frontend specific routes
 router.get('/my-repairs', repairController.getMyRepairs);
 
+// Internal Store Stock Repair Routes
+router.post(
+    '/internal',
+    restrictTo('admin', 'super_admin', 'store_manager', 'sales_staff', 'staff'),
+    repairController.createInternalRepair
+);
+
+router.post(
+    '/:id/internal-receive',
+    restrictTo('admin', 'super_admin', 'store_manager', 'sales_staff', 'staff'),
+    repairController.receiveInternalRepair
+);
+
+router.post(
+    '/product/:productId/receive',
+    restrictTo('admin', 'super_admin', 'store_manager', 'sales_staff', 'staff'),
+    repairController.receiveProductFromRepair
+);
+
 // POS and Admin Routes
 router
     .route('/')

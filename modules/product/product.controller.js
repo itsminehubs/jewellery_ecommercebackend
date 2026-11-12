@@ -43,6 +43,12 @@ const updateProduct = asyncHandler(async (req, res) => {
   ApiResponse.success(product, 'Product updated successfully').send(res);
 });
 
+const updateStock = asyncHandler(async (req, res) => {
+  const { stock, quantityChange, notes } = req.body;
+  const product = await productService.updateProductStock(req.params.id, { stock, quantityChange, notes }, req.user?.id);
+  ApiResponse.success(product, 'Stock updated successfully').send(res);
+});
+
 const deleteProduct = asyncHandler(async (req, res) => {
   await productService.deleteProduct(req.params.id, req.user?.id);
   ApiResponse.success(null, 'Product deleted successfully').send(res);
@@ -95,6 +101,7 @@ module.exports = {
   scanProduct,
   createProduct,
   updateProduct,
+  updateStock,
   deleteProduct,
   getProductsByCategory,
   getFeaturedProducts,

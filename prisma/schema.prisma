@@ -56,6 +56,7 @@ model User {
   updatedDiamondRates   DiamondRate[]
   schemes               Scheme[]
   installmentsCollected SchemeInstallment[]
+  schemeActivityLogs    SchemeActivityLog[] @relation("SchemeActivityLogUser")
   createdCreditMemos    CreditMemo[]        @relation("CreditMemoCreator")
 
   posOrders        POSOrder[]       @relation("POSCustomer")
@@ -71,6 +72,8 @@ model User {
 
   imitationOrdersAsCustomer ImitationSale[] @relation("ImitationCustomer")
   imitationOrdersAsStaff    ImitationSale[] @relation("ImitationStaff")
+  goldBarSales              GoldBarSale[]   @relation("CustomerGoldBarSales")
+  goldBarSalesHandled       GoldBarSale[]   @relation("StaffGoldBarSales")
 
   repairs           Repair[]
   billedRepairs     Repair[]  @relation("BilledRepairs")
@@ -144,6 +147,7 @@ model Product {
   price            Decimal @db.Decimal(20, 2)
   purchasePrice    Decimal @default(0) @db.Decimal(20, 2)
   makingCharges    Decimal @default(0) @db.Decimal(20, 2)
+  makingPercentage Decimal? @default(0) @db.Decimal(5, 2)
   makingChargeType String  @default("per_gram") // fixed, per_gram
   stoneCharges     Decimal @default(0) @db.Decimal(20, 2)
   wastage          Decimal @default(0) @db.Decimal(5, 2)
@@ -155,8 +159,9 @@ model Product {
   gstRate Decimal @default(3) @db.Decimal(5, 2)
 
   // Inventory & Status
-  stock  Int    @default(0)
-  status String @default("active") // active, out_of_stock, archived
+  stock         Int    @default(0)
+  status        String @default("active") // active, out_of_stock, archived
+  internalState String @default("AVAILABLE") // AVAILABLE, IN_REPAIR, IN_TRANSIT
 
   // Analytics
   rating           Decimal @default(0) @db.Decimal(3, 2)
@@ -167,6 +172,7 @@ model Product {
   trending         Boolean @default(false)
   forHer           Boolean @default(false)
   carbonsmithworld Boolean @default(false)
+  makeForOrder     Boolean @default(false)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -352,6 +358,33 @@ model ImitationSale {
   staff       User     @relation("ImitationStaff", fields: [staffId], references: [id])
 }
 
+model GoldBarSale {
+  id          String   @id @default(uuid())
+  orderNumber String   @unique
+  customerId  String?
+  staffId     String
+
+  // Sale Details
+  purity      String   // 99.9%, 99.5%, etc.
+  quantity    Int      @default(1)
+  netWeight   Decimal  @db.Decimal(10, 3)
+  grossWeight Decimal  @db.Decimal(10, 3)
+  metalRate   Decimal  @db.Decimal(20, 2)
+  gstAmount   Decimal  @default(0) @db.Decimal(20, 2)
+  grandTotal  Decimal  @db.Decimal(20, 2)
+  paymentMode String   @default("cash") // cash, card, upi, cheque
+
+  customerPan String
+
+  status      String   @default("completed") // completed, cancelled
+  notes       String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  customer    User?    @relation("CustomerGoldBarSales", fields: [customerId], references: [id])
+  staff       User     @relation("StaffGoldBarSales", fields: [staffId], references: [id])
+}
 model POSOrderItem {
     id         String  @id @default(uuid())
     posOrderId String
@@ -407,6 +440,16 @@ model CreditMemo {
 
   customerPan       String?
   customerGst       String?
+
+  lockedGoldRate    Decimal? @db.Decimal(20, 2)
+  isRateLocked      Boolean  @default(false)
+  referencePurity   String?  @default("22K")
+  lockedGrams       Decimal? @db.Decimal(20, 4)
+  remainingGrams    Decimal? @db.Decimal(20, 4)
+  lockedPureGrams   Decimal? @db.Decimal(20, 4)
+  remainingPureGrams Decimal? @db.Decimal(20, 4)
+  exchangePurity    String?
+  exchangeWeight    Decimal? @db.Decimal(20, 3)
 
   expiresAt DateTime?
   createdAt DateTime  @default(now())
@@ -698,6 +741,16 @@ model GoldRate {
   createdAt DateTime @default(now())
 }
 
+model SchemeGoldRate {
+  id            String   @id @default(uuid())
+  metal         String   @default("gold") // gold, silver, platinum
+  purity        String // 24K, 22K, 18K
+  ratePerGram   Decimal  @db.Decimal(20, 2)
+  effectiveDate DateTime @default(now())
+
+  createdAt DateTime @default(now())
+}
+
 model DiamondRate {
   id            String   @id @default(uuid())
   cut           String   @default("All")
@@ -717,6 +770,12 @@ model Scheme {
   schemeId     String   @unique
   shopId       String
   customerId   String
+  
+  schemeType   String   @default("GOLD") // GOLD or DIAMOND
+  purity       String?  // 24K, 22K, 18K (Only for GOLD)
+  accumulatedGrams Decimal @default(0) @db.Decimal(20, 4)
+  redeemedGrams    Decimal @default(0) @db.Decimal(20, 4)
+  
   startDate    DateTime @default(now())
   maturityDate DateTime
 
@@ -738,6 +797,7 @@ model Scheme {
   customer        User                @relation(fields: [customerId], references: [id])
   redemptionOrder POSOrder?           @relation(fields: [redemptionOrderId], references: [id])
   installments    SchemeInstallment[]
+  activityLogs    SchemeActivityLog[]
 
   @@index([shopId])
 }
@@ -747,6 +807,8 @@ model SchemeInstallment {
   schemeId      String
   date          DateTime @default(now())
   amount        Decimal  @db.Decimal(20, 2)
+  goldRateApplied Decimal? @db.Decimal(20, 2)
+  gramsCredited   Decimal? @db.Decimal(20, 4)
   method        String // cash, card, upi, bank_transfer
   transactionId String?
   notes         String?
@@ -756,6 +818,20 @@ model SchemeInstallment {
 
   scheme      Scheme @relation(fields: [schemeId], references: [id], onDelete: Cascade)
   collectedBy User   @relation(fields: [collectedById], references: [id])
+}
+
+model SchemeActivityLog {
+  id            String   @id @default(uuid())
+  schemeId      String
+  action        String // ENROLLMENT, INSTALLMENT, REDEMPTION, PREMATURE_CLOSURE
+  description   String
+  details       Json?    // Snapshot of rates, amounts, transaction details
+  performedById String?
+
+  createdAt     DateTime @default(now())
+
+  scheme        Scheme   @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+  performedBy   User?    @relation("SchemeActivityLogUser", fields: [performedById], references: [id])
 }
 
 // ---------------------------------------------------------

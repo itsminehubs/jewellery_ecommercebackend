@@ -2,15 +2,10 @@ const prisma = require('../../config/prisma');
 const ApiError = require('../../utils/ApiError');
 const { asyncHandler } = require('../../middlewares/error.middleware');
 const ApiResponse = require('../../utils/ApiResponse');
+const { generateRepairVoucherNumber } = require('../../utils/invoiceNumberGenerator');
 
 const generateVoucher = async () => {
-    const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
-    const count = await prisma.repair.count({
-        where: {
-            receiptVoucher: { startsWith: `REP-${dateStr}` }
-        }
-    });
-    return `REP-${dateStr}-${(count + 1).toString().padStart(3, '0')}`;
+    return await generateRepairVoucherNumber(prisma);
 };
 
 exports.createRepair = asyncHandler(async (req, res, next) => {
@@ -72,19 +67,73 @@ exports.createRepair = asyncHandler(async (req, res, next) => {
 });
 
 exports.getAllRepairs = asyncHandler(async (req, res, next) => {
-    const filter = {};
+    const andConditions = [];
+
     if (req.headers['x-shop-id'] && req.headers['x-shop-id'] !== 'MAIN') {
         let shopIdFilter = req.headers['x-shop-id'];
         if (!/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(shopIdFilter)) {
             const store = await prisma.store.findUnique({ where: { shop_id: shopIdFilter } });
             if (store) shopIdFilter = store.id;
         }
-        filter.storeId = shopIdFilter;
+        andConditions.push({ storeId: shopIdFilter });
     }
     
     if (req.query.customer) {
-        filter.customerId = req.query.customer;
+        andConditions.push({ customerId: req.query.customer });
     }
+
+    // Filter by repair type: 'internal' | 'customer' | 'all'
+    if (req.query.type === 'internal') {
+        andConditions.push({ repairDetails: { contains: '"isInternal":true' } });
+    } else if (req.query.type === 'customer') {
+        andConditions.push({
+            NOT: { repairDetails: { contains: '"isInternal":true' } }
+        });
+    }
+
+    // Filter by status
+    if (req.query.status && req.query.status !== 'all') {
+        if (req.query.status === 'in-progress' || req.query.status === 'in_progress') {
+            andConditions.push({ status: { in: ['in-progress', 'in_progress', 'received'] } });
+        } else {
+            andConditions.push({ status: req.query.status });
+        }
+    }
+
+    // Search query across voucher, item description, customer, and internal details
+    if (req.query.search && req.query.search.trim()) {
+        const s = req.query.search.trim();
+        andConditions.push({
+            OR: [
+                { receiptVoucher: { contains: s, mode: 'insensitive' } },
+                { itemDescription: { contains: s, mode: 'insensitive' } },
+                { repairDetails: { contains: s, mode: 'insensitive' } },
+                { notes: { contains: s, mode: 'insensitive' } },
+                { customer: { name: { contains: s, mode: 'insensitive' } } },
+                { customer: { phone: { contains: s, mode: 'insensitive' } } }
+            ]
+        });
+    }
+
+    if (req.query.startDate && req.query.endDate) {
+        let start = new Date(req.query.startDate);
+        let end = new Date(req.query.endDate);
+        if (isNaN(start.getTime())) start = new Date();
+        if (isNaN(end.getTime())) end = new Date();
+        if (typeof req.query.endDate === 'string' && req.query.endDate.length <= 10) {
+            end.setHours(23, 59, 59, 999);
+        }
+        if (start > end) { const tmp = start; start = end; end = tmp; }
+        andConditions.push({ createdAt: { gte: start, lte: end } });
+    } else if (req.query.date) {
+        const start = new Date(req.query.date);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(req.query.date);
+        end.setHours(23, 59, 59, 999);
+        andConditions.push({ createdAt: { gte: start, lte: end } });
+    }
+
+    const where = andConditions.length > 0 ? { AND: andConditions } : {};
 
     const page = parseInt(req.query.page, 10) || 1;
     const limit = parseInt(req.query.limit, 10) || 10;
@@ -92,17 +141,17 @@ exports.getAllRepairs = asyncHandler(async (req, res, next) => {
 
     const [repairs, total] = await Promise.all([
         prisma.repair.findMany({
-            where: filter,
+            where,
             include: {
                 customer: { select: { id: true, name: true, phone: true, email: true, addresses: true } },
                 store: { select: { id: true, name: true, address: true, phone: true } },
-                billedBy: { select: { id: true, name: true } }
+                billedBy: { select: { id: true, name: true, email: true, role: true } }
             },
             orderBy: { createdAt: 'desc' },
             skip,
             take: limit
         }),
-        prisma.repair.count({ where: filter })
+        prisma.repair.count({ where })
     ]);
 
     const formattedRepairs = repairs.map(r => {
@@ -112,6 +161,20 @@ exports.getAllRepairs = asyncHandler(async (req, res, next) => {
         }
         return {
             ...r,
+            isInternal: Boolean(details.isInternal),
+            productId: details.productId,
+            productName: details.productName,
+            sku: details.sku,
+            tagId: details.tagId,
+            metal: details.metal,
+            purity: details.purity,
+            category: details.category,
+            reason: details.reason,
+            notes: details.notes || r.notes || '',
+            sentBy: details.sentBy,
+            receivedBy: details.receivedBy,
+            isReceived: Boolean(details.isReceived || r.status === 'delivered'),
+            receiveNotes: details.receiveNotes || details.receivedBy?.notes || '',
             items: details.items || [],
             repairBagNumber: details.repairBagNumber || '',
             remarks: details.remarks || r.notes || ''
@@ -119,6 +182,7 @@ exports.getAllRepairs = asyncHandler(async (req, res, next) => {
     });
 
     res.status(200).json({
+        success: true,
         status: 'success',
         results: formattedRepairs.length,
         pagination: {
@@ -147,6 +211,15 @@ exports.getMyRepairs = asyncHandler(async (req, res, next) => {
         }
         return {
             ...r,
+            isInternal: Boolean(details.isInternal),
+            productId: details.productId,
+            productName: details.productName,
+            sku: details.sku,
+            tagId: details.tagId,
+            reason: details.reason,
+            sentBy: details.sentBy,
+            receivedBy: details.receivedBy,
+            isReceived: Boolean(details.isReceived),
             items: details.items || [],
             repairBagNumber: details.repairBagNumber || '',
             remarks: details.remarks || r.notes || ''
@@ -225,12 +298,291 @@ exports.deleteRepair = asyncHandler(async (req, res, next) => {
         return next(ApiError.notFound('No repair found with that ID'));
     }
 
+    // Safety edge case: If this was an active internal store repair, restore product internalState to AVAILABLE so it isn't orphaned
+    if (repairExists.repairDetails) {
+        try {
+            const details = JSON.parse(repairExists.repairDetails);
+            if (details.isInternal && details.productId && !details.isReceived && repairExists.status !== 'delivered') {
+                const product = await prisma.product.findUnique({ where: { id: details.productId } });
+                if (product && product.internalState === 'IN_REPAIR') {
+                    await prisma.product.update({
+                        where: { id: details.productId },
+                        data: { internalState: 'AVAILABLE' }
+                    });
+
+                    const auditService = require('../audit/audit.service');
+                    await auditService.logStockChange({
+                        productId: product.id,
+                        type: 'repair_in',
+                        action: 'INTERNAL_REPAIR_CANCELLED',
+                        beforeQuantity: product.stock,
+                        afterQuantity: product.stock,
+                        quantityChanged: 0,
+                        referenceId: repairExists.receiptVoucher,
+                        notes: `Internal repair record removed by ${req.user.name || 'Admin'}. Product restored to AVAILABLE stock.`,
+                        performedById: req.user.id
+                    });
+                }
+            }
+        } catch (e) {
+            console.error('Error handling product revert on repair deletion:', e);
+        }
+    }
+
     await prisma.repair.delete({
         where: { id: req.params.id }
     });
 
-    res.status(204).json({
+    res.status(200).json({
         status: 'success',
+        message: 'Repair record deleted successfully',
         data: null
+    });
+});
+
+exports.createInternalRepair = asyncHandler(async (req, res, next) => {
+    const { productId, reason, notes, estimatedCost } = req.body;
+    if (!productId) {
+        return next(ApiError.badRequest('Product ID is required for internal stock repair intake.'));
+    }
+    if (!reason || !reason.trim()) {
+        return next(ApiError.badRequest('Repair reason / problem details are required.'));
+    }
+
+    const product = await prisma.product.findUnique({
+        where: { id: productId },
+        include: { metalDetails: true, category: true }
+    });
+
+    if (!product) {
+        return next(ApiError.notFound('Product not found.'));
+    }
+
+    if (product.internalState === 'IN_REPAIR') {
+        return next(ApiError.badRequest(`Product "${product.name}" (SKU: ${product.sku}) is already in repair at the workshop.`));
+    }
+
+    const receiptVoucher = await generateVoucher();
+    const sender = {
+        id: req.user.id,
+        name: req.user.name || 'Staff Member',
+        email: req.user.email || '',
+        role: req.user.role || 'staff',
+        phone: req.user.phone || '',
+        sentAt: new Date().toISOString()
+    };
+
+    const repairDetails = JSON.stringify({
+        isInternal: true,
+        productId: product.id,
+        productName: product.name,
+        sku: product.sku,
+        tagId: product.tagId,
+        metal: product.metalDetails?.metalType || 'Gold',
+        purity: product.metalDetails?.purity || '',
+        category: product.category?.name || '',
+        reason: reason.trim(),
+        notes: notes || '',
+        sentBy: sender
+    });
+
+    // 1. Update Product internalState to IN_REPAIR
+    await prisma.product.update({
+        where: { id: product.id },
+        data: { internalState: 'IN_REPAIR' }
+    });
+
+    // 2. Create Repair Record
+    const newRepair = await prisma.repair.create({
+        data: {
+            receiptVoucher,
+            customerId: req.user.id,
+            storeId: product.shopId || req.user.storeId || null,
+            billedById: req.user.id,
+            itemDescription: `[Store Stock] ${product.name} (SKU: ${product.sku}) - ${reason.trim()}`,
+            repairDetails,
+            estimatedCost: estimatedCost ? Number(estimatedCost) : 0,
+            status: 'in-progress',
+            notes: `Store stock repair: ${reason.trim()}`
+        },
+        include: {
+            customer: { select: { id: true, name: true, phone: true } },
+            billedBy: { select: { id: true, name: true } }
+        }
+    });
+
+    // 3. Log into Audit Trail
+    const auditService = require('../audit/audit.service');
+    await auditService.logStockChange({
+        productId: product.id,
+        type: 'repair_out',
+        action: 'INTERNAL_REPAIR_SENT',
+        beforeQuantity: product.stock,
+        afterQuantity: product.stock,
+        quantityChanged: 0,
+        referenceId: receiptVoucher,
+        notes: `Sent to repair by ${sender.name} (${sender.role}): ${reason.trim()}`,
+        performedById: req.user.id
+    });
+
+    res.status(201).json({
+        status: 'success',
+        message: 'Internal store stock product successfully sent to repair',
+        data: newRepair
+    });
+});
+
+exports.receiveInternalRepair = asyncHandler(async (req, res, next) => {
+    const { id } = req.params;
+    const { notes, actualCost } = req.body;
+
+    const repair = await prisma.repair.findUnique({
+        where: { id }
+    });
+
+    if (!repair) {
+        return next(ApiError.notFound('Repair record not found.'));
+    }
+
+    let details = {};
+    if (repair.repairDetails) {
+        try { details = JSON.parse(repair.repairDetails); } catch(e){}
+    }
+
+    if (details.isReceived || repair.status === 'delivered') {
+        return next(ApiError.badRequest('This repair item has already been received back into inventory.'));
+    }
+
+    const productId = details.productId;
+    const receiver = {
+        id: req.user.id,
+        name: req.user.name || 'Staff Member',
+        email: req.user.email || '',
+        role: req.user.role || 'staff',
+        phone: req.user.phone || '',
+        receivedAt: new Date().toISOString(),
+        notes: notes || ''
+    };
+
+    details.receivedBy = receiver;
+    details.isReceived = true;
+    details.receiveNotes = notes || '';
+
+    // 1. If product exists, mark internalState back to AVAILABLE
+    if (productId) {
+        const product = await prisma.product.findUnique({ where: { id: productId } });
+        if (product) {
+            await prisma.product.update({
+                where: { id: productId },
+                data: { internalState: 'AVAILABLE' }
+            });
+
+            // Log into Audit Trail
+            const auditService = require('../audit/audit.service');
+            await auditService.logStockChange({
+                productId: product.id,
+                type: 'repair_in',
+                action: 'INTERNAL_REPAIR_RECEIVED',
+                beforeQuantity: product.stock,
+                afterQuantity: product.stock,
+                quantityChanged: 0,
+                referenceId: repair.receiptVoucher,
+                notes: `Received back from repair by ${receiver.name} (${receiver.role}). Inspection: ${notes || 'Repaired & verified'}`,
+                performedById: req.user.id
+            });
+        }
+    }
+
+    // 2. Update Repair record to delivered / received
+    const updatedRepair = await prisma.repair.update({
+        where: { id },
+        data: {
+            status: 'delivered',
+            repairDetails: JSON.stringify(details),
+            actualCost: actualCost != null ? Number(actualCost) : repair.actualCost,
+            notes: (repair.notes ? repair.notes + ' | ' : '') + `Received by ${receiver.name} on ${new Date().toLocaleDateString()}`
+        },
+        include: {
+            customer: { select: { id: true, name: true, phone: true } },
+            billedBy: { select: { id: true, name: true } }
+        }
+    });
+
+    res.status(200).json({
+        status: 'success',
+        message: 'Internal store stock product received back into stock successfully',
+        data: updatedRepair
+    });
+});
+
+exports.receiveProductFromRepair = asyncHandler(async (req, res, next) => {
+    const { productId } = req.params;
+    const { notes, actualCost } = req.body;
+
+    const repair = await prisma.repair.findFirst({
+        where: {
+            repairDetails: { contains: productId },
+            status: { notIn: ['delivered', 'cancelled'] }
+        },
+        orderBy: { createdAt: 'desc' }
+    });
+
+    const receiver = {
+        id: req.user.id,
+        name: req.user.name || 'Staff Member',
+        role: req.user.role || 'staff',
+        phone: req.user.phone || '',
+        receivedAt: new Date().toISOString(),
+        notes: notes || ''
+    };
+
+    // 1. Mark product AVAILABLE
+    const product = await prisma.product.findUnique({ where: { id: productId } });
+    if (product) {
+        await prisma.product.update({
+            where: { id: productId },
+            data: { internalState: 'AVAILABLE' }
+        });
+
+        // 2. Log in Audit Trail
+        const auditService = require('../audit/audit.service');
+        await auditService.logStockChange({
+            productId: product.id,
+            type: 'repair_in',
+            action: 'INTERNAL_REPAIR_RECEIVED',
+            beforeQuantity: product.stock,
+            afterQuantity: product.stock,
+            quantityChanged: 0,
+            referenceId: repair?.receiptVoucher || 'INTERNAL_REPAIR',
+            notes: `Received back from repair by ${receiver.name} (${receiver.role}). Notes: ${notes || 'Good condition'}`,
+            performedById: req.user.id
+        });
+    }
+
+    // 3. If repair record exists, update it
+    let updatedRepair = null;
+    if (repair) {
+        let details = {};
+        if (repair.repairDetails) {
+            try { details = JSON.parse(repair.repairDetails); } catch(e){}
+        }
+        details.receivedBy = receiver;
+        details.isReceived = true;
+
+        updatedRepair = await prisma.repair.update({
+            where: { id: repair.id },
+            data: {
+                status: 'delivered',
+                repairDetails: JSON.stringify(details),
+                actualCost: actualCost != null ? Number(actualCost) : repair.actualCost,
+                notes: (repair.notes ? repair.notes + ' | ' : '') + `Received by ${receiver.name} on ${new Date().toLocaleDateString()}`
+            }
+        });
+    }
+
+    res.status(200).json({
+        status: 'success',
+        message: 'Product received back into stock successfully',
+        data: updatedRepair
     });
 });

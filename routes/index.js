@@ -22,6 +22,7 @@ const creditMemoRoutes = require('../modules/credit-memo/creditMemo.routes');
 const customOrderRoutes = require('../modules/order/customOrder.routes');
 const repairRoutes = require('../modules/repair/repair.routes');
 const imitationSaleRoutes = require('../modules/imitation-sale/imitation-sale.routes');
+const goldBarSaleRoutes = require('../modules/gold-bar-sale/gold-bar-sale.routes');
 const { handleWebhook } = require('../modules/payment/razorpay.webhook');
 // Webhook endpoint (before JSON parsing middleware)
 router.post('/webhooks/razorpay', express.raw({ type: 'application/json' }), handleWebhook);
@@ -49,9 +50,11 @@ router.use('/procurement', vendorPurchaseRoutes);
 router.use('/audit', require('../modules/audit/audit.routes'));
 router.use('/accounting', require('../modules/accounting/accounting.routes'));
 router.use('/schemes', require('../modules/scheme/scheme.routes'));
+router.use('/scheme', require('../modules/scheme/scheme.routes'));
 router.use('/reports', require('../modules/reports/reports.routes'));
 router.use('/repairs', repairRoutes);
 router.use('/imitation-sales', imitationSaleRoutes);
+router.use('/gold-bar-sales', goldBarSaleRoutes);
 
 // API info
 router.get('/', (req, res) => {

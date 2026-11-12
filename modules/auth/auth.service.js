@@ -14,11 +14,16 @@ const sendOTP = async (phone, purpose = 'login') => {
   try {
     const otp = await otpService.generateAndStoreOTP(phone, undefined, purpose);
 
-    return {
-      message: SUCCESS_MESSAGES.OTP_SENT,
+    const isSandbox = process.env.IS_SANDBOX === 'true' || process.env.NODE_ENV !== 'production';
+
+    const response = {
+      message: isSandbox ? `[SANDBOX] OTP is: ${otp} (or enter 123456)` : SUCCESS_MESSAGES.OTP_SENT,
       phone,
-      otp // SANDBOX MODE: Return OTP in response
+      otp: isSandbox ? otp : undefined,
+      sandboxOtp: isSandbox ? otp : undefined
     };
+
+    return response;
   } catch (error) {
     if (error instanceof ApiError) throw error;
     logger.error(`Error sending OTP: ${error.message}`);

@@ -1,4 +1,6 @@
 const prisma = require('../../config/prisma');
+const { cacheHelper } = require('../../config');
+const { CACHE_KEYS } = require('../../utils/constants');
 
 const roundTo2 = (num) => Number((Math.round((num + Number.EPSILON) * 100) / 100).toFixed(2));
 const roundTo3 = (num) => Number((Math.round((num + Number.EPSILON) * 1000) / 1000).toFixed(3));
@@ -23,12 +25,18 @@ const calculateProductPrice = async (productData, metalDetails, stoneDetails) =>
                 stone.netWeight = roundTo3(caratVal * 0.200);
             }
 
-            const stoneWeightGrams = stone.netWeight ? Number(stone.netWeight) : 0;
+            const stoneWeightGrams = (stone.netWeight !== undefined && stone.netWeight !== null && String(stone.netWeight).trim() !== '') 
+                ? Number(stone.netWeight) 
+                : 0;
+            stone.netWeight = stoneWeightGrams;
             totalStoneWeight += stoneWeightGrams;
 
-            let rate = stone.rate ? Number(stone.rate) : 0;
+            let rate = (stone.rate !== undefined && stone.rate !== null && String(stone.rate).trim() !== '') 
+                ? Number(stone.rate) 
+                : 0;
+            stone.rate = rate;
 
-            if (stone.stoneType === 'Diamond') {
+            if ((stone.stoneType || '').trim().toLowerCase() === 'diamond') {
                 const query = {
                     cut: stone.cut || 'All',
                     color: stone.color || 'All',
@@ -63,7 +71,8 @@ const calculateProductPrice = async (productData, metalDetails, stoneDetails) =>
     }
 
     const manualStoneCharges = productData.stoneCharges ? Number(productData.stoneCharges) : 0;
-    const stoneValue = roundTo2(dynamicStoneValue > 0 ? dynamicStoneValue : manualStoneCharges);
+    // Manual stone charges override dynamic rates when provided
+    const stoneValue = roundTo2(manualStoneCharges > 0 ? manualStoneCharges : dynamicStoneValue);
 
     // 2. Net Gold Weight
     const netWeight = roundTo3(Math.max(0, grossWeight - totalStoneWeight));
@@ -84,7 +93,10 @@ const calculateProductPrice = async (productData, metalDetails, stoneDetails) =>
                     mode: 'insensitive'
                 }
             },
-            orderBy: { effectiveDate: 'desc' }
+            orderBy: [
+                { effectiveDate: 'desc' },
+                { createdAt: 'desc' }
+            ]
         });
 
         if (latestRate) {
@@ -98,11 +110,38 @@ const calculateProductPrice = async (productData, metalDetails, stoneDetails) =>
 
     // 5. Calculate Making Charges & Apply Discount
     let makingValue = 0;
-    const makingCharges = productData.makingCharges ? Number(productData.makingCharges) : 0;
-    if (productData.makingChargeType === 'per_gram') {
-        makingValue = makingCharges * netWeight;
+    let makingCharges = productData.makingCharges ? Number(productData.makingCharges) : 0;
+    const makingPercentage = productData.makingPercentage ? Number(productData.makingPercentage) : 0;
+
+    // Dynamically recalculate making charges whenever makingPercentage is set
+    if (makingPercentage > 0) {
+        if (latestRate) {
+            const ratePerGram = Number(latestRate.ratePerGram);
+            if (productData.makingChargeType === 'per_gram') {
+                makingCharges = roundTo2((makingPercentage / 100) * ratePerGram);
+                makingValue = roundTo2(makingCharges * netWeight);
+            } else {
+                makingValue = roundTo2(metalValue * (makingPercentage / 100));
+                makingCharges = makingValue;
+            }
+        } else if (metalValue > 0) {
+            if (productData.makingChargeType === 'per_gram' && netWeight > 0) {
+                const effectiveRate = metalValue / netWeight;
+                makingCharges = roundTo2((makingPercentage / 100) * effectiveRate);
+                makingValue = roundTo2(makingCharges * netWeight);
+            } else {
+                makingValue = roundTo2(metalValue * (makingPercentage / 100));
+                makingCharges = makingValue;
+            }
+        } else if (productData.makingChargeType === 'per_gram') {
+            makingValue = roundTo2(makingCharges * netWeight);
+        } else {
+            makingValue = roundTo2(makingCharges);
+        }
+    } else if (productData.makingChargeType === 'per_gram') {
+        makingValue = roundTo2(makingCharges * netWeight);
     } else {
-        makingValue = makingCharges;
+        makingValue = roundTo2(makingCharges);
     }
 
     const discount = productData.discount ? Number(productData.discount) : 0;
@@ -118,7 +157,16 @@ const calculateProductPrice = async (productData, metalDetails, stoneDetails) =>
     // 8. Totals
     const totalCalculatedPrice = roundTo2(subtotal + gst);
 
-    if (subtotal > 0) {
+    const isManual = Boolean(
+        productData.isManualPrice || 
+        productData.isPriceManual || 
+        productData.basicDetails?.isManualPrice
+    );
+
+    if (isManual && Number(productData.price) > 0) {
+        price = Number(productData.price);
+        finalPrice = Number(productData.price);
+    } else if (subtotal > 0) {
         price = Math.round(totalCalculatedPrice);
         finalPrice = Math.round(totalCalculatedPrice);
     }
@@ -127,7 +175,9 @@ const calculateProductPrice = async (productData, metalDetails, stoneDetails) =>
         price,
         finalPrice,
         metalDetails,
-        stoneDetails
+        stoneDetails,
+        makingCharges,
+        makingValue
     };
 };
 
@@ -147,11 +197,15 @@ const recalculatePricesForMetal = async (metal, purity) => {
     });
 
     for (const product of products) {
-        const { price, finalPrice, metalDetails, stoneDetails } = await calculateProductPrice(product, product.metalDetails, product.stoneDetails);
+        const { price, finalPrice, metalDetails, stoneDetails, makingCharges } = await calculateProductPrice(product, product.metalDetails, product.stoneDetails);
         const updateData = {
             price,
             finalPrice
         };
+
+        if (makingCharges !== undefined && product.makingPercentage && Number(product.makingPercentage) > 0) {
+            updateData.makingCharges = makingCharges;
+        }
         
         if (metalDetails) {
             updateData.metalDetails = {
@@ -166,7 +220,12 @@ const recalculatePricesForMetal = async (metal, purity) => {
             data: updateData
         });
     }
-    console.log(`Recalculated prices for ${products.length} products with ${metal} ${purity}`);
+
+    if (cacheHelper && CACHE_KEYS && CACHE_KEYS.PRODUCT_DETAIL) {
+        await cacheHelper.delPattern(`${CACHE_KEYS.PRODUCT_DETAIL}:*`).catch(() => {});
+    }
+
+    console.log(`Recalculated prices and making charges for ${products.length} products with ${metal} ${purity}`);
 };
 
 /**
@@ -177,18 +236,24 @@ const recalculatePricesForDiamond = async (diamondRate) => {
     const products = await prisma.product.findMany({
         where: {
             stoneDetails: {
-                some: { stoneType: 'Diamond' }
+                some: {
+                    stoneType: { in: ['Diamond', 'diamond', 'DIAMOND'] }
+                }
             }
         },
         include: { metalDetails: true, stoneDetails: true }
     });
 
     for (const product of products) {
-        const { price, finalPrice, metalDetails, stoneDetails } = await calculateProductPrice(product, product.metalDetails, product.stoneDetails);
+        const { price, finalPrice, metalDetails, stoneDetails, makingCharges } = await calculateProductPrice(product, product.metalDetails, product.stoneDetails);
         const updateData = {
             price,
             finalPrice
         };
+
+        if (makingCharges !== undefined && product.makingPercentage && Number(product.makingPercentage) > 0) {
+            updateData.makingCharges = makingCharges;
+        }
         
         if (metalDetails) {
             updateData.metalDetails = {
@@ -215,7 +280,12 @@ const recalculatePricesForDiamond = async (diamondRate) => {
             data: updateData
         });
     }
-    console.log(`Recalculated prices for ${products.length} diamond products`);
+
+    if (cacheHelper && CACHE_KEYS && CACHE_KEYS.PRODUCT_DETAIL) {
+        await cacheHelper.delPattern(`${CACHE_KEYS.PRODUCT_DETAIL}:*`).catch(() => {});
+    }
+
+    console.log(`Recalculated prices and making charges for ${products.length} diamond products`);
 };
 
 module.exports = {

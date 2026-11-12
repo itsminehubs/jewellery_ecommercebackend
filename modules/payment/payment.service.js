@@ -68,7 +68,20 @@ const verifyPayment = async (paymentData) => {
     try {
         const fullOrderForEmail = await prisma.order.findUnique({
             where: { id: order.id },
-            include: { items: { include: { product: true } } }
+            include: {
+                shippingAddress: true,
+                items: {
+                    include: {
+                        product: {
+                            include: {
+                                metalDetails: true,
+                                stoneDetails: true,
+                                images: true
+                            }
+                        }
+                    }
+                }
+            }
         });
         const user = await prisma.user.findUnique({ where: { id: order.userId } });
 
