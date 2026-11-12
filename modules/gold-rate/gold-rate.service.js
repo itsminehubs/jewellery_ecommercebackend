@@ -278,11 +278,37 @@ const deleteSchemeRate = async (metal, purity) => {
     });
 };
 
+/**
+ * Get historical gold rates for trend graphs and analysis
+ */
+const getRateHistory = async (metal = 'gold', days = 30) => {
+    const m = normalizeMetal(metal);
+    const safeDays = Math.min(Math.max(Number(days) || 30, 1), 365);
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - safeDays);
+
+    const rates = await prisma.goldRate.findMany({
+        where: {
+            metal: { equals: m, mode: 'insensitive' },
+            effectiveDate: { gte: startDate }
+        },
+        orderBy: { effectiveDate: 'asc' }
+    });
+
+    return rates.map(r => ({
+        ...r,
+        metal: normalizeMetal(r.metal),
+        purity: normalizePurity(r.purity),
+        ratePerGram: roundCurrency(Number(r.ratePerGram))
+    }));
+};
+
 module.exports = {
     updateRate,
     getLatestRate,
     getLatestRates: getCurrentRates, // Alias for reports.service.js
     getCurrentRates,
+    getRateHistory,
     deleteRate,
     updateSchemeRate,
     getSchemeCurrentRates,

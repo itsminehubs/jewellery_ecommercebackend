@@ -16,6 +16,12 @@ const getCurrentRates = asyncHandler(async (req, res) => {
     ApiResponse.success(rates, 'Current gold rates fetched').send(res);
 });
 
+const getRateHistory = asyncHandler(async (req, res) => {
+    const { metal = 'gold', days = 30 } = req.query;
+    const history = await goldRateService.getRateHistory(metal, days);
+    ApiResponse.success(history, 'Gold rate history fetched').send(res);
+});
+
 const getLatestRate = asyncHandler(async (req, res) => {
     const { metal, purity } = req.query;
     const rate = await goldRateService.getLatestRate(metal, purity);
@@ -53,6 +59,7 @@ module.exports = {
     updateRate,
     getCurrentRates,
     getLatestRate,
+    getRateHistory,
     deleteRate,
     updateSchemeRate,
     getSchemeCurrentRates,
