@@ -7,6 +7,7 @@ const { PERMISSIONS } = require('../../utils/constants');
 
 router.get('/current', goldRateController.getCurrentRates);
 router.get('/latest', goldRateController.getLatestRate);
+router.get('/history', goldRateController.getRateHistory);
 
 // Admin/Staff only routes to update rates
 router.post('/', authenticate, checkPermission(PERMISSIONS.SET_GOLD_RATES), goldRateController.updateRate);
