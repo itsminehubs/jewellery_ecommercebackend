@@ -253,11 +253,11 @@ const getAllProducts = async (filters = {}, options = {}) => {
   if (sort === 'discount') primarySort = { discount: 'desc' };
   if (sort === 'recommended') primarySort = { featured: 'desc' };
 
-  // If no single productType is specified or 'all' is passed on public storefront, prioritize diamond above gold
+  // Order products strictly by primarySort with createdAt tie-breaker without forcing diamond priority
   let orderBy = [primarySort];
   const isAdminOrPos = carbonsmithworld === 'all' || makeForOrder === 'all';
-  if (!isAdminOrPos && (!productType || productType === 'all' || (productType.includes('diamond') && productType.includes('gold')))) {
-    orderBy = [{ stoneDetails: { _count: 'desc' } }, primarySort];
+  if (!isAdminOrPos && primarySort.createdAt === undefined) {
+    orderBy.push({ createdAt: 'desc' });
   }
 
   const products = await prisma.product.findMany({
@@ -761,6 +761,7 @@ const getProductsByCategory = async (categoryIdOrSlug, options = {}) => {
   if (sort === 'price' || sort === 'price-asc') orderBy = { finalPrice: 'asc' };
   if (sort === '-price' || sort === 'price-desc') orderBy = { finalPrice: 'desc' };
   if (sort === 'views' || sort === 'popularity') orderBy = { views: 'desc' };
+  if (sort === 'newest' || sort === '-createdAt') orderBy = { createdAt: 'desc' };
   if (sort === 'rating') orderBy = { rating: 'desc' };
   if (sort === 'discount') orderBy = { discount: 'desc' };
   if (sort === 'recommended') orderBy = { featured: 'desc' };
@@ -794,8 +795,10 @@ const getFeaturedProducts = async (options = {}) => {
   if (sort === 'price' || sort === 'price-asc') orderBy = { finalPrice: 'asc' };
   if (sort === '-price' || sort === 'price-desc') orderBy = { finalPrice: 'desc' };
   if (sort === 'views' || sort === 'popularity') orderBy = { views: 'desc' };
+  if (sort === 'newest' || sort === '-createdAt') orderBy = { createdAt: 'desc' };
   if (sort === 'rating') orderBy = { rating: 'desc' };
   if (sort === 'discount') orderBy = { discount: 'desc' };
+  if (sort === 'recommended') orderBy = { featured: 'desc' };
 
   const products = await prisma.product.findMany({
     where,
@@ -825,10 +828,11 @@ const getTrendingProducts = async (options = {}) => {
   let orderBy = { views: 'desc' };
   if (sort === 'price' || sort === 'price-asc') orderBy = { finalPrice: 'asc' };
   if (sort === '-price' || sort === 'price-desc') orderBy = { finalPrice: 'desc' };
-  if (sort === 'newest') orderBy = { createdAt: 'desc' };
+  if (sort === 'newest' || sort === '-createdAt') orderBy = { createdAt: 'desc' };
   if (sort === 'rating') orderBy = { rating: 'desc' };
   if (sort === 'discount') orderBy = { discount: 'desc' };
   if (sort === 'recommended') orderBy = { featured: 'desc' };
+  if (sort === 'popularity' || sort === 'views' || sort === '-views') orderBy = { views: 'desc' };
 
   const products = await prisma.product.findMany({
     where,
