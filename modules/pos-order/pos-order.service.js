@@ -1,4 +1,6 @@
 const prisma = require('../../config/prisma');
+const { Prisma } = require('@prisma/client');
+const Decimal = Prisma.Decimal;
 const loyaltyService = require('../user/loyalty.service');
 const inventoryService = require('../product/inventory.service');
 const cashbookService = require('../accounting/cashbook.service');
@@ -14,18 +16,28 @@ const { parseKarat, toPureGoldGrams, convertGoldQuantity } = require('../../util
 
 const MAX_RETRIES = 3;
 
-const roundTo2 = (num) => Math.round((num + Number.EPSILON) * 100) / 100;
-const roundTo3 = (num) => Math.round((num + Number.EPSILON) * 1000) / 1000;
-const roundTo4 = (num) => Math.round((num + Number.EPSILON) * 10000) / 10000;
+const toDecimal = (val, def = 0) => {
+    if (val === null || val === undefined || val === '') return new Decimal(def);
+    try {
+        return new Decimal(val);
+    } catch {
+        return new Decimal(def);
+    }
+};
+
+const roundTo2 = (num) => Math.round((Number(num) + Number.EPSILON) * 100) / 100;
+const roundTo3 = (num) => Math.round((Number(num) + Number.EPSILON) * 1000) / 1000;
+const roundTo4 = (num) => Math.round((Number(num) + Number.EPSILON) * 10000) / 10000;
+const roundTo6 = (num) => Math.round((Number(num) + Number.EPSILON) * 1000000) / 1000000;
 
 /**
  * Calculate the exact price of a POS cart based on live rates and dynamic credit memo rate locking
  */
 const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditMemoRef = null, schemeRef = null) => {
-    let cartGrossSubtotal = 0;
-    let cartSubtotal = 0;
-    let cartGst = 0;
-    let cartTotal = 0;
+    let cartGrossSubtotal = new Decimal(0);
+    let cartSubtotal = new Decimal(0);
+    let cartGst = new Decimal(0);
+    let cartTotal = new Decimal(0);
     const calculatedItems = [];
 
     // 1. Resolve active Credit Memos (supports single ID, array of IDs, or comma-separated string)
@@ -47,34 +59,37 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
                     { id: { in: memoLookupIds } }
                 ],
                 status: { not: 'cancelled' }
-            }
+            },
+            orderBy: { createdAt: 'asc' } // Deterministic FIFO allocation
         });
 
         for (const lookupId of memoLookupIds) {
             const m = foundMemos.find(fm => fm.memoId === lookupId || fm.id === lookupId);
             if (m && !activeMemos.some(am => am.id === m.id)) {
                 const refPurity = m.referencePurity || m.exchangePurity || '22K';
-                const rate = Number(m.lockedGoldRate || 0);
-                let grams = 0;
+                const rate = toDecimal(m.lockedGoldRate || 0);
+                const balance = toDecimal(m.balance || 0);
+                let grams = new Decimal(0);
                 if (m.remainingGrams !== null && m.remainingGrams !== undefined) {
-                    grams = Number(m.remainingGrams);
+                    grams = toDecimal(m.remainingGrams);
                 } else if (m.lockedGrams !== null && m.lockedGrams !== undefined) {
-                    grams = Number(m.lockedGrams);
-                } else if (rate > 0) {
-                    grams = Number((Number(m.balance) / rate).toFixed(4));
+                    grams = toDecimal(m.lockedGrams);
+                } else if (rate.gt(0)) {
+                    grams = balance.dividedBy(rate);
                 }
 
-                if (grams > 0 && rate > 0) {
+                if (grams.gt(0) && rate.gt(0) && balance.gt(0)) {
                     activeMemos.push({
                         id: m.id,
                         memoId: m.memoId,
                         referencePurity: refPurity,
-                        refKarat: parseKarat(refPurity),
+                        refKarat: toDecimal(parseKarat(refPurity)),
                         lockedRate: rate,
-                        initialGrams: roundTo4(grams),
-                        availableGrams: roundTo4(grams),
-                        consumedGrams: 0,
-                        consumedValue: 0
+                        balance: balance,
+                        initialGrams: grams,
+                        availableGrams: new Decimal(grams),
+                        consumedGrams: new Decimal(0),
+                        consumedValue: new Decimal(0)
                     });
                 }
             }
@@ -83,16 +98,18 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
 
     // Fallback for manual legacy rate override without memo
     if (activeMemos.length === 0 && lockedGoldRate && !isNaN(Number(lockedGoldRate)) && Number(lockedGoldRate) > 0) {
+        const legacyRate = toDecimal(lockedGoldRate);
         activeMemos.push({
             id: 'legacy-override',
             memoId: 'Rate Override',
             referencePurity: '22K',
-            refKarat: 22,
-            lockedRate: Number(lockedGoldRate),
-            initialGrams: 999999,
-            availableGrams: 999999,
-            consumedGrams: 0,
-            consumedValue: 0
+            refKarat: new Decimal(22),
+            lockedRate: legacyRate,
+            balance: new Decimal(999999999),
+            initialGrams: new Decimal(999999),
+            availableGrams: new Decimal(999999),
+            consumedGrams: new Decimal(0),
+            consumedValue: new Decimal(0)
         });
     }
 
@@ -113,19 +130,34 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
                     { id: { in: schemeLookupIds } }
                 ],
                 status: { notIn: ['closed', 'cancelled'] }
-            }
+            },
+            orderBy: { createdAt: 'asc' }
         });
 
         for (const s of foundSchemes) {
-            const monthlyInst = Number(s.monthlyInstallment || 1);
-            const totalPaid = Number(s.totalPaid || 0);
+            const monthlyInst = toDecimal(s.monthlyInstallment || 1);
+            const totalPaid = toDecimal(s.totalPaid || 0);
             const totalMonths = Number(s.totalMonths || 11);
-            const paidInstallmentCount = Math.min(totalMonths, Math.floor(totalPaid / (monthlyInst > 0 ? monthlyInst : 1)));
+            const paidInstallmentCount = Math.min(totalMonths, Math.floor(totalPaid.dividedBy(monthlyInst.gt(0) ? monthlyInst : 1).toNumber()));
 
             const enrollmentDate = new Date(s.startDate || s.createdAt);
             const daysSinceEnrollment = Math.floor((new Date() - enrollmentDate) / (1000 * 60 * 60 * 24));
-            const isFullTenure = s.status === 'matured' || s.status === 'completed' || (paidInstallmentCount >= totalMonths) || (daysSinceEnrollment >= 330 && daysSinceEnrollment <= 365);
-            const isHalfTenure = !isFullTenure && ((paidInstallmentCount >= Math.ceil(totalMonths / 2)) || (daysSinceEnrollment >= 180 && daysSinceEnrollment < 330));
+
+            // Strict Non-Overlapping Duration Tiers
+            let isFullTenure = false;
+            let isHalfTenure = false;
+            let isPast365Days = false;
+            let isUnder6Months = false;
+
+            if (s.status === 'matured' || s.status === 'completed' || (daysSinceEnrollment >= 330 && daysSinceEnrollment <= 365 && paidInstallmentCount >= totalMonths)) {
+                isFullTenure = true;
+            } else if (daysSinceEnrollment > 365) {
+                isPast365Days = true;
+            } else if (daysSinceEnrollment >= 180 && daysSinceEnrollment < 330 && paidInstallmentCount >= Math.ceil(totalMonths / 2)) {
+                isHalfTenure = true;
+            } else {
+                isUnder6Months = true;
+            }
 
             let metadata = {};
             try {
@@ -152,20 +184,20 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
                 }
             }
 
-            const totalAccum = Number(s.accumulatedGrams || 0);
-            const alreadyRedeemed = Number(s.redeemedGrams || 0);
-            const availableGrams = s.remainingGrams != null ? Number(s.remainingGrams) : Math.max(0, totalAccum - alreadyRedeemed);
+            const totalAccum = toDecimal(s.accumulatedGrams || 0);
+            const alreadyRedeemed = toDecimal(s.redeemedGrams || 0);
+            const availableGrams = s.remainingGrams != null ? toDecimal(s.remainingGrams) : Decimal.max(0, totalAccum.minus(alreadyRedeemed));
 
             activeSchemes.push({
                 id: s.id,
                 schemeId: s.schemeId,
                 schemeType: s.schemeType,
                 purity: s.purity || '22K',
-                refKarat: parseKarat(s.purity || '22K'),
-                initialGrams: roundTo4(availableGrams),
-                availableGrams: roundTo4(availableGrams),
-                consumedGrams: 0,
-                consumedValue: 0,
+                refKarat: toDecimal(parseKarat(s.purity || '22K')),
+                initialGrams: availableGrams,
+                availableGrams: new Decimal(availableGrams),
+                consumedGrams: new Decimal(0),
+                consumedValue: new Decimal(0),
                 daysSinceEnrollment,
                 makingDiscountPercent,
                 diamondDiscountPercent,
@@ -174,8 +206,8 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
         }
     }
 
-    let totalLockedGoldValue = 0;
-    let totalCustomerSavings = 0;
+    let totalLockedGoldValue = new Decimal(0);
+    let totalCustomerSavings = new Decimal(0);
 
     for (const item of items) {
         // Fetch full product from DB
@@ -251,21 +283,19 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
             stoneValue = Math.max(0, roundTo2(stoneValue - diamondDiscountAmount));
         }
 
-        // 2. Net Gold Weight and Wastage
-        const netWeight = roundTo3(Math.max(0, grossWeight - totalStoneWeight));
-        const wastagePercent = productData.wastage ? Number(productData.wastage) : 0;
-        const wastageWeight = roundTo3(netWeight * (wastagePercent / 100));
-        const finalGoldWeight = roundTo3(netWeight + wastageWeight);
-
+        // 2. Authoritative Net Gold Weight & Eligible Gold Weight
+        // Strictly use Net Metal Weight (Gross Weight minus Stone Weight). Do NOT add wastage to eligible gold weight!
+        const netWeight = metalDetails?.netWeight ? Number(metalDetails.netWeight) : roundTo3(Math.max(0, grossWeight - totalStoneWeight));
         const qty = Number(item.quantity) || 1;
-        const totalItemGoldWeight = roundTo3(finalGoldWeight * qty);
+        const eligibleGoldWeight = toDecimal(netWeight).times(qty);
+        const totalItemGoldWeight = eligibleGoldWeight;
 
         const metalType = (metalDetails?.metalType || 'gold').toLowerCase();
         const productPurity = metalDetails?.purity || '22K';
-        const prodKarat = parseKarat(productPurity);
+        const prodKarat = toDecimal(parseKarat(productPurity));
 
         // 3. Fetch latest live approved rate for this product's purity
-        let currentPurityRate = 0;
+        let currentPurityRate = toDecimal(0);
         const currentRateDoc = await prisma.goldRate.findFirst({
             where: {
                 metal: metalType,
@@ -281,7 +311,7 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
         });
 
         if (currentRateDoc) {
-            currentPurityRate = Number(currentRateDoc.ratePerGram);
+            currentPurityRate = toDecimal(currentRateDoc.ratePerGram);
         } else {
             // Fallback: derive from 22K base rate
             const base22k = await prisma.goldRate.findFirst({
@@ -289,136 +319,137 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
                 orderBy: [{ effectiveDate: 'desc' }, { createdAt: 'desc' }]
             });
             if (base22k) {
-                currentPurityRate = Number(((Number(base22k.ratePerGram) * prodKarat) / 22).toFixed(2));
+                currentPurityRate = toDecimal(base22k.ratePerGram).times(prodKarat).dividedBy(22);
             }
         }
 
         // 4. Dynamic Gold Rate Locking and Purity Conversion
-        let metalValue = 0;
-        let rateUsed = currentPurityRate;
-        let appliedProductGrams = 0;
-        let remainingProductGrams = totalItemGoldWeight;
-        let lockedPortionValue = 0;
-        let remainingPortionValue = 0;
-        let itemSavings = 0;
+        let metalValue = new Decimal(0);
+        let rateUsed = currentPurityRate.toNumber();
+        let appliedProductGrams = new Decimal(0);
+        let remainingProductGrams = new Decimal(totalItemGoldWeight);
+        let lockedPortionValue = new Decimal(0);
+        let remainingPortionValue = new Decimal(0);
+        let itemSavings = new Decimal(0);
         const itemConsumedBreakdown = [];
 
-        if (metalType === 'gold' && activeMemos.some(m => m.availableGrams > 0)) {
-            let itemWeightNeeded = totalItemGoldWeight;
+        if (metalType === 'gold' && activeMemos.some(m => m.availableGrams.gt(0))) {
+            let itemWeightNeeded = new Decimal(totalItemGoldWeight);
 
             for (const memo of activeMemos) {
-                if (memo.availableGrams <= 0 || itemWeightNeeded <= 0) continue;
+                if (memo.availableGrams.lte(0) || itemWeightNeeded.lte(0)) continue;
 
                 // Universal Purity Conversion for this memo:
                 // coverable_product_grams = memo.availableGrams * (memo.refKarat / prodKarat)
-                const coverableProductGrams = (memo.availableGrams * memo.refKarat) / prodKarat;
-                const applyGrams = roundTo3(Math.min(coverableProductGrams, itemWeightNeeded));
-                if (applyGrams <= 0) continue;
+                const coverableProductGrams = memo.availableGrams.times(memo.refKarat).dividedBy(prodKarat);
+                const applyGrams = Decimal.min(coverableProductGrams, itemWeightNeeded);
+                if (applyGrams.lte(0)) continue;
 
                 // consumed_reference_grams = applyGrams * (prodKarat / memo.refKarat)
-                const refGramsConsumed = roundTo4((applyGrams * prodKarat) / memo.refKarat);
-                memo.availableGrams = Math.max(0, roundTo4(memo.availableGrams - refGramsConsumed));
-                memo.consumedGrams = roundTo4(memo.consumedGrams + refGramsConsumed);
+                const refGramsConsumed = applyGrams.times(prodKarat).dividedBy(memo.refKarat);
+                memo.availableGrams = Decimal.max(0, memo.availableGrams.minus(refGramsConsumed));
+                memo.consumedGrams = memo.consumedGrams.plus(refGramsConsumed);
 
-                const memoPortionValue = roundTo2(refGramsConsumed * memo.lockedRate);
-                memo.consumedValue = roundTo2(memo.consumedValue + memoPortionValue);
+                const memoPortionValue = refGramsConsumed.times(memo.lockedRate);
+                memo.consumedValue = memo.consumedValue.plus(memoPortionValue);
 
-                lockedPortionValue = roundTo2(lockedPortionValue + memoPortionValue);
-                appliedProductGrams = roundTo3(appliedProductGrams + applyGrams);
-                itemWeightNeeded = roundTo3(Math.max(0, itemWeightNeeded - applyGrams));
+                lockedPortionValue = lockedPortionValue.plus(memoPortionValue);
+                appliedProductGrams = appliedProductGrams.plus(applyGrams);
+                itemWeightNeeded = Decimal.max(0, itemWeightNeeded.minus(applyGrams));
 
                 itemConsumedBreakdown.push({
                     memoId: memo.memoId,
                     referencePurity: memo.referencePurity,
-                    lockedRate: memo.lockedRate,
-                    appliedProductGrams: applyGrams,
-                    consumedRefGrams: refGramsConsumed,
-                    portionValue: memoPortionValue
+                    lockedRate: Number(memo.lockedRate.toFixed(2)),
+                    appliedProductGrams: Number(applyGrams.toFixed(6)),
+                    consumedRefGrams: Number(refGramsConsumed.toFixed(6)),
+                    portionValue: Number(memoPortionValue.toFixed(2))
                 });
             }
 
             remainingProductGrams = itemWeightNeeded;
-            remainingPortionValue = roundTo2(remainingProductGrams * currentPurityRate);
-            metalValue = roundTo2(lockedPortionValue + remainingPortionValue);
+            remainingPortionValue = remainingProductGrams.times(currentPurityRate);
+            metalValue = lockedPortionValue.plus(remainingPortionValue);
 
             // Savings calculation against pricing 100% at today's market rate
-            const fullValueAtTodayRate = roundTo2(totalItemGoldWeight * currentPurityRate);
-            itemSavings = Math.max(0, roundTo2(fullValueAtTodayRate - metalValue));
-            totalCustomerSavings = roundTo2(totalCustomerSavings + itemSavings);
-            totalLockedGoldValue = roundTo2(totalLockedGoldValue + lockedPortionValue);
+            const fullValueAtTodayRate = totalItemGoldWeight.times(currentPurityRate);
+            itemSavings = Decimal.max(0, fullValueAtTodayRate.minus(metalValue));
+            totalCustomerSavings = totalCustomerSavings.plus(itemSavings);
+            totalLockedGoldValue = totalLockedGoldValue.plus(lockedPortionValue);
 
-            rateUsed = appliedProductGrams > 0 ? (itemConsumedBreakdown[0]?.lockedRate || currentPurityRate) : currentPurityRate;
+            rateUsed = appliedProductGrams.gt(0) ? (itemConsumedBreakdown[0]?.lockedRate || currentPurityRate.toNumber()) : currentPurityRate.toNumber();
         } else {
-            metalValue = roundTo2(totalItemGoldWeight * currentPurityRate);
+            metalValue = totalItemGoldWeight.times(currentPurityRate);
             remainingPortionValue = metalValue;
-            rateUsed = currentPurityRate;
+            rateUsed = currentPurityRate.toNumber();
         }
 
         // Apply Gold Scheme: Deduct saved gold weight directly, charge rest gold at today's rate
-        let schemeGoldDeductedGrams = 0;
+        let schemeGoldDeductedGrams = new Decimal(0);
         let schemeItemBreakdown = [];
 
-        if (metalType === 'gold' && activeSchemes.some(s => s.schemeType === 'GOLD' && s.availableGrams > 0)) {
-            let itemWeightNeeded = remainingProductGrams;
+        if (metalType === 'gold' && activeSchemes.some(s => s.schemeType === 'GOLD' && s.availableGrams.gt(0))) {
+            let itemWeightNeeded = new Decimal(remainingProductGrams);
 
             for (const sch of activeSchemes.filter(s => s.schemeType === 'GOLD')) {
-                if (sch.availableGrams <= 0 || itemWeightNeeded <= 0) continue;
+                if (sch.availableGrams.lte(0) || itemWeightNeeded.lte(0)) continue;
 
-                const coverableProductGrams = (sch.availableGrams * sch.refKarat) / prodKarat;
-                const applyGrams = roundTo3(Math.min(coverableProductGrams, itemWeightNeeded));
-                if (applyGrams <= 0) continue;
+                const coverableProductGrams = sch.availableGrams.times(sch.refKarat).dividedBy(prodKarat);
+                const applyGrams = Decimal.min(coverableProductGrams, itemWeightNeeded);
+                if (applyGrams.lte(0)) continue;
 
-                const refGramsConsumed = roundTo4((applyGrams * prodKarat) / sch.refKarat);
-                sch.availableGrams = Math.max(0, roundTo4(sch.availableGrams - refGramsConsumed));
-                sch.consumedGrams = roundTo4(sch.consumedGrams + refGramsConsumed);
+                const refGramsConsumed = applyGrams.times(prodKarat).dividedBy(sch.refKarat);
+                sch.availableGrams = Decimal.max(0, sch.availableGrams.minus(refGramsConsumed));
+                sch.consumedGrams = sch.consumedGrams.plus(refGramsConsumed);
 
-                schemeGoldDeductedGrams = roundTo3(schemeGoldDeductedGrams + applyGrams);
-                itemWeightNeeded = roundTo3(Math.max(0, itemWeightNeeded - applyGrams));
+                schemeGoldDeductedGrams = schemeGoldDeductedGrams.plus(applyGrams);
+                itemWeightNeeded = Decimal.max(0, itemWeightNeeded.minus(applyGrams));
 
-                const savedGoldValue = roundTo2(applyGrams * currentPurityRate);
-                sch.consumedValue = roundTo2((sch.consumedValue || 0) + savedGoldValue);
+                const savedGoldValue = applyGrams.times(currentPurityRate);
+                sch.consumedValue = sch.consumedValue.plus(savedGoldValue);
 
                 schemeItemBreakdown.push({
                     schemeId: sch.schemeId,
                     schemeType: 'GOLD',
                     purity: sch.purity,
-                    appliedProductGrams: applyGrams,
-                    consumedRefGrams: refGramsConsumed,
-                    savedGoldValue,
+                    appliedProductGrams: Number(applyGrams.toFixed(6)),
+                    consumedRefGrams: Number(refGramsConsumed.toFixed(6)),
+                    savedGoldValue: Number(savedGoldValue.toFixed(2)),
                     makingDiscountPercent: sch.makingDiscountPercent
                 });
             }
 
             remainingProductGrams = itemWeightNeeded; // Rest Gold
-            remainingPortionValue = roundTo2(remainingProductGrams * currentPurityRate); // Rest Gold @ Today Rate
-            metalValue = roundTo2(lockedPortionValue + remainingPortionValue);
+            remainingPortionValue = remainingProductGrams.times(currentPurityRate); // Rest Gold @ Today Rate
+            metalValue = lockedPortionValue.plus(remainingPortionValue);
 
-            const savedGoldSavings = roundTo2(schemeGoldDeductedGrams * currentPurityRate);
-            itemSavings = Math.max(0, roundTo2(itemSavings + savedGoldSavings));
-            totalCustomerSavings = roundTo2(totalCustomerSavings + savedGoldSavings);
+            const savedGoldSavings = schemeGoldDeductedGrams.times(currentPurityRate);
+            itemSavings = Decimal.max(0, itemSavings.plus(savedGoldSavings));
+            totalCustomerSavings = totalCustomerSavings.plus(savedGoldSavings);
         }
 
         // 5. Calculate Making Charges & Apply Discount
-        // CRITICAL USER RULE: Making charge is calculated on GROSS WEIGHT ONLY when a scheme is applied!
+        // STRICT USER RULE: Making charge is calculated on GROSS WEIGHT ONLY when a scheme is applied!
         const isSchemeActive = activeSchemes.length > 0 || schemeItemBreakdown.length > 0;
         const weightForMaking = isSchemeActive ? (grossWeight > 0 ? grossWeight : netWeight) : netWeight;
+        const weightForMakingBasis = isSchemeActive ? 'gross' : 'net';
 
-        let makingValue = 0;
+        let makingValue = new Decimal(0);
         let makingCharges = productData.makingCharges ? Number(productData.makingCharges) : (productData.makingCharge ? Number(productData.makingCharge) : 0);
         const makingPercentage = productData.makingPercentage ? Number(productData.makingPercentage) : 0;
 
         if (makingPercentage > 0 && rateUsed > 0) {
             if (productData.makingChargeType === 'per_gram') {
                 makingCharges = roundTo2((makingPercentage / 100) * rateUsed);
-                makingValue = roundTo2(makingCharges * weightForMaking);
+                makingValue = toDecimal(makingCharges).times(weightForMaking);
             } else {
-                makingValue = roundTo2(metalValue * (makingPercentage / 100));
-                makingCharges = makingValue;
+                makingValue = metalValue.times(makingPercentage).dividedBy(100);
+                makingCharges = roundTo2(makingValue.toNumber());
             }
         } else if (productData.makingChargeType === 'per_gram') {
-            makingValue = roundTo2(makingCharges * weightForMaking);
+            makingValue = toDecimal(makingCharges).times(weightForMaking);
         } else {
-            makingValue = roundTo2(makingCharges);
+            makingValue = toDecimal(makingCharges);
         }
 
         let schemeMakingDiscountPercent = 0;
@@ -428,72 +459,75 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
             schemeMakingDiscountPercent = activeSchemes.find(s => s.schemeType === 'DIAMOND')?.diamondMakingDiscountPercent || 0;
         }
 
-        let schemeMakingDiscountAmount = 0;
+        let schemeMakingDiscountAmount = new Decimal(0);
         if (schemeMakingDiscountPercent > 0) {
-            schemeMakingDiscountAmount = roundTo2(makingValue * (schemeMakingDiscountPercent / 100));
+            schemeMakingDiscountAmount = makingValue.times(schemeMakingDiscountPercent).dividedBy(100);
         }
 
-        const discountAmount = Number(item.discount || 0) + schemeMakingDiscountAmount;
+        const manualDiscount = toDecimal(item.discount || 0);
+        const totalDiscountAmount = manualDiscount.plus(schemeMakingDiscountAmount);
         let discountedMakingValue = makingValue;
-        if (discountAmount > 0) {
-            discountedMakingValue = Math.max(0, makingValue - discountAmount);
+        if (totalDiscountAmount.gt(0)) {
+            discountedMakingValue = Decimal.max(0, makingValue.minus(totalDiscountAmount));
         }
-        discountedMakingValue = roundTo2(discountedMakingValue);
 
         // 6. Subtotal
-        const subtotal = roundTo2(metalValue + discountedMakingValue + stoneValue);
+        const subtotal = metalValue.plus(discountedMakingValue).plus(stoneValue);
 
         // 7. GST (Flat 3% on Subtotal)
-        const gstRate = Number(productData.gstRate || 3);
-        const gst = roundTo2(subtotal * (gstRate / 100));
+        const gstRate = toDecimal(productData.gstRate || 3);
+        const gst = subtotal.times(gstRate).dividedBy(100);
 
         // 8. Totals
-        const finalTotal = roundTo2(subtotal + gst);
+        const finalTotal = subtotal.plus(gst);
 
-        const itemGross = roundTo2((metalValue + makingValue + stoneValue) * qty);
-        cartGrossSubtotal = roundTo2(cartGrossSubtotal + itemGross);
-        cartSubtotal = roundTo2(cartSubtotal + subtotal);
-        cartGst = roundTo2(cartGst + gst);
-        cartTotal = roundTo2(cartTotal + finalTotal);
+        const itemGross = metalValue.plus(makingValue).plus(stoneValue).times(qty);
+        cartGrossSubtotal = cartGrossSubtotal.plus(itemGross);
+        cartSubtotal = cartSubtotal.plus(subtotal);
+        cartGst = cartGst.plus(gst);
+        cartTotal = cartTotal.plus(finalTotal);
 
         calculatedItems.push({
             ...productData,
             calculatedPrice: {
-                metalValue,
-                makingCharge: makingValue,
-                originalMakingCharge: makingValue,
+                metalValue: Number(metalValue.toFixed(2)),
+                makingCharge: Number(makingValue.toFixed(2)),
+                originalMakingCharge: Number(makingValue.toFixed(2)),
                 unitMakingCharge: makingCharges,
-                discountedMakingValue: discountedMakingValue,
+                weightForMakingBasis,
+                weightForMaking: roundTo3(weightForMaking),
+                eligibleGoldWeight: Number(eligibleGoldWeight.toFixed(3)),
+                discountedMakingValue: Number(discountedMakingValue.toFixed(2)),
                 stoneValue,
-                discountAmount,
-                subtotal,
-                gst,
-                finalTotal,
+                discountAmount: Number(totalDiscountAmount.toFixed(2)),
+                subtotal: Number(subtotal.toFixed(2)),
+                gst: Number(gst.toFixed(2)),
+                finalTotal: Number(finalTotal.toFixed(2)),
                 rateUsed,
-                currentPurityRate,
+                currentPurityRate: Number(currentPurityRate.toFixed(2)),
                 rateLock: {
                     referencePurity: itemConsumedBreakdown[0]?.referencePurity || activeMemos[0]?.referencePurity || '22K',
                     productPurity: productPurity,
-                    appliedProductGrams,
-                    remainingProductGrams,
+                    appliedProductGrams: Number(appliedProductGrams.toFixed(6)),
+                    remainingProductGrams: Number(remainingProductGrams.toFixed(6)),
                     consumedRefGrams: roundTo4(itemConsumedBreakdown.reduce((s, b) => s + b.consumedRefGrams, 0)),
-                    lockedPortionValue,
-                    remainingPortionValue,
-                    savings: itemSavings,
-                    lockedRate: itemConsumedBreakdown[0]?.lockedRate || activeMemos[0]?.lockedRate || 0,
+                    lockedPortionValue: Number(lockedPortionValue.toFixed(2)),
+                    remainingPortionValue: Number(remainingPortionValue.toFixed(2)),
+                    savings: Number(itemSavings.toFixed(2)),
+                    lockedRate: itemConsumedBreakdown[0]?.lockedRate || activeMemos[0]?.lockedRate.toNumber() || 0,
                     breakdown: itemConsumedBreakdown
                 },
                 schemeLock: schemeItemBreakdown.length > 0 ? {
                     schemeId: schemeItemBreakdown[0].schemeId,
                     schemeType: 'GOLD',
                     purity: schemeItemBreakdown[0].purity,
-                    initialGoldWeight: totalItemGoldWeight,
-                    savedGoldDeducted: schemeGoldDeductedGrams,
-                    restGoldWeight: remainingProductGrams,
-                    todayRate: currentPurityRate,
-                    restGoldValue: remainingPortionValue,
+                    initialGoldWeight: Number(totalItemGoldWeight.toFixed(6)),
+                    savedGoldDeducted: Number(schemeGoldDeductedGrams.toFixed(6)),
+                    restGoldWeight: Number(remainingProductGrams.toFixed(6)),
+                    todayRate: Number(currentPurityRate.toFixed(2)),
+                    restGoldValue: Number(remainingPortionValue.toFixed(2)),
                     makingDiscountPercent: schemeMakingDiscountPercent,
-                    savings: roundTo2(schemeGoldDeductedGrams * currentPurityRate)
+                    savings: Number(schemeGoldDeductedGrams.times(currentPurityRate).toFixed(2))
                 } : null
             },
             quantity: qty
@@ -503,44 +537,45 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
     return {
         items: calculatedItems,
         summary: {
-            grossSubtotal: roundTo2(cartGrossSubtotal),
-            subtotal: roundTo2(cartSubtotal),
-            gst: roundTo2(cartGst),
-            total: roundTo2(cartSubtotal + cartGst),
-            goldLock: activeMemos.length > 0 && activeMemos.some(m => m.consumedGrams > 0 || m.initialGrams > 0) ? {
+            grossSubtotal: roundTo2(cartGrossSubtotal.toNumber()),
+            subtotal: roundTo2(cartSubtotal.toNumber()),
+            gst: roundTo2(cartGst.toNumber()),
+            total: roundTo2(cartSubtotal.plus(cartGst).toNumber()),
+            goldLock: activeMemos.length > 0 && activeMemos.some(m => m.consumedGrams.gt(0) || m.initialGrams.gt(0)) ? {
                 memoId: activeMemos.map(m => m.memoId).join(', '),
                 referencePurity: activeMemos[0]?.referencePurity || '22K',
-                lockedRate: activeMemos[0]?.lockedRate || 0,
-                initialAvailableGrams: roundTo3(activeMemos.reduce((s, m) => s + m.initialGrams, 0)),
-                consumedRefGrams: roundTo3(activeMemos.reduce((s, m) => s + m.consumedGrams, 0)),
-                remainingRefGrams: roundTo3(activeMemos.reduce((s, m) => s + m.availableGrams, 0)),
-                totalLockedGoldValue: roundTo2(totalLockedGoldValue),
-                totalCustomerSavings: roundTo2(totalCustomerSavings),
+                lockedRate: activeMemos[0]?.lockedRate.toNumber() || 0,
+                initialAvailableGrams: roundTo4(activeMemos.reduce((s, m) => s.plus(m.initialGrams), new Decimal(0)).toNumber()),
+                consumedRefGrams: roundTo4(activeMemos.reduce((s, m) => s.plus(m.consumedGrams), new Decimal(0)).toNumber()),
+                remainingRefGrams: roundTo4(activeMemos.reduce((s, m) => s.plus(m.availableGrams), new Decimal(0)).toNumber()),
+                totalLockedGoldValue: roundTo2(totalLockedGoldValue.toNumber()),
+                totalCustomerSavings: roundTo2(totalCustomerSavings.toNumber()),
                 memos: activeMemos.map(m => ({
                     memoId: m.memoId,
                     referencePurity: m.referencePurity,
-                    lockedRate: m.lockedRate,
-                    initialAvailableGrams: roundTo3(m.initialGrams),
-                    consumedRefGrams: roundTo3(m.consumedGrams),
-                    remainingRefGrams: roundTo3(m.availableGrams),
-                    consumedValue: roundTo2(m.consumedValue)
+                    lockedRate: Number(m.lockedRate.toFixed(2)),
+                    initialAvailableGrams: Number(m.initialGrams.toFixed(4)),
+                    consumedRefGrams: Number(m.consumedGrams.toFixed(4)),
+                    remainingRefGrams: Number(m.availableGrams.toFixed(4)),
+                    consumedValue: Number(m.consumedValue.toFixed(2)),
+                    remainingBalance: Number(Decimal.max(0, m.balance.minus(m.consumedValue)).toFixed(2))
                 }))
             } : null,
-            scheme: activeSchemes.length > 0 && activeSchemes.some(s => s.consumedGrams > 0 || s.consumedValue > 0) ? {
+            scheme: activeSchemes.length > 0 && activeSchemes.some(s => s.consumedGrams.gt(0) || s.consumedValue.gt(0)) ? {
                 schemes: activeSchemes.map(s => ({
                     schemeId: s.schemeId,
                     schemeType: s.schemeType,
                     purity: s.purity,
-                    initialGrams: s.initialGrams,
-                    consumedRefGrams: roundTo4(s.consumedGrams),
-                    remainingRefGrams: roundTo4(s.availableGrams),
-                    consumedValue: roundTo2(s.consumedValue || 0),
+                    initialGrams: Number(s.initialGrams.toFixed(4)),
+                    consumedRefGrams: Number(s.consumedGrams.toFixed(4)),
+                    remainingRefGrams: Number(s.availableGrams.toFixed(4)),
+                    consumedValue: Number(s.consumedValue.toFixed(2)),
                     makingDiscountPercent: s.makingDiscountPercent,
                     diamondDiscountPercent: s.diamondDiscountPercent
                 })),
-                consumedRefGrams: roundTo4(activeSchemes.reduce((s, sch) => s + sch.consumedGrams, 0)),
-                remainingRefGrams: roundTo4(activeSchemes.reduce((s, sch) => s + sch.availableGrams, 0)),
-                totalCustomerSavings: roundTo2(activeSchemes.reduce((s, sch) => s + (sch.consumedValue || 0), 0))
+                consumedRefGrams: roundTo4(activeSchemes.reduce((s, sch) => s.plus(sch.consumedGrams), new Decimal(0)).toNumber()),
+                remainingRefGrams: roundTo4(activeSchemes.reduce((s, sch) => s.plus(sch.availableGrams), new Decimal(0)).toNumber()),
+                totalCustomerSavings: roundTo2(activeSchemes.reduce((s, sch) => s.plus(sch.consumedValue), new Decimal(0)).toNumber())
             } : null
         }
     };
@@ -946,9 +981,22 @@ const createOrder = async (orderData) => {
                         throw new ApiError(400, `Credit Memo #${payment.referenceId} has insufficient balance. (Available: ₹${memo.balance}, Required: ₹${parsedAmount})`);
                     }
 
-                    // Security: Verify OTP if provided or require redemption authorization
+                    // Security: Verify OTP or redemption authorization token
+                    const authToken = payment.redemptionAuthToken || orderData.creditMemoAuthToken;
                     const otp = payment.otp || payment.redemptionOtp || orderData.creditMemoOtp;
-                    if (!payment.skipOtp && !orderData.skipCreditMemoOtp) {
+                    let authValid = false;
+
+                    if (authToken) {
+                        const { cacheHelper } = require('../../config');
+                        if (cacheHelper) {
+                            const cachedAuth = await cacheHelper.get(`credit_memo_auth_${authToken}`);
+                            if (cachedAuth && !cachedAuth.used && cachedAuth.memoIds?.includes(memo.memoId)) {
+                                authValid = true;
+                            }
+                        }
+                    }
+
+                    if (!authValid && !payment.skipOtp && !orderData.skipCreditMemoOtp) {
                         if (!otp) {
                             throw new ApiError(400, `Security Requirement: Customer OTP verification is required to redeem Credit Memo #${memo.memoId}.`);
                         }
@@ -981,25 +1029,35 @@ const createOrder = async (orderData) => {
                         }
                     }
 
-                    const newBalance = Math.max(0, Number(memo.balance) - parsedAmount);
-                    let newRemainingGrams = memo.remainingGrams;
-                    let newRemainingPureGrams = memo.remainingPureGrams;
+                    const currentBal = toDecimal(memo.balance);
+                    const parsedAmt = toDecimal(parsedAmount);
+                    const newBalDecimal = Decimal.max(0, currentBal.minus(parsedAmt));
+                    const newBalance = Number(newBalDecimal.toFixed(2));
+                    let newRemainingGrams = memo.remainingGrams !== null ? toDecimal(memo.remainingGrams) : null;
+                    let newRemainingPureGrams = memo.remainingPureGrams !== null ? toDecimal(memo.remainingPureGrams) : null;
 
-                    let gramsConsumed = 0;
+                    let gramsConsumed = new Decimal(0);
                     const refPurity = memo.referencePurity || memo.exchangePurity || '22K';
+                    const rate = toDecimal(memo.lockedGoldRate || 0);
 
                     if (newBalance <= 0) {
-                        gramsConsumed = Number(memo.remainingGrams || 0);
-                        newRemainingGrams = 0;
-                        newRemainingPureGrams = 0;
-                    } else if (memo.lockedGoldRate && Number(memo.lockedGoldRate) > 0) {
-                        gramsConsumed = parsedAmount / Number(memo.lockedGoldRate);
-                        if (memo.remainingGrams !== null && memo.remainingGrams !== undefined) {
-                            newRemainingGrams = Math.max(0, Number((Number(memo.remainingGrams) - gramsConsumed).toFixed(4)));
+                        gramsConsumed = toDecimal(memo.remainingGrams || 0);
+                        newRemainingGrams = new Decimal(0);
+                        newRemainingPureGrams = new Decimal(0);
+                    } else if (rate.gt(0)) {
+                        // Check if exact consumed reference grams is supplied from backend calculated cart
+                        if (payment.consumedRefGrams && Number(payment.consumedRefGrams) > 0) {
+                            gramsConsumed = toDecimal(payment.consumedRefGrams);
+                        } else {
+                            gramsConsumed = parsedAmt.dividedBy(rate);
                         }
-                        if (memo.remainingPureGrams !== null && memo.remainingPureGrams !== undefined) {
-                            const pureGramsConsumed = toPureGoldGrams(gramsConsumed, refPurity);
-                            newRemainingPureGrams = Math.max(0, Number((Number(memo.remainingPureGrams) - pureGramsConsumed).toFixed(4)));
+
+                        if (newRemainingGrams !== null) {
+                            newRemainingGrams = Decimal.max(0, newRemainingGrams.minus(gramsConsumed));
+                        }
+                        if (newRemainingPureGrams !== null) {
+                            const pureGramsConsumed = toDecimal(toPureGoldGrams(gramsConsumed.toNumber(), refPurity));
+                            newRemainingPureGrams = Decimal.max(0, newRemainingPureGrams.minus(pureGramsConsumed));
                         }
                     }
 
@@ -1007,15 +1065,15 @@ const createOrder = async (orderData) => {
                         where: { id: memo.id },
                         data: {
                             balance: newBalance,
-                            remainingGrams: newRemainingGrams,
-                            remainingPureGrams: newRemainingPureGrams,
+                            remainingGrams: newRemainingGrams !== null ? Number(newRemainingGrams.toFixed(4)) : null,
+                            remainingPureGrams: newRemainingPureGrams !== null ? Number(newRemainingPureGrams.toFixed(4)) : null,
                             status: newBalance <= 0 ? 'applied' : 'active'
                         }
                     });
 
                     // Store reference for invoice re-printing with grams and locked rate details
-                    const memoTag = (memo.lockedGoldRate && Number(memo.lockedGoldRate) > 0)
-                        ? `PAYMENT_REF:credit_memo:${memo.memoId}:${parsedAmount}:GRAMS:${Number(gramsConsumed.toFixed(3))}:PURITY:${refPurity}:RATE:${memo.lockedGoldRate}`
+                    const memoTag = (rate.gt(0))
+                        ? `PAYMENT_REF:credit_memo:${memo.memoId}:${parsedAmount}:GRAMS:${Number(gramsConsumed.toFixed(3))}:PURITY:${refPurity}:RATE:${rate.toNumber()}`
                         : `PAYMENT_REF:credit_memo:${memo.memoId}:${parsedAmount}`;
                     orderData.notes = (orderData.notes ? orderData.notes + '||' : '') + memoTag;
                 }
@@ -1713,6 +1771,68 @@ const processReturn = async (orderId, returnData, performedBy) => {
                     notes: `Store credit from returned Order ${order.orderNumber}`,
                     performedBy: performedBy
                 }, tx);
+            }
+        }
+
+        // Restore Credit Memos and Schemes if original order used them
+        if (order.notes && typeof order.notes === 'string') {
+            const parts = order.notes.split('||');
+            for (const part of parts) {
+                if (part.startsWith('PAYMENT_REF:credit_memo:')) {
+                    const sub = part.split(':');
+                    const memoId = sub[2];
+                    const restoredAmount = Number(sub[3] || 0);
+                    const gramsIdx = sub.indexOf('GRAMS');
+                    const restoredGrams = gramsIdx !== -1 ? Number(sub[gramsIdx + 1] || 0) : 0;
+                    const purityIdx = sub.indexOf('PURITY');
+                    const purity = purityIdx !== -1 ? sub[purityIdx + 1] : '22K';
+
+                    const memo = await tx.creditMemo.findFirst({
+                        where: { OR: [{ memoId }, { id: memoId }] }
+                    });
+                    if (memo) {
+                        const updatedBalance = Number((Number(memo.balance) + restoredAmount).toFixed(2));
+                        let updatedGrams = memo.remainingGrams !== null ? Number((Number(memo.remainingGrams) + restoredGrams).toFixed(4)) : null;
+                        let updatedPureGrams = memo.remainingPureGrams !== null ? Number((Number(memo.remainingPureGrams) + toPureGoldGrams(restoredGrams, purity)).toFixed(4)) : null;
+
+                        await tx.creditMemo.update({
+                            where: { id: memo.id },
+                            data: {
+                                balance: updatedBalance,
+                                remainingGrams: updatedGrams,
+                                remainingPureGrams: updatedPureGrams,
+                                status: 'active'
+                            }
+                        });
+                    }
+                } else if (part.startsWith('PAYMENT_REF:scheme:')) {
+                    const sub = part.split(':');
+                    const schemeId = sub[2];
+                    const gramsIdx = sub.indexOf('GRAMS');
+                    const gramsDebited = gramsIdx !== -1 ? Number(sub[gramsIdx + 1] || 0) : 0;
+
+                    const scheme = await tx.scheme.findFirst({
+                        where: { OR: [{ id: schemeId }, { schemeId }] }
+                    });
+                    if (scheme) {
+                        const updatedRedeemedGrams = Math.max(0, Number((Number(scheme.redeemedGrams || 0) - gramsDebited).toFixed(4)));
+                        await tx.scheme.update({
+                            where: { id: scheme.id },
+                            data: {
+                                redeemedGrams: updatedRedeemedGrams,
+                                status: updatedRedeemedGrams > 0 ? 'partially_redeemed' : 'active'
+                            }
+                        });
+                        await tx.schemeActivityLog.create({
+                            data: {
+                                schemeId: scheme.id,
+                                action: 'RETURN_REVERSAL',
+                                description: `Order ${order.orderNumber} returned. Restored ${gramsDebited}g to scheme.`,
+                                performedById: performedBy
+                            }
+                        });
+                    }
+                }
             }
         }
 
