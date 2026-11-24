@@ -577,9 +577,28 @@ const verifyCombinedRedemptionOtp = asyncHandler(async (req, res) => {
         return ApiResponse.error('Invalid or expired OTP. Please enter the correct verification code.', 400).send(res);
     }
 
+    const crypto = require('crypto');
+    const token = crypto.randomBytes(24).toString('hex');
+    const totalBalance = memos.reduce((s, m) => s + Number(m.balance), 0);
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+
+    const { cacheHelper } = require('../../config');
+    if (cacheHelper) {
+        await cacheHelper.set(`credit_memo_auth_${token}`, {
+            customerId: memos[0].customerId,
+            memoIds: cleanMemoIds,
+            maxAmount: totalBalance,
+            expiresAt: expiresAt.toISOString(),
+            used: false
+        }, 900);
+    }
+
     ApiResponse.success({
         verified: true,
+        redemptionAuthToken: token,
         memoIds: cleanMemoIds,
+        maxAmount: totalBalance,
+        expiresAt: expiresAt.toISOString(),
         count: cleanMemoIds.length,
         message: `All ${cleanMemoIds.length} Credit Memos successfully authorized`
     }, 'All credit memos authorized successfully').send(res);

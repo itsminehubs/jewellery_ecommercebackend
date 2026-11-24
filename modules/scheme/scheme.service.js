@@ -872,13 +872,23 @@ const calculateRedemptionValue = (schemeRaw, quoteGoldRate = null, storeSettings
     const today = new Date();
     const daysSinceEnrollment = Math.floor((today - enrollmentDate) / (1000 * 60 * 60 * 24));
 
-    // 4 Duration Tiers - Evaluates both completed installments/status AND elapsed calendar days
-    // A scheme is Full Tenure (100% benefit) if status is matured/completed, all 11 installments paid, OR >= 330 days elapsed
-    const isCompletedOrMatured = scheme.status === 'matured' || scheme.status === 'completed' || (paidInstallmentCount >= totalMonths);
-    const isFullTenure = isCompletedOrMatured || (daysSinceEnrollment >= 330 && daysSinceEnrollment < 365);
-    const isHalfTenure = !isFullTenure && ((paidInstallmentCount >= Math.ceil(totalMonths / 2)) || (daysSinceEnrollment >= 180 && daysSinceEnrollment < 330));
-    const isPast365Days = !isFullTenure && daysSinceEnrollment >= 365;
-    const isUnder6Months = !isFullTenure && !isHalfTenure;
+    // Strict 4 Non-Overlapping Duration Tiers
+    // Contractual maturity requires elapsed calendar days OR explicit admin matured status.
+    // Paying installments in advance alone does not grant full tenure benefits prematurely.
+    let isFullTenure = false;
+    let isHalfTenure = false;
+    let isPast365Days = false;
+    let isUnder6Months = false;
+
+    if (scheme.status === 'matured' || scheme.status === 'completed' || (daysSinceEnrollment >= 330 && daysSinceEnrollment <= 365 && paidInstallmentCount >= totalMonths)) {
+        isFullTenure = true;
+    } else if (daysSinceEnrollment > 365) {
+        isPast365Days = true;
+    } else if (daysSinceEnrollment >= 180 && daysSinceEnrollment < 330 && paidInstallmentCount >= Math.ceil(totalMonths / 2)) {
+        isHalfTenure = true;
+    } else {
+        isUnder6Months = true;
+    }
 
     // Configurable discounts from management (store settings or scheme metadata defaults)
     const settings = {
