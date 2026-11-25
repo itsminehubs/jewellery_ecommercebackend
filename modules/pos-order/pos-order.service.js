@@ -63,8 +63,7 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
             orderBy: { createdAt: 'asc' } // Deterministic FIFO allocation
         });
 
-        for (const lookupId of memoLookupIds) {
-            const m = foundMemos.find(fm => fm.memoId === lookupId || fm.id === lookupId);
+        for (const m of foundMemos) {
             if (m && !activeMemos.some(am => am.id === m.id)) {
                 const refPurity = m.referencePurity || m.exchangePurity || '22K';
                 const rate = toDecimal(m.lockedGoldRate || 0);
@@ -79,17 +78,24 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
                 }
 
                 if (grams.gt(0) && rate.gt(0) && balance.gt(0)) {
+                    const refKarat = toDecimal(parseKarat(refPurity));
+                    const pureGrams = grams.times(refKarat).dividedBy(24);
+                    const origAmt = toDecimal(m.originalAmount || balance);
                     activeMemos.push({
                         id: m.id,
                         memoId: m.memoId,
                         referencePurity: refPurity,
-                        refKarat: toDecimal(parseKarat(refPurity)),
+                        refKarat: refKarat,
                         lockedRate: rate,
                         balance: balance,
+                        originalAmount: origAmt,
                         initialGrams: grams,
                         availableGrams: new Decimal(grams),
+                        initialPureGrams: pureGrams,
+                        availablePureGold: new Decimal(pureGrams),
                         consumedGrams: new Decimal(0),
-                        consumedValue: new Decimal(0)
+                        consumedValue: new Decimal(0),
+                        createdAt: m.createdAt
                     });
                 }
             }
@@ -99,6 +105,8 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
     // Fallback for manual legacy rate override without memo
     if (activeMemos.length === 0 && lockedGoldRate && !isNaN(Number(lockedGoldRate)) && Number(lockedGoldRate) > 0) {
         const legacyRate = toDecimal(lockedGoldRate);
+        const legacyGrams = new Decimal(999999);
+        const legacyPureGrams = legacyGrams.times(22).dividedBy(24);
         activeMemos.push({
             id: 'legacy-override',
             memoId: 'Rate Override',
@@ -106,8 +114,10 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
             refKarat: new Decimal(22),
             lockedRate: legacyRate,
             balance: new Decimal(999999999),
-            initialGrams: new Decimal(999999),
-            availableGrams: new Decimal(999999),
+            initialGrams: legacyGrams,
+            availableGrams: new Decimal(legacyGrams),
+            initialPureGrams: legacyPureGrams,
+            availablePureGold: new Decimal(legacyPureGrams),
             consumedGrams: new Decimal(0),
             consumedValue: new Decimal(0)
         });
@@ -209,8 +219,11 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
     let totalLockedGoldValue = new Decimal(0);
     let totalCustomerSavings = new Decimal(0);
 
+    // 3. Pre-scan all items to classify products and calculate cart pure gold requirements (Pass 1)
+    const preparedItems = [];
+    let totalCartPureGoldRequirement = new Decimal(0);
+
     for (const item of items) {
-        // Fetch full product from DB
         const productData = await prisma.product.findFirst({
             where: {
                 OR: [
@@ -230,6 +243,7 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
         const grossWeight = metalDetails?.grossWeight ? Number(metalDetails.grossWeight) : (productData.grossWeight ? Number(productData.grossWeight) : 0);
         let totalStoneWeight = 0;
         let dynamicStoneValue = 0;
+        let hasDiamonds = false;
 
         // 1. Calculate Stone Weight and Value
         if (stoneDetails && stoneDetails.length > 0) {
@@ -243,6 +257,7 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
 
                 let rate = stone.rate ? Number(stone.rate) : 0;
                 if (stone.stoneType === 'Diamond') {
+                    hasDiamonds = true;
                     const query = {
                         cut: stone.cut || 'All',
                         color: stone.color || 'All',
@@ -278,52 +293,114 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
 
         const activeDiamondScheme = activeSchemes.find(s => s.schemeType === 'DIAMOND' && s.diamondDiscountPercent > 0);
         let diamondDiscountAmount = 0;
-        if (activeDiamondScheme && stoneValue > 0) {
+        if (activeDiamondScheme && stoneValue > 0 && hasDiamonds) {
             diamondDiscountAmount = roundTo2(stoneValue * (activeDiamondScheme.diamondDiscountPercent / 100));
             stoneValue = Math.max(0, roundTo2(stoneValue - diamondDiscountAmount));
         }
 
-        // 2. Authoritative Net Gold Weight & Eligible Gold Weight
-        // Strictly use Net Metal Weight (Gross Weight minus Stone Weight). Do NOT add wastage to eligible gold weight!
-        const netWeight = metalDetails?.netWeight ? Number(metalDetails.netWeight) : roundTo3(Math.max(0, grossWeight - totalStoneWeight));
-        const qty = Number(item.quantity) || 1;
-        const eligibleGoldWeight = toDecimal(netWeight).times(qty);
-        const totalItemGoldWeight = eligibleGoldWeight;
-
-        const metalType = (metalDetails?.metalType || 'gold').toLowerCase();
-        const productPurity = metalDetails?.purity || '22K';
+        // 2. Authoritative Product Classification:
+        // Case A (Gold-only)
+        // Case B (Diamond-only: eligibleGoldWeight = 0, Credit Memo allocation = 0, Diamond value unchanged)
+        // Case C (Gold jewellery containing diamonds: eligibleGoldWeight = net metal weight, diamond value separate)
+        const hasMetal = Boolean(metalDetails && metalDetails.metalType);
+        const rawMetalType = hasMetal ? String(metalDetails.metalType).trim().toLowerCase() : '';
+        const isGoldMetal = rawMetalType === 'gold';
+        const productPurity = (hasMetal && metalDetails.purity) ? String(metalDetails.purity).trim() : '22K';
         const prodKarat = toDecimal(parseKarat(productPurity));
 
-        // 3. Fetch latest live approved rate for this product's purity
-        let currentPurityRate = toDecimal(0);
-        const currentRateDoc = await prisma.goldRate.findFirst({
-            where: {
-                metal: metalType,
-                purity: {
-                    equals: productPurity,
-                    mode: 'insensitive'
-                }
-            },
-            orderBy: [
-                { effectiveDate: 'desc' },
-                { createdAt: 'desc' }
-            ]
-        });
+        let netWeight = 0;
+        let eligibleGoldWeight = new Decimal(0);
+        let productPureGoldReq = new Decimal(0);
 
-        if (currentRateDoc) {
-            currentPurityRate = toDecimal(currentRateDoc.ratePerGram);
+        if (isGoldMetal) {
+            if (metalDetails?.netWeight && Number(metalDetails.netWeight) > 0) {
+                netWeight = Number(metalDetails.netWeight);
+            } else if (grossWeight > 0) {
+                netWeight = roundTo3(Math.max(0, grossWeight - totalStoneWeight));
+            }
+            const qty = Number(item.quantity) || 1;
+            eligibleGoldWeight = toDecimal(netWeight).times(qty);
+            productPureGoldReq = eligibleGoldWeight.times(prodKarat).dividedBy(24);
+            totalCartPureGoldRequirement = totalCartPureGoldRequirement.plus(productPureGoldReq);
         } else {
-            // Fallback: derive from 22K base rate
-            const base22k = await prisma.goldRate.findFirst({
-                where: { metal: 'gold', purity: { equals: '22K', mode: 'insensitive' } },
-                orderBy: [{ effectiveDate: 'desc' }, { createdAt: 'desc' }]
+            // Diamond-only or non-gold: eligible gold weight is strictly ZERO!
+            netWeight = 0;
+            eligibleGoldWeight = new Decimal(0);
+            productPureGoldReq = new Decimal(0);
+        }
+
+        // Fetch latest live approved rate for this product's purity
+        let currentPurityRate = toDecimal(0);
+        if (isGoldMetal) {
+            const currentRateDoc = await prisma.goldRate.findFirst({
+                where: {
+                    metal: 'gold',
+                    purity: {
+                        equals: productPurity,
+                        mode: 'insensitive'
+                    }
+                },
+                orderBy: [
+                    { effectiveDate: 'desc' },
+                    { createdAt: 'desc' }
+                ]
             });
-            if (base22k) {
-                currentPurityRate = toDecimal(base22k.ratePerGram).times(prodKarat).dividedBy(22);
+
+            if (currentRateDoc) {
+                currentPurityRate = toDecimal(currentRateDoc.ratePerGram);
+            } else {
+                // Fallback: derive from 22K base rate
+                const base22k = await prisma.goldRate.findFirst({
+                    where: { metal: 'gold', purity: { equals: '22K', mode: 'insensitive' } },
+                    orderBy: [{ effectiveDate: 'desc' }, { createdAt: 'desc' }]
+                });
+                if (base22k) {
+                    currentPurityRate = toDecimal(base22k.ratePerGram).times(prodKarat).dividedBy(22);
+                }
             }
         }
 
-        // 4. Dynamic Gold Rate Locking and Purity Conversion
+        preparedItems.push({
+            item,
+            productData,
+            metalDetails,
+            stoneDetails,
+            grossWeight,
+            totalStoneWeight,
+            stoneValue,
+            hasDiamonds,
+            isGoldMetal,
+            rawMetalType,
+            productPurity,
+            prodKarat,
+            netWeight,
+            eligibleGoldWeight,
+            productPureGoldReq,
+            currentPurityRate,
+            qty: Number(item.quantity) || 1
+        });
+    }
+
+    // 4. Sort Prepared Items: High-Karat eligible gold jewellery first (22K -> 18K -> 14K; 24K excluded), then non-eligible/non-gold items
+    preparedItems.forEach((p, idx) => { p.originalIndex = idx; });
+    preparedItems.sort((a, b) => {
+        const aGold = (a.isGoldMetal && a.eligibleGoldWeight.gt(0) && a.prodKarat.lte(22)) ? a.prodKarat.toNumber() : -1;
+        const bGold = (b.isGoldMetal && b.eligibleGoldWeight.gt(0) && b.prodKarat.lte(22)) ? b.prodKarat.toNumber() : -1;
+        if (bGold !== aGold) return bGold - aGold;
+        return a.originalIndex - b.originalIndex;
+    });
+
+    for (const m of activeMemos) {
+        if (!m.availablePureGold) {
+            m.availablePureGold = m.availableGrams.times(m.refKarat).dividedBy(24);
+        }
+    }
+
+    // 5. Calculate Line Items with High-Karat First Allocation & Multi-Memo FIFO Consumption (Pass 2)
+    for (const pItem of preparedItems) {
+        const { item, productData, grossWeight, netWeight, stoneValue, hasDiamonds, isGoldMetal, productPurity, prodKarat, eligibleGoldWeight, currentPurityRate, qty } = pItem;
+        const totalItemGoldWeight = eligibleGoldWeight;
+
         let metalValue = new Decimal(0);
         let rateUsed = currentPurityRate.toNumber();
         let appliedProductGrams = new Decimal(0);
@@ -333,62 +410,78 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
         let itemSavings = new Decimal(0);
         const itemConsumedBreakdown = [];
 
-        if (metalType === 'gold' && activeMemos.some(m => m.availableGrams.gt(0))) {
-            let itemWeightNeeded = new Decimal(totalItemGoldWeight);
+        // Apply Credit Memo allocation: Only 22K and below (22K -> 18K -> 14K); 24K is excluded
+        if (isGoldMetal && totalItemGoldWeight.gt(0) && prodKarat.lte(22) && activeMemos.some(m => m.availablePureGold && m.availablePureGold.gt(0))) {
+            let neededPureGold = new Decimal(pItem.productPureGoldReq);
 
             for (const memo of activeMemos) {
-                if (memo.availableGrams.lte(0) || itemWeightNeeded.lte(0)) continue;
+                if (memo.availablePureGold.lte(0) || neededPureGold.lte(0)) continue;
 
-                // Universal Purity Conversion for this memo:
-                // coverable_product_grams = memo.availableGrams * (memo.refKarat / prodKarat)
-                const coverableProductGrams = memo.availableGrams.times(memo.refKarat).dividedBy(prodKarat);
-                const applyGrams = Decimal.min(coverableProductGrams, itemWeightNeeded);
-                if (applyGrams.lte(0)) continue;
+                const fundPureGold = Decimal.min(memo.availablePureGold, neededPureGold);
+                if (fundPureGold.lte(0)) continue;
 
-                // consumed_reference_grams = applyGrams * (prodKarat / memo.refKarat)
-                const refGramsConsumed = applyGrams.times(prodKarat).dividedBy(memo.refKarat);
+                memo.availablePureGold = Decimal.max(0, memo.availablePureGold.minus(fundPureGold));
+                neededPureGold = Decimal.max(0, neededPureGold.minus(fundPureGold));
+
+                // Converted reference grams from this memo:
+                const refGramsConsumed = Decimal.min(memo.availableGrams, fundPureGold.times(24).dividedBy(memo.refKarat));
                 memo.availableGrams = Decimal.max(0, memo.availableGrams.minus(refGramsConsumed));
+                if (memo.availableGrams.lte(0.0001)) {
+                    memo.availableGrams = new Decimal(0);
+                    memo.availablePureGold = new Decimal(0);
+                }
                 memo.consumedGrams = memo.consumedGrams.plus(refGramsConsumed);
+
+                // Converted product grams covered:
+                const applyGrams = fundPureGold.times(24).dividedBy(prodKarat);
 
                 const memoPortionValue = refGramsConsumed.times(memo.lockedRate);
                 memo.consumedValue = memo.consumedValue.plus(memoPortionValue);
 
                 lockedPortionValue = lockedPortionValue.plus(memoPortionValue);
                 appliedProductGrams = appliedProductGrams.plus(applyGrams);
-                itemWeightNeeded = Decimal.max(0, itemWeightNeeded.minus(applyGrams));
+
+                const effectiveKaratRate = Number((memo.lockedRate.times(prodKarat).dividedBy(memo.refKarat)).toFixed(2));
 
                 itemConsumedBreakdown.push({
                     memoId: memo.memoId,
                     referencePurity: memo.referencePurity,
                     lockedRate: Number(memo.lockedRate.toFixed(2)),
+                    effectiveKaratRate: effectiveKaratRate,
                     appliedProductGrams: Number(applyGrams.toFixed(6)),
                     consumedRefGrams: Number(refGramsConsumed.toFixed(6)),
                     portionValue: Number(memoPortionValue.toFixed(2))
                 });
             }
 
-            remainingProductGrams = itemWeightNeeded;
+            remainingProductGrams = Decimal.max(0, totalItemGoldWeight.minus(appliedProductGrams));
             remainingPortionValue = remainingProductGrams.times(currentPurityRate);
             metalValue = lockedPortionValue.plus(remainingPortionValue);
 
-            // Savings calculation against pricing 100% at today's market rate
             const fullValueAtTodayRate = totalItemGoldWeight.times(currentPurityRate);
             itemSavings = Decimal.max(0, fullValueAtTodayRate.minus(metalValue));
             totalCustomerSavings = totalCustomerSavings.plus(itemSavings);
             totalLockedGoldValue = totalLockedGoldValue.plus(lockedPortionValue);
 
-            rateUsed = appliedProductGrams.gt(0) ? (itemConsumedBreakdown[0]?.lockedRate || currentPurityRate.toNumber()) : currentPurityRate.toNumber();
-        } else {
+            rateUsed = totalItemGoldWeight.gt(0) 
+                ? Number(metalValue.dividedBy(totalItemGoldWeight).toFixed(2)) 
+                : currentPurityRate.toNumber();
+        } else if (isGoldMetal && totalItemGoldWeight.gt(0)) {
             metalValue = totalItemGoldWeight.times(currentPurityRate);
             remainingPortionValue = metalValue;
             rateUsed = currentPurityRate.toNumber();
+        } else {
+            // Diamond-only or non-gold: metal value is 0!
+            metalValue = new Decimal(0);
+            remainingPortionValue = new Decimal(0);
+            rateUsed = 0;
         }
 
         // Apply Gold Scheme: Deduct saved gold weight directly, charge rest gold at today's rate
         let schemeGoldDeductedGrams = new Decimal(0);
         let schemeItemBreakdown = [];
 
-        if (metalType === 'gold' && activeSchemes.some(s => s.schemeType === 'GOLD' && s.availableGrams.gt(0))) {
+        if (isGoldMetal && activeSchemes.some(s => s.schemeType === 'GOLD' && s.availableGrams.gt(0)) && remainingProductGrams.gt(0)) {
             let itemWeightNeeded = new Decimal(remainingProductGrams);
 
             for (const sch of activeSchemes.filter(s => s.schemeType === 'GOLD')) {
@@ -426,9 +519,13 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
             const savedGoldSavings = schemeGoldDeductedGrams.times(currentPurityRate);
             itemSavings = Decimal.max(0, itemSavings.plus(savedGoldSavings));
             totalCustomerSavings = totalCustomerSavings.plus(savedGoldSavings);
+
+            if (totalItemGoldWeight.gt(0)) {
+                rateUsed = Number(metalValue.dividedBy(totalItemGoldWeight).toFixed(2));
+            }
         }
 
-        // 5. Calculate Making Charges & Apply Discount
+        // 6. Calculate Making Charges & Apply Discount
         // STRICT USER RULE: Making charge is calculated on GROSS WEIGHT ONLY when a scheme is applied!
         const isSchemeActive = activeSchemes.length > 0 || schemeItemBreakdown.length > 0;
         const weightForMaking = isSchemeActive ? (grossWeight > 0 ? grossWeight : netWeight) : netWeight;
@@ -455,7 +552,7 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
         let schemeMakingDiscountPercent = 0;
         if (schemeItemBreakdown.length > 0) {
             schemeMakingDiscountPercent = schemeItemBreakdown[0].makingDiscountPercent || 0;
-        } else if (activeSchemes.some(s => s.schemeType === 'DIAMOND' && s.diamondMakingDiscountPercent > 0)) {
+        } else if (hasDiamonds && activeSchemes.some(s => s.schemeType === 'DIAMOND' && s.diamondMakingDiscountPercent > 0)) {
             schemeMakingDiscountPercent = activeSchemes.find(s => s.schemeType === 'DIAMOND')?.diamondMakingDiscountPercent || 0;
         }
 
@@ -471,14 +568,14 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
             discountedMakingValue = Decimal.max(0, makingValue.minus(totalDiscountAmount));
         }
 
-        // 6. Subtotal
+        // 7. Subtotal
         const subtotal = metalValue.plus(discountedMakingValue).plus(stoneValue);
 
-        // 7. GST (Flat 3% on Subtotal)
+        // 8. GST (Flat 3% on Subtotal)
         const gstRate = toDecimal(productData.gstRate || 3);
         const gst = subtotal.times(gstRate).dividedBy(100);
 
-        // 8. Totals
+        // 9. Totals
         const finalTotal = subtotal.plus(gst);
 
         const itemGross = metalValue.plus(makingValue).plus(stoneValue).times(qty);
@@ -488,6 +585,7 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
         cartTotal = cartTotal.plus(finalTotal);
 
         calculatedItems.push({
+            originalIndex: pItem.originalIndex,
             ...productData,
             calculatedPrice: {
                 metalValue: Number(metalValue.toFixed(2)),
@@ -515,6 +613,7 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
                     remainingPortionValue: Number(remainingPortionValue.toFixed(2)),
                     savings: Number(itemSavings.toFixed(2)),
                     lockedRate: itemConsumedBreakdown[0]?.lockedRate || activeMemos[0]?.lockedRate.toNumber() || 0,
+                    effectiveLockedRate: itemConsumedBreakdown[0]?.effectiveKaratRate || (itemConsumedBreakdown[0]?.lockedRate ? Number((itemConsumedBreakdown[0].lockedRate * (prodKarat.toNumber() / parseKarat(itemConsumedBreakdown[0].referencePurity))).toFixed(2)) : 0),
                     breakdown: itemConsumedBreakdown
                 },
                 schemeLock: schemeItemBreakdown.length > 0 ? {
@@ -534,6 +633,22 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
         });
     }
 
+    calculatedItems.sort((a, b) => a.originalIndex - b.originalIndex);
+    calculatedItems.forEach(i => { delete i.originalIndex; });
+
+    let totalAdvanceDeduction = new Decimal(0);
+    for (const m of activeMemos) {
+        let cashDeducted = new Decimal(0);
+        if (m.initialGrams && m.initialGrams.gt(0)) {
+            const fractionConsumed = Decimal.min(1, m.consumedGrams.dividedBy(m.initialGrams));
+            cashDeducted = Decimal.min(m.balance, fractionConsumed.times(m.originalAmount || m.balance));
+        } else {
+            cashDeducted = Decimal.min(m.balance, m.consumedValue);
+        }
+        m.cashAdvanceDeducted = cashDeducted;
+        totalAdvanceDeduction = totalAdvanceDeduction.plus(cashDeducted);
+    }
+
     return {
         items: calculatedItems,
         summary: {
@@ -550,6 +665,7 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
                 remainingRefGrams: roundTo4(activeMemos.reduce((s, m) => s.plus(m.availableGrams), new Decimal(0)).toNumber()),
                 totalLockedGoldValue: roundTo2(totalLockedGoldValue.toNumber()),
                 totalCustomerSavings: roundTo2(totalCustomerSavings.toNumber()),
+                totalAdvanceDeduction: roundTo2(totalAdvanceDeduction.toNumber()),
                 memos: activeMemos.map(m => ({
                     memoId: m.memoId,
                     referencePurity: m.referencePurity,
@@ -557,8 +673,9 @@ const calculateCartPrice = async (items, storeId, lockedGoldRate = null, creditM
                     initialAvailableGrams: Number(m.initialGrams.toFixed(4)),
                     consumedRefGrams: Number(m.consumedGrams.toFixed(4)),
                     remainingRefGrams: Number(m.availableGrams.toFixed(4)),
-                    consumedValue: Number(m.consumedValue.toFixed(2)),
-                    remainingBalance: Number(Decimal.max(0, m.balance.minus(m.consumedValue)).toFixed(2))
+                    consumedValue: Number((m.cashAdvanceDeducted || m.consumedValue).toFixed(2)),
+                    lockedGoldDeliveredValue: Number(m.consumedValue.toFixed(2)),
+                    remainingBalance: Number(Decimal.max(0, m.balance.minus(m.cashAdvanceDeducted || m.consumedValue)).toFixed(2))
                 }))
             } : null,
             scheme: activeSchemes.length > 0 && activeSchemes.some(s => s.consumedGrams.gt(0) || s.consumedValue.gt(0)) ? {
@@ -1067,15 +1184,21 @@ const createOrder = async (orderData) => {
                             balance: newBalance,
                             remainingGrams: newRemainingGrams !== null ? Number(newRemainingGrams.toFixed(4)) : null,
                             remainingPureGrams: newRemainingPureGrams !== null ? Number(newRemainingPureGrams.toFixed(4)) : null,
-                            status: newBalance <= 0 ? 'applied' : 'active'
+                            status: (newBalance <= 0 || (newRemainingGrams !== null && newRemainingGrams.lte(0.0001))) ? 'applied' : 'active'
                         }
                     });
 
-                    // Store reference for invoice re-printing with grams and locked rate details
+                    // Store reference for invoice re-printing with grams and locked rate details (deduplicating existing notes)
                     const memoTag = (rate.gt(0))
                         ? `PAYMENT_REF:credit_memo:${memo.memoId}:${parsedAmount}:GRAMS:${Number(gramsConsumed.toFixed(3))}:PURITY:${refPurity}:RATE:${rate.toNumber()}`
                         : `PAYMENT_REF:credit_memo:${memo.memoId}:${parsedAmount}`;
-                    orderData.notes = (orderData.notes ? orderData.notes + '||' : '') + memoTag;
+                    
+                    if (orderData.notes && typeof orderData.notes === 'string') {
+                        const existingParts = orderData.notes.split('||').filter(p => !p.startsWith(`PAYMENT_REF:credit_memo:${memo.memoId}:`) && p !== `PAYMENT_REF:credit_memo:${memo.memoId}`);
+                        orderData.notes = existingParts.length > 0 ? existingParts.join('||') + '||' + memoTag : memoTag;
+                    } else {
+                        orderData.notes = memoTag;
+                    }
                 }
             }
         }
