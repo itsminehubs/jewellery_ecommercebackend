@@ -150,23 +150,29 @@ const createCreditMemo = asyncHandler(async (req, res) => {
         lockedGoldRate,
         referencePurity,
         exchangePurity,
-        exchangeWeight
+        exchangeWeight,
+        holdGoldGrams,
+        lockedGrams: reqLockedGrams
     } = req.body;
 
     if (!customer || !paymentMethod) {
         return ApiResponse.error('Customer ID and paymentMethod are required', 400).send(res);
     }
 
-    const purityToUse = referencePurity || exchangePurity || '22K';
+    // Credit memos for advance/booking always use 22K benchmark; gold_exchange can record the exchanged old-gold purity
+    const purityToUse = paymentMethod === 'gold_exchange' ? (referencePurity || exchangePurity || '22K') : '22K';
     let effectiveLockedRate = lockedGoldRate ? Number(lockedGoldRate) : null;
+    const requestedHoldGrams = Number(holdGoldGrams || reqLockedGrams || 0);
 
     let finalAmount = Number(originalAmount) || 0;
     if (paymentMethod === 'gold_exchange' && exchangeWeight && effectiveLockedRate && finalAmount === 0) {
         finalAmount = Number((Number(exchangeWeight) * effectiveLockedRate).toFixed(2));
+    } else if (finalAmount === 0 && requestedHoldGrams > 0 && effectiveLockedRate) {
+        finalAmount = Number(((requestedHoldGrams * effectiveLockedRate) * 0.5).toFixed(2));
     }
 
-    if (finalAmount <= 0 && (!exchangeWeight || Number(exchangeWeight) <= 0)) {
-        return ApiResponse.error('Credit Memo amount or exchange weight must be greater than 0', 400).send(res);
+    if (finalAmount <= 0 && (!exchangeWeight || Number(exchangeWeight) <= 0) && requestedHoldGrams <= 0) {
+        return ApiResponse.error('Credit Memo amount, exchange weight, or gold hold quantity must be greater than 0', 400).send(res);
     }
 
     let finalNotes = notes || '';
@@ -247,6 +253,11 @@ const createCreditMemo = asyncHandler(async (req, res) => {
             const goldGrams = Number(Number(exchangeWeight).toFixed(4));
             const cashGrams = (additionalCash > 0 && effectiveLockedRate > 0) ? Number((additionalCash / effectiveLockedRate).toFixed(4)) : 0;
             lockedGrams = Number((goldGrams + cashGrams).toFixed(4));
+        } else if (requestedHoldGrams > 0) {
+            lockedGrams = Number(requestedHoldGrams.toFixed(4));
+            const totalGoldCommitment = Number((lockedGrams * effectiveLockedRate).toFixed(2));
+            const holdNote = `Rate-Lock Hold Booking: ${lockedGrams}g of ${purityToUse} @ ₹${effectiveLockedRate}/g (Total Gold Commitment: ₹${totalGoldCommitment.toLocaleString('en-IN')}) | Advance Deposit: ₹${finalAmount.toLocaleString('en-IN')}`;
+            finalNotes = finalNotes ? `${holdNote}\n${finalNotes}` : holdNote;
         } else {
             lockedGrams = Number((finalAmount / effectiveLockedRate).toFixed(4));
         }
